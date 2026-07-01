@@ -101,6 +101,33 @@ export interface RunDto {
   _startAt?: number;
 }
 
+/** SkillSourceType — verbatim per Phase 3 contract §1.1. */
+export type SkillSourceType = 'GITHUB' | 'LOCAL' | 'INLINE';
+
+/** SkillDto — an importable, hash-locked instruction bundle (Phase 3 §1.1). */
+export interface SkillDto {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  sourceType: SkillSourceType;
+  content: string;
+  computedHash: string;
+  createdDate: string;
+}
+
+/** AgentDto — a user-defined dev agent (instructions + bound skills) (Phase 3 §1.2). */
+export interface AgentDto {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  model: string;
+  builtin: boolean;
+  skillIds: string[];
+  createdDate: string;
+}
+
 const now = () => new Date().toISOString().slice(0, 19);
 
 let seq = 1;
@@ -124,6 +151,8 @@ interface Db {
   iterations: Map<string, IterationDto>;
   tasks: Map<string, TaskDto>;
   runs: Map<string, RunDto>;
+  skills: Map<string, SkillDto>;
+  agents: Map<string, AgentDto>;
 }
 
 export const db: Db = {
@@ -132,6 +161,8 @@ export const db: Db = {
   iterations: new Map(),
   tasks: new Map(),
   runs: new Map(),
+  skills: new Map(),
+  agents: new Map(),
 };
 
 /** Build a demo Spec structure from a project's design prose. */
@@ -428,4 +459,181 @@ export function seed(): void {
   const p2 = createProject('设备巡检系统', '设备巡检：巡检计划、巡检记录、异常上报与统计看板。');
   // advance p2 into SPEC_REVIEW so reviewers have something to open immediately
   refineSpec(p2.id);
+  seedSkillsAndAgents();
+}
+
+// --- Phase 3: Skills + Custom Agents (contract §1, §4, §6) ---
+
+/**
+ * djb2 string hash → 8 hex chars. This mock plays the SERVER role, so it (not
+ * the FE) produces `computedHash`. The real backend uses the §6 sha256
+ * length-prefixed recipe; here we only need a *deterministic* digest over the
+ * same canonical parts so that re-importing identical content is idempotent
+ * (same hash → dedupe, no new row). The FE never recomputes either way.
+ */
+function digest(parts: string[]): string {
+  // length-prefixed join mirrors §6's boundary-safe concatenation
+  const canonical = parts.map((p) => `${p.length} ${p}`).join('');
+  let h = 5381;
+  for (let i = 0; i < canonical.length; i += 1) {
+    h = ((h << 5) + h + canonical.charCodeAt(i)) | 0;
+  }
+  return `sha256:${(h >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+/** compute a skill's lock over ("v1", source, name, description, content) — §6 order */
+function computeSkillHash(s: {
+  source: string;
+  name: string;
+  description: string;
+  content: string;
+}): string {
+  return digest(['v1', s.source, s.name, s.description, s.content]);
+}
+
+/**
+ * Import + hash-lock a skill (contract ep #16). Idempotent by hash: if a skill
+ * with the same `computedHash` already exists, return it unchanged (no new row).
+ */
+export function importSkill(input: {
+  name: string;
+  description: string;
+  source: string;
+  sourceType: SkillSourceType;
+  content: string;
+}): SkillDto {
+  const computedHash = computeSkillHash({
+    source: input.source,
+    name: input.name,
+    description: input.description,
+    content: input.content,
+  });
+  const existing = Array.from(db.skills.values()).find((s) => s.computedHash === computedHash);
+  if (existing) return existing;
+
+  const skill: SkillDto = {
+    id: nextId('SKIL'),
+    name: input.name,
+    description: input.description,
+    source: input.source,
+    sourceType: input.sourceType,
+    content: input.content,
+    computedHash,
+    createdDate: now(),
+  };
+  db.skills.set(skill.id, skill);
+  return skill;
+}
+
+/** Delete a skill (contract ep #19); rejected if bound to any agent. */
+export function deleteSkill(id: string): { ok: boolean; message: string } {
+  if (!db.skills.has(id)) return { ok: false, message: `skill ${id} not found` };
+  const boundBy = Array.from(db.agents.values()).filter((a) => a.skillIds.includes(id));
+  if (boundBy.length) {
+    return {
+      ok: false,
+      message: `技能被 ${boundBy.length} 个 Agent 绑定，无法删除`,
+    };
+  }
+  db.skills.delete(id);
+  return { ok: true, message: '删除成功' };
+}
+
+/** Create/update a custom agent (contract ep #20). No id = create. */
+export function saveAgent(input: {
+  id?: string;
+  name: string;
+  description: string;
+  instructions: string;
+  model: string;
+}): AgentDto {
+  if (input.id) {
+    const existing = db.agents.get(input.id);
+    if (existing) {
+      existing.name = input.name;
+      existing.description = input.description;
+      existing.instructions = input.instructions;
+      existing.model = input.model;
+      return existing;
+    }
+  }
+  const agent: AgentDto = {
+    id: nextId('AGNT'),
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
+    model: input.model ?? '',
+    builtin: false,
+    skillIds: [],
+    createdDate: now(),
+  };
+  db.agents.set(agent.id, agent);
+  return agent;
+}
+
+/** Delete a custom agent (contract ep #23); built-in agents are rejected. */
+export function deleteAgent(id: string): { ok: boolean; message: string } {
+  const agent = db.agents.get(id);
+  if (!agent) return { ok: false, message: `agent ${id} not found` };
+  if (agent.builtin) return { ok: false, message: '内置 Agent 不可删除' };
+  db.agents.delete(id);
+  return { ok: true, message: '删除成功' };
+}
+
+/** Attach/replace an agent's bound skills (contract ep #24). */
+export function attachAgentSkills(agentId: string, skillIds: string[]): AgentDto | null {
+  const agent = db.agents.get(agentId);
+  if (!agent) return null;
+  // keep only ids that resolve to real skills
+  agent.skillIds = (skillIds ?? []).filter((sid) => db.skills.has(sid));
+  return agent;
+}
+
+/**
+ * Seed the LOCAL designated skills (`suid`, `eadp-backend`) and the 3 built-in
+ * agents (contract §4). Content is a short pointer stub per §4.
+ */
+function seedSkillsAndAgents(): void {
+  if (db.skills.size > 0 || db.agents.size > 0) return;
+
+  const suid = importSkill({
+    name: 'suid',
+    description: '@ead/suid 组件库开发技能',
+    source: 'local:suid',
+    sourceType: 'LOCAL',
+    content: '# SUID Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/suid。',
+  });
+  importSkill({
+    name: 'eadp-backend',
+    description: 'sei-core 分层架构后端开发技能',
+    source: 'local:eadp-backend',
+    sourceType: 'LOCAL',
+    content: '# EADP Backend Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/eadp-backend。',
+  });
+
+  const seedAgent = (name: string, description: string): void => {
+    const agent: AgentDto = {
+      id: nextId('AGNT'),
+      name,
+      description,
+      instructions: '',
+      model: '',
+      builtin: true,
+      skillIds: [],
+      createdDate: now(),
+    };
+    db.agents.set(agent.id, agent);
+  };
+  seedAgent('requirement-agent', '内置：需求解析 Agent');
+  seedAgent('dispatch-agent', '内置：任务派发 Agent');
+  seedAgent('deploy-agent', '内置：部署 Agent');
+
+  // one custom dev agent bound to suid, so the two-step flow has a live example
+  const devAgent = saveAgent({
+    name: 'suid-dev',
+    description: '按 EADP 契约实现 SUID 页面',
+    instructions: '你负责实现单个页面，遵循 @ead/suid 组件库规范。',
+    model: '',
+  });
+  attachAgentSkills(devAgent.id, [suid.id]);
 }

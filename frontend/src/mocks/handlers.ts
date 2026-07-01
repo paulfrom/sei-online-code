@@ -6,16 +6,21 @@
 import { http, HttpResponse } from 'msw';
 import type { Search } from '@/services/onlineCode';
 import {
+  attachAgentSkills,
   confirmSpec,
   createProject,
   db,
+  deleteAgent,
+  deleteSkill,
   deployIteration,
   dispatchIteration,
+  importSkill,
   mergeIteration,
   readIteration,
   readRun,
   refineSpec,
   runsOf,
+  saveAgent,
   seed,
   tasksOf,
 } from './db';
@@ -199,5 +204,108 @@ export const handlers = [
     const body = (await request.json()) as { iterationId?: string };
     const iteration = mergeIteration(body?.iterationId ?? '');
     return iteration ? ok(iteration, '开始合并') : fail('iteration not found');
+  }),
+
+  // #16 import + hash-lock a skill; idempotent by hash
+  http.post('*/api/skill/import', async ({ request }) => {
+    const body = (await request.json()) as {
+      name?: string;
+      description?: string;
+      source?: string;
+      sourceType?: 'GITHUB' | 'LOCAL' | 'INLINE';
+      content?: string;
+    };
+    if (!body?.name) return fail('name is required');
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(body.name)) {
+      return fail('name 必须匹配 ^[a-z0-9][a-z0-9-]{0,63}$');
+    }
+    if (!body?.content) return fail('content is required');
+    const skill = importSkill({
+      name: body.name,
+      description: body.description ?? '',
+      source: body.source ?? `inline:${body.name}`,
+      sourceType: body.sourceType ?? 'INLINE',
+      content: body.content,
+    });
+    return ok(skill, '技能已导入');
+  }),
+
+  // #17 list skills (Search body → PageResult)
+  http.post('*/api/skill/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const rows = Array.from(db.skills.values()).sort((a, b) =>
+      a.createdDate < b.createdDate ? 1 : -1,
+    );
+    return ok(paginate(rows, search));
+  }),
+
+  // #18 load one skill
+  http.get('*/api/skill/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const skill = db.skills.get(id);
+    return skill ? ok(skill) : fail(`skill ${id} not found`);
+  }),
+
+  // #19 delete a skill (rejected if bound to any agent)
+  http.delete('*/api/skill/delete', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const res = deleteSkill(id);
+    return res.ok ? ok(null, res.message) : fail(res.message);
+  }),
+
+  // #20 create/update a custom agent (no id = create)
+  http.post('*/api/agent/save', async ({ request }) => {
+    const body = (await request.json()) as {
+      id?: string;
+      name?: string;
+      description?: string;
+      instructions?: string;
+      model?: string;
+    };
+    if (!body?.name) return fail('name is required');
+    if (body.id) {
+      const existing = db.agents.get(body.id);
+      if (existing?.builtin) return fail('内置 Agent 不可编辑');
+    }
+    const agent = saveAgent({
+      id: body.id,
+      name: body.name,
+      description: body.description ?? '',
+      instructions: body.instructions ?? '',
+      model: body.model ?? '',
+    });
+    return ok(agent, '保存成功');
+  }),
+
+  // #21 list agents (built-in + custom)
+  http.post('*/api/agent/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    // built-in first, then custom by newest
+    const rows = Array.from(db.agents.values()).sort((a, b) => {
+      if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+      return a.createdDate < b.createdDate ? 1 : -1;
+    });
+    return ok(paginate(rows, search));
+  }),
+
+  // #22 load one agent
+  http.get('*/api/agent/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const agent = db.agents.get(id);
+    return agent ? ok(agent) : fail(`agent ${id} not found`);
+  }),
+
+  // #23 delete a custom agent (built-in rejected)
+  http.delete('*/api/agent/delete', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const res = deleteAgent(id);
+    return res.ok ? ok(null, res.message) : fail(res.message);
+  }),
+
+  // #24 attach/replace an agent's bound skills
+  http.post('*/api/agent/skills', async ({ request }) => {
+    const body = (await request.json()) as { agentId?: string; skillIds?: string[] };
+    const agent = attachAgentSkills(body?.agentId ?? '', body?.skillIds ?? []);
+    return agent ? ok(agent, '技能已绑定') : fail('agent not found');
   }),
 ];
