@@ -53,6 +53,9 @@ export default defineConfig({
     default: 'zh-CN',
     // default true, when it is true, will use `navigator.language` overwrite default
     baseNavigator: true,
+    // project uses @ead/suid (not raw antd); disable antd locale ConfigProvider
+    // injection so the build does not require an `antd` dependency.
+    antd: false,
   },
   qiankun: {
     slave: {},
