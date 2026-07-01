@@ -136,6 +136,24 @@ export interface AgentDto {
   createdDate: string;
 }
 
+/** PlatformConfigDto — the single platform config row (Phase 5 §1.1). */
+export interface PlatformConfigDto {
+  id: string;
+  workspaceRoot: string;
+  templateGitlabUrl: string;
+  createdDate: string;
+}
+
+/** Workspace provisioning source — CLONE (template URL set) | SCAFFOLD (empty). */
+export type WorkspaceSource = 'CLONE' | 'SCAFFOLD';
+
+/** WorkspaceResolveResult — resolved per-project workspace dir (Phase 5 §2 ep #33). */
+export interface WorkspaceResolveResult {
+  path: string;
+  provisioned: boolean;
+  source: WorkspaceSource;
+}
+
 const now = () => new Date().toISOString().slice(0, 19);
 
 let seq = 1;
@@ -153,6 +171,12 @@ export const MERGE_DURATION_MS = 2000;
 /** per-project static preview port base (contract §2.3 example uses 41001) */
 let previewPort = 41001;
 
+/** Fixed singleton id for the platform config row (Phase 5 §1.1). */
+export const CONFIG_ID = 'CONFIG';
+
+/** Workspace Root default when unset (contract §1.1 — OS temp + "/sei-online-code"). */
+export const DEFAULT_WORKSPACE_ROOT = '/tmp/sei-online-code';
+
 interface Db {
   projects: Map<string, ProjectDto>;
   specs: Map<string, SpecDto>;
@@ -161,6 +185,10 @@ interface Db {
   runs: Map<string, RunDto>;
   skills: Map<string, SkillDto>;
   agents: Map<string, AgentDto>;
+  /** singleton platform config row (Phase 5); null until first get creates it */
+  config: PlatformConfigDto | null;
+  /** projectId → source of first provisioning (drives clone-once reuse, §3) */
+  workspaces: Map<string, WorkspaceSource>;
 }
 
 export const db: Db = {
@@ -171,6 +199,8 @@ export const db: Db = {
   runs: new Map(),
   skills: new Map(),
   agents: new Map(),
+  config: null,
+  workspaces: new Map(),
 };
 
 /** Build a demo Spec structure from a project's design prose. */
@@ -635,6 +665,58 @@ export function specsOf(projectId: string): SpecDto[] {
   return Array.from(db.specs.values())
     .filter((s) => s.projectId === projectId)
     .sort((a, b) => a.version - b.version);
+}
+
+// --- Phase 5: Config Surface + Workspace resolve (contract §1–§3) ---
+
+/**
+ * Read the singleton platform config (contract ep #31), creating the default row
+ * on first access. `workspaceRoot` defaults to the OS temp path; `templateGitlabUrl`
+ * has no default (empty → scaffold path is the day-one path).
+ */
+export function getConfig(): PlatformConfigDto {
+  if (!db.config) {
+    db.config = {
+      id: CONFIG_ID,
+      workspaceRoot: DEFAULT_WORKSPACE_ROOT,
+      templateGitlabUrl: '',
+      createdDate: now(),
+    };
+  }
+  return db.config;
+}
+
+/**
+ * Upsert the singleton platform config (contract ep #32). Empty `workspaceRoot`
+ * falls back to the default; the fixed id and createdDate are preserved across saves.
+ */
+export function saveConfig(input: {
+  workspaceRoot?: string;
+  templateGitlabUrl?: string;
+}): PlatformConfigDto {
+  const current = getConfig();
+  current.workspaceRoot = input.workspaceRoot?.trim() || DEFAULT_WORKSPACE_ROOT;
+  current.templateGitlabUrl = input.templateGitlabUrl?.trim() ?? '';
+  return current;
+}
+
+/**
+ * Resolve a project's workspace dir (contract ep #33 / §3). `source` = CLONE when
+ * a template URL is configured, else SCAFFOLD. `provisioned` = true when the dir
+ * already existed (clone-once reuse — the source of the FIRST provisioning is
+ * kept, never re-decided). Path is `<workspaceRoot>/<projectId>`.
+ */
+export function resolveWorkspace(projectId: string): WorkspaceResolveResult | null {
+  if (!projectId) return null;
+  const config = getConfig();
+  const path = `${config.workspaceRoot}/${projectId}`;
+  const prior = db.workspaces.get(projectId);
+  if (prior) {
+    return { path, provisioned: true, source: prior };
+  }
+  const source: WorkspaceSource = config.templateGitlabUrl.trim() ? 'CLONE' : 'SCAFFOLD';
+  db.workspaces.set(projectId, source);
+  return { path, provisioned: false, source };
 }
 
 /** seed a couple of projects so the list is not empty on first load */

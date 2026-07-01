@@ -16,6 +16,7 @@ import {
   deleteSkill,
   deployIteration,
   dispatchIteration,
+  getConfig,
   importSkill,
   iterationsOf,
   mergeIteration,
@@ -23,9 +24,11 @@ import {
   readIteration,
   readRun,
   refineSpec,
+  resolveWorkspace,
   retryIteration,
   runsOf,
   saveAgent,
+  saveConfig,
   seed,
   specsOf,
   tasksOf,
@@ -363,5 +366,33 @@ export const handlers = [
     const projectId = new URL(request.url).searchParams.get('projectId') ?? '';
     if (!projectId) return fail('projectId is required');
     return ok(specsOf(projectId));
+  }),
+
+  // --- Phase 5: Config Surface + Workspace resolve (contract eps #31–33) ---
+
+  // #31 read platform config (creates default singleton if absent)
+  http.get('*/api/config/get', () => {
+    return ok(getConfig());
+  }),
+
+  // #32 upsert platform config (Workspace Root + Template GitLab URL)
+  http.post('*/api/config/save', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      workspaceRoot?: string;
+      templateGitlabUrl?: string;
+    };
+    const config = saveConfig({
+      workspaceRoot: body?.workspaceRoot,
+      templateGitlabUrl: body?.templateGitlabUrl,
+    });
+    return ok(config, '配置已保存');
+  }),
+
+  // #33 resolve a project's workspace dir → { path, provisioned, source }
+  http.get('*/api/workspace/resolve', ({ request }) => {
+    const projectId = new URL(request.url).searchParams.get('projectId') ?? '';
+    if (!projectId) return fail('projectId is required');
+    const result = resolveWorkspace(projectId);
+    return result ? ok(result) : fail('workspace resolve failed');
   }),
 ];

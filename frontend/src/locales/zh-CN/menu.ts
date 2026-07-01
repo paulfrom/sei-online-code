@@ -11,6 +11,7 @@ export default {
   'menu.onlineCodeTimeline': '迭代时间线',
   'menu.onlineCodeSkills': '技能管理',
   'menu.onlineCodeAgents': 'Agent 管理',
+  'menu.onlineCodeSettings': '平台配置',
   'menu.reporting': '监管报送',
   'menu.reportingPlan': '填报计划',
   'menu.reportingPlanNew': '新增填报计划',

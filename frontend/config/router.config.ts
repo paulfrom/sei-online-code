@@ -61,6 +61,12 @@ const routes: any[] = [
             title: 'menu.onlineCodeAgents',
             component: './OnlineCode/Agents',
           },
+          {
+            path: '/online-code/settings',
+            name: 'onlineCodeSettings',
+            title: 'menu.onlineCodeSettings',
+            component: './OnlineCode/Settings',
+          },
         ],
       },
     ],

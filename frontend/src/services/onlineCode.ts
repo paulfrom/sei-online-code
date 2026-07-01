@@ -347,3 +347,48 @@ export async function retryIteration(iterationId: string): Promise<ResultData<It
 export async function findSpecsByProject(projectId: string): Promise<ResultData<SpecDto[]>> {
   return request({ url: `${API}/spec/findByProject`, method: 'GET', params: { projectId } });
 }
+
+// --- Phase 5: Config Surface + Workspace resolve (contract eps #31–33) ---
+
+/** PlatformConfigDto — the single platform config row (Phase 5 §1.1). */
+export interface PlatformConfigDto {
+  /** singleton row, fixed id `CONFIG` */
+  id: string;
+  /** default `${OS temp}/sei-online-code`; env override `oc.workspace.root` */
+  workspaceRoot: string;
+  /** "" = no template → scaffold-generate path (no default) */
+  templateGitlabUrl: string;
+  createdDate: string;
+}
+
+/** Workspace provisioning source — CLONE when a template URL is set, else SCAFFOLD. */
+export type WorkspaceSource = 'CLONE' | 'SCAFFOLD';
+
+/** WorkspaceResolveResult — resolved per-project workspace dir (Phase 5 §2 ep #33). */
+export interface WorkspaceResolveResult {
+  /** resolved workspace dir: `<workspaceRoot>/<projectId>` */
+  path: string;
+  /** true when the dir already existed (clone-once reuse — never re-clone) */
+  provisioned: boolean;
+  source: WorkspaceSource;
+}
+
+/** #31 read platform config (creates default singleton if absent) */
+export async function getConfig(): Promise<ResultData<PlatformConfigDto>> {
+  return request({ url: `${API}/config/get`, method: 'GET' });
+}
+
+/** #32 upsert platform config (Workspace Root + Template GitLab URL) */
+export async function saveConfig(params: {
+  workspaceRoot: string;
+  templateGitlabUrl: string;
+}): Promise<ResultData<PlatformConfigDto>> {
+  return request({ url: `${API}/config/save`, method: 'POST', data: params });
+}
+
+/** #33 resolve a project's workspace dir → { path, provisioned, source } */
+export async function resolveWorkspace(
+  projectId: string,
+): Promise<ResultData<WorkspaceResolveResult>> {
+  return request({ url: `${API}/workspace/resolve`, method: 'GET', params: { projectId } });
+}

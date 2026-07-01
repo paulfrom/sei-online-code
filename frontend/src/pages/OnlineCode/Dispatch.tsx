@@ -43,6 +43,7 @@ import type {
   TaskState,
 } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
+import WorkspaceSourceIndicator from './components/WorkspaceSourceIndicator';
 
 const useStyles = createStyles(({ token, css }) => ({
   page: css`
@@ -57,6 +58,11 @@ const useStyles = createStyles(({ token, css }) => ({
     display: flex;
     justify-content: space-between;
     align-items: center;
+  `,
+  headerActions: css`
+    display: flex;
+    align-items: center;
+    gap: ${token.marginSM}px;
   `,
   body: css`
     flex: 1;
@@ -329,7 +335,8 @@ const Dispatch: React.FC = () => {
     <div className={styles.page}>
       <div className={styles.header}>
         <BannerTitle title={project.name} subTitle="任务派发与并发执行" />
-        <div>
+        <div className={styles.headerActions}>
+          <WorkspaceSourceIndicator projectId={projectId} />
           <LifecycleBadge state={project.state} />
           <Button
             type="primary"

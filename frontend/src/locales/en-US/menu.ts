@@ -10,6 +10,7 @@ export default {
   'menu.onlineCodeTimeline': 'Timeline',
   'menu.onlineCodeSkills': 'Skills',
   'menu.onlineCodeAgents': 'Agents',
+  'menu.onlineCodeSettings': 'Settings',
   'menu.reporting': 'Regulatory Reporting',
   'menu.reportingPlan': 'Reporting Plan',
   'menu.reportingPlanNew': 'New Plan',
