@@ -1,0 +1,119 @@
+package com.changhong.onlinecode.dto;
+
+import com.changhong.onlinecode.dto.enums.TaskState;
+import com.changhong.sei.core.dto.BaseEntityDto;
+import io.swagger.v3.oas.annotations.media.Schema;
+
+import java.util.Date;
+import java.util.List;
+
+/**
+ * Task DTO。契约 Phase 2 §1.1 —— Dispatch Agent 切分出的一个非重叠工作单元。
+ *
+ * @author sei-online-code
+ */
+@Schema(description = "Task DTO")
+public class TaskDto extends BaseEntityDto {
+
+    private static final long serialVersionUID = 1L;
+
+    @Schema(description = "所属迭代 id")
+    private String iterationId;
+
+    @Schema(description = "任务标题", example = "库存列表页")
+    private String title;
+
+    @Schema(description = "任务描述（agent prompt seed）")
+    private String description;
+
+    @Schema(description = "文件边界声明（跨任务不重叠）",
+            example = "[\"src/pages/stock/list.tsx\", \"src/mocks/stock.ts\"]")
+    private List<String> fileScope;
+
+    @Schema(description = "分配的 agent；Phase 2 为单一内建 dev-agent", example = "dev-agent")
+    private String assignedAgent;
+
+    @Schema(description = "任务状态", example = "PENDING")
+    private TaskState state;
+
+    @Schema(description = "worktree 分支；RUNNING 前为 null", example = "task/ITER0001-0001")
+    private String worktreeBranch;
+
+    @Schema(description = "分派/合并顺序", example = "1")
+    private Integer seq;
+
+    @Schema(description = "创建时间")
+    private Date createdDate;
+
+    public String getIterationId() {
+        return iterationId;
+    }
+
+    public void setIterationId(String iterationId) {
+        this.iterationId = iterationId;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public List<String> getFileScope() {
+        return fileScope;
+    }
+
+    public void setFileScope(List<String> fileScope) {
+        this.fileScope = fileScope;
+    }
+
+    public String getAssignedAgent() {
+        return assignedAgent;
+    }
+
+    public void setAssignedAgent(String assignedAgent) {
+        this.assignedAgent = assignedAgent;
+    }
+
+    public TaskState getState() {
+        return state;
+    }
+
+    public void setState(TaskState state) {
+        this.state = state;
+    }
+
+    public String getWorktreeBranch() {
+        return worktreeBranch;
+    }
+
+    public void setWorktreeBranch(String worktreeBranch) {
+        this.worktreeBranch = worktreeBranch;
+    }
+
+    public Integer getSeq() {
+        return seq;
+    }
+
+    public void setSeq(Integer seq) {
+        this.seq = seq;
+    }
+
+    public Date getCreatedDate() {
+        return createdDate;
+    }
+
+    public void setCreatedDate(Date createdDate) {
+        this.createdDate = createdDate;
+    }
+}

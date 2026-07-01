@@ -23,6 +23,12 @@ public class RunLogFrame implements Serializable {
     @Schema(description = "迭代 id")
     private String iterationId;
 
+    @Schema(description = "任务 id（Phase 2 多 agent fan-out）；无归属时为 null")
+    private String taskId;
+
+    @Schema(description = "运行 id（Phase 2 多 agent fan-out）；无归属时为 null")
+    private String runId;
+
     @Schema(description = "流类型：stdout | stderr | system")
     private String stream;
 
@@ -51,6 +57,22 @@ public class RunLogFrame implements Serializable {
 
     public void setIterationId(String iterationId) {
         this.iterationId = iterationId;
+    }
+
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public void setTaskId(String taskId) {
+        this.taskId = taskId;
+    }
+
+    public String getRunId() {
+        return runId;
+    }
+
+    public void setRunId(String runId) {
+        this.runId = runId;
     }
 
     public String getStream() {

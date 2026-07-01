@@ -50,18 +50,35 @@ public class ClaudeRunner {
      * @return 完成后携带聚合 stdout 的 future
      */
     public CompletableFuture<String> execute(String iterationId, String prompt, String cwd) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, prompt, cwd));
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd));
+    }
+
+    /**
+     * 异步执行一次 claude 运行，带 taskId/runId（Phase 2 并行 fan-out 场景）。
+     *
+     * @param iterationId 迭代 id
+     * @param taskId      任务 id（日志帧路由）
+     * @param runId       运行 id（日志帧路由）
+     * @param prompt      提示词
+     * @param cwd         工作目录（可为 null）
+     * @return 完成后携带聚合 stdout 的 future
+     */
+    public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
+                                             String prompt, String cwd) {
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd));
     }
 
     /**
      * 阻塞执行 claude 进程并逐行流式回传（供 {@link #execute} 在独立线程调用）。
      *
      * @param iterationId 迭代 id
+     * @param taskId      任务 id（可为 null）
+     * @param runId       运行 id（可为 null）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
      * @return 聚合 stdout
      */
-    private String runBlocking(String iterationId, String prompt, String cwd) {
+    private String runBlocking(String iterationId, String taskId, String runId, String prompt, String cwd) {
         List<String> args = buildArgs(prompt);
         ProcessBuilder pb = new ProcessBuilder(args);
         if (cwd != null && !cwd.isBlank()) {
@@ -69,11 +86,11 @@ public class ClaudeRunner {
         }
         StringBuilder output = new StringBuilder();
         try {
-            emit(iterationId, "system", "spawning: " + String.join(" ", args), null);
+            emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
 
             // stderr 独立线程读取，避免与 stdout 相互阻塞（参考 claude.go 的双 goroutine）。
-            Thread stderrPump = pumpStderr(iterationId, process.getErrorStream());
+            Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream());
             stderrPump.start();
 
             try (BufferedReader reader = new BufferedReader(
@@ -81,20 +98,20 @@ public class ClaudeRunner {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append('\n');
-                    emit(iterationId, "stdout", line, null);
+                    emit(iterationId, taskId, runId, "stdout", line, null);
                 }
             }
 
             int code = process.waitFor();
             stderrPump.join();
             String finalState = code == 0 ? "PREVIEW" : "FAILED";
-            emit(iterationId, "system", "DONE", finalState);
+            emit(iterationId, taskId, runId, "system", "DONE", finalState);
         } catch (IOException e) {
             LOGGER.warn("claude spawn failed: iterationId={}", iterationId, e);
-            emit(iterationId, "system", "DONE", "FAILED");
+            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            emit(iterationId, "system", "DONE", "FAILED");
+            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
         }
         return output.toString();
     }
@@ -114,13 +131,13 @@ public class ClaudeRunner {
         return args;
     }
 
-    private Thread pumpStderr(String iterationId, InputStream stderr) {
+    private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr) {
         return new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    emit(iterationId, "stderr", line, null);
+                    emit(iterationId, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
                 LOGGER.debug("claude stderr pump ended: iterationId={}", iterationId, e);
@@ -128,8 +145,10 @@ public class ClaudeRunner {
         }, "claude-stderr-" + iterationId);
     }
 
-    private void emit(String iterationId, String stream, String line, String state) {
+    private void emit(String iterationId, String taskId, String runId, String stream, String line, String state) {
         RunLogFrame frame = new RunLogFrame(iterationId, stream, line, LocalDateTime.now().format(TS));
+        frame.setTaskId(taskId);
+        frame.setRunId(runId);
         frame.setState(state);
         RunLogWebSocketHub.broadcast(frame);
     }
