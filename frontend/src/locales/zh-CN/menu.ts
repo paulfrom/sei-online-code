@@ -8,6 +8,7 @@ export default {
   'menu.onlineCodeSpec': 'Spec 评审',
   'menu.onlineCodeDispatch': '任务派发',
   'menu.onlineCodePreview': '预览',
+  'menu.onlineCodeTimeline': '迭代时间线',
   'menu.onlineCodeSkills': '技能管理',
   'menu.onlineCodeAgents': 'Agent 管理',
   'menu.reporting': '监管报送',

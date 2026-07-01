@@ -58,9 +58,17 @@ export interface IterationDto {
   projectId: string;
   specId: string;
   specVersion: number;
+  /** 1-based loop-round ordinal within the project (Phase 4 §1.1) */
+  round: number;
   state: LifecycleState;
   previewUrl: string | null;
+  /** the iteration this round refined from; null for round 1 (Phase 4 §1.1) */
+  parentIterationId: string | null;
+  /** user optimization prose that seeded this round; null for round 1 (Phase 4 §1.1) */
+  feedback: string | null;
   createdDate: string;
+  /** set on ACCEPTED/FAILED/CANCELLED (Phase 4 §1.1) */
+  finishedDate: string | null;
   /** internal: epoch ms when merge was triggered (drives MERGING→DEPLOYING flip) */
   _mergeAt?: number;
   /** internal: epoch ms when deploy was triggered (drives DEPLOYING→PREVIEW flip) */
@@ -261,14 +269,34 @@ export function confirmSpec(specId: string): IterationDto | null {
   const project = db.projects.get(spec.projectId);
   if (!project) return null;
   spec.state = 'CONFIRMED';
+
+  // Dedupe: `optimize` (#26) may have already opened the SPEC_REVIEW iteration
+  // for this exact spec version; re-confirming (#6) reuses it rather than
+  // forking a duplicate round. Otherwise this is the round-1 confirm.
+  const existing = Array.from(db.iterations.values()).find((it) => it.specId === spec.id);
+  if (existing) {
+    existing.state = 'DISPATCHING';
+    project.currentIterationId = existing.id;
+    project.currentSpecId = spec.id;
+    project.state = 'DISPATCHING';
+    project.lastEditedDate = now();
+    return existing;
+  }
+
+  const round =
+    Array.from(db.iterations.values()).filter((it) => it.projectId === project.id).length + 1;
   const iteration: IterationDto = {
     id: nextId('ITER'),
     projectId: project.id,
     specId: spec.id,
     specVersion: spec.version,
+    round,
     state: 'DISPATCHING',
     previewUrl: null,
+    parentIterationId: null,
+    feedback: null,
     createdDate: now(),
+    finishedDate: null,
   };
   db.iterations.set(iteration.id, iteration);
   project.currentIterationId = iteration.id;
@@ -450,6 +478,163 @@ export function mergeIteration(iterationId: string): IterationDto | null {
     project.lastEditedDate = now();
   }
   return iteration;
+}
+
+/** Terminal states — no further transitions; carry `finishedDate` (Phase 4 §3). */
+const TERMINAL_STATES: LifecycleState[] = ['ACCEPTED', 'FAILED', 'CANCELLED'];
+
+/**
+ * Accept (contract ep #25): PREVIEW → ACCEPTED, set finishedDate. Guarded:
+ * only PREVIEW iterations accept sign-off.
+ */
+export function acceptIteration(
+  iterationId: string,
+): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
+  const iteration = db.iterations.get(iterationId);
+  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
+  if (iteration.state !== 'PREVIEW') {
+    return { ok: false, message: `仅 PREVIEW 状态可验收，当前为 ${iteration.state}` };
+  }
+  iteration.state = 'ACCEPTED';
+  iteration.finishedDate = now();
+  const project = db.projects.get(iteration.projectId);
+  if (project) {
+    project.state = 'ACCEPTED';
+    project.lastEditedDate = now();
+  }
+  return { ok: true, iteration };
+}
+
+/**
+ * Optimize (contract ep #26): from PREVIEW, the Requirement Agent incrementally
+ * updates the Spec → a NEW immutable version, opens a new iteration (round+1,
+ * parent chain, feedback) in SPEC_REVIEW. Feedback must be non-empty; the prior
+ * Spec is never edited (Phase 4 §3 — Spec is the single source of truth).
+ */
+export function optimizeProject(
+  projectId: string,
+  feedback: string,
+): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
+  const project = db.projects.get(projectId);
+  if (!project) return { ok: false, message: `project ${projectId} not found` };
+  if (!feedback || !feedback.trim()) return { ok: false, message: 'feedback 不能为空' };
+  if (project.state !== 'PREVIEW') {
+    return { ok: false, message: `仅 PREVIEW 状态可优化，当前为 ${project.state}` };
+  }
+  const parent = project.currentIterationId
+    ? db.iterations.get(project.currentIterationId) ?? null
+    : null;
+
+  // new immutable Spec version = prior max + 1
+  const priorVersion = Array.from(db.specs.values())
+    .filter((s) => s.projectId === projectId)
+    .reduce((m, s) => Math.max(m, s.version), 0);
+  const spec = buildSpec(project, priorVersion + 1);
+  db.specs.set(spec.id, spec);
+
+  const iteration: IterationDto = {
+    id: nextId('ITER'),
+    projectId: project.id,
+    specId: spec.id,
+    specVersion: spec.version,
+    round: (parent?.round ?? 0) + 1,
+    state: 'SPEC_REVIEW',
+    previewUrl: null,
+    parentIterationId: parent?.id ?? null,
+    feedback: feedback.trim(),
+    createdDate: now(),
+    finishedDate: null,
+  };
+  db.iterations.set(iteration.id, iteration);
+  project.currentSpecId = spec.id;
+  project.currentIterationId = iteration.id;
+  project.state = 'SPEC_REVIEW';
+  project.lastEditedDate = now();
+  return { ok: true, iteration };
+}
+
+/** All iterations of a project, ordered by round (contract ep #27). */
+export function iterationsOf(projectId: string): IterationDto[] {
+  return Array.from(db.iterations.values())
+    .filter((it) => it.projectId === projectId)
+    .sort((a, b) => a.round - b.round);
+}
+
+/**
+ * Cancel (contract ep #28): abort a non-terminal iteration → CANCELLED, cascade
+ * RUNNING tasks/runs → CANCELLED in the same pass (backend rule #9). Guarded:
+ * terminal iterations cannot be cancelled.
+ */
+export function cancelIteration(
+  iterationId: string,
+): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
+  const iteration = db.iterations.get(iterationId);
+  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
+  if (TERMINAL_STATES.includes(iteration.state)) {
+    return { ok: false, message: `终态迭代不可取消，当前为 ${iteration.state}` };
+  }
+  // cascade: RUNNING/MERGING tasks and RUNNING runs → CANCELLED
+  Array.from(db.tasks.values())
+    .filter((t) => t.iterationId === iterationId)
+    .forEach((t) => {
+      if (t.state === 'RUNNING' || t.state === 'MERGING' || t.state === 'PENDING') {
+        t.state = 'CANCELLED';
+      }
+    });
+  Array.from(db.runs.values())
+    .filter((r) => r.iterationId === iterationId)
+    .forEach((r) => {
+      if (r.state === 'RUNNING') {
+        r.state = 'CANCELLED';
+        r.finishedDate = now();
+      }
+    });
+  iteration.state = 'CANCELLED';
+  iteration.finishedDate = now();
+  const project = db.projects.get(iteration.projectId);
+  if (project) {
+    project.state = 'CANCELLED';
+    project.lastEditedDate = now();
+  }
+  return { ok: true, iteration };
+}
+
+/**
+ * Retry (contract ep #29): from FAILED, re-dispatch the same Spec version — new
+ * tasks/runs, state → DISPATCHING. Guarded: only FAILED iterations retry. Prior
+ * tasks/runs of this iteration are cleared so re-dispatch starts clean.
+ */
+export function retryIteration(
+  iterationId: string,
+): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
+  const iteration = db.iterations.get(iterationId);
+  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
+  if (iteration.state !== 'FAILED') {
+    return { ok: false, message: `仅 FAILED 状态可重试，当前为 ${iteration.state}` };
+  }
+  // drop stale tasks/runs so re-dispatch cuts a fresh set
+  Array.from(db.tasks.values())
+    .filter((t) => t.iterationId === iterationId)
+    .forEach((t) => db.tasks.delete(t.id));
+  Array.from(db.runs.values())
+    .filter((r) => r.iterationId === iterationId)
+    .forEach((r) => db.runs.delete(r.id));
+  iteration.state = 'DISPATCHING';
+  iteration.finishedDate = null;
+  const project = db.projects.get(iteration.projectId);
+  if (project) {
+    project.currentIterationId = iteration.id;
+    project.state = 'DISPATCHING';
+    project.lastEditedDate = now();
+  }
+  return { ok: true, iteration };
+}
+
+/** Spec version history for a project, ordered by version (contract ep #30). */
+export function specsOf(projectId: string): SpecDto[] {
+  return Array.from(db.specs.values())
+    .filter((s) => s.projectId === projectId)
+    .sort((a, b) => a.version - b.version);
 }
 
 /** seed a couple of projects so the list is not empty on first load */

@@ -44,6 +44,12 @@ const routes: any[] = [
             component: './OnlineCode/Preview',
           },
           {
+            path: '/online-code/timeline',
+            name: 'onlineCodeTimeline',
+            title: 'menu.onlineCodeTimeline',
+            component: './OnlineCode/Timeline',
+          },
+          {
             path: '/online-code/skills',
             name: 'onlineCodeSkills',
             title: 'menu.onlineCodeSkills',

@@ -6,7 +6,9 @@
 import { http, HttpResponse } from 'msw';
 import type { Search } from '@/services/onlineCode';
 import {
+  acceptIteration,
   attachAgentSkills,
+  cancelIteration,
   confirmSpec,
   createProject,
   db,
@@ -15,13 +17,17 @@ import {
   deployIteration,
   dispatchIteration,
   importSkill,
+  iterationsOf,
   mergeIteration,
+  optimizeProject,
   readIteration,
   readRun,
   refineSpec,
+  retryIteration,
   runsOf,
   saveAgent,
   seed,
+  specsOf,
   tasksOf,
 } from './db';
 
@@ -307,5 +313,55 @@ export const handlers = [
     const body = (await request.json()) as { agentId?: string; skillIds?: string[] };
     const agent = attachAgentSkills(body?.agentId ?? '', body?.skillIds ?? []);
     return agent ? ok(agent, '技能已绑定') : fail('agent not found');
+  }),
+
+  // --- Phase 4: Full Build Loop (contract eps #25–30) ---
+
+  // #25 accept: PREVIEW → ACCEPTED (sets finishedDate)
+  http.post('*/api/iteration/accept', async ({ request }) => {
+    const body = (await request.json()) as { iterationId?: string };
+    const res = acceptIteration(body?.iterationId ?? '');
+    return res.ok ? ok(res.iteration, '已验收') : fail(res.message);
+  }),
+
+  // #26 optimize: PREVIEW → new Spec version + new iteration (round+1) → SPEC_REVIEW
+  http.post('*/api/project/optimize', async ({ request }) => {
+    const body = (await request.json()) as { projectId?: string; feedback?: string };
+    const res = optimizeProject(body?.projectId ?? '', body?.feedback ?? '');
+    return res.ok ? ok(res.iteration, '已生成新一轮 Spec，请评审确认') : fail(res.message);
+  }),
+
+  // #27 timeline: list a project's iterations (filter by projectId, order by round)
+  http.post('*/api/iteration/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const projectId = search?.filters?.find((f) => f.fieldName === 'projectId')?.value;
+    let rows = Array.from(db.iterations.values());
+    if (projectId) {
+      rows = iterationsOf(String(projectId));
+    } else {
+      rows = rows.sort((a, b) => a.round - b.round);
+    }
+    return ok(paginate(rows, search));
+  }),
+
+  // #28 cancel: abort active iteration → CANCELLED (cascade RUNNING tasks/runs)
+  http.post('*/api/iteration/cancel', async ({ request }) => {
+    const body = (await request.json()) as { iterationId?: string };
+    const res = cancelIteration(body?.iterationId ?? '');
+    return res.ok ? ok(res.iteration, '迭代已取消') : fail(res.message);
+  }),
+
+  // #29 retry: from FAILED, re-dispatch the same Spec version → DISPATCHING
+  http.post('*/api/iteration/retry', async ({ request }) => {
+    const body = (await request.json()) as { iterationId?: string };
+    const res = retryIteration(body?.iterationId ?? '');
+    return res.ok ? ok(res.iteration, '迭代已重新派发') : fail(res.message);
+  }),
+
+  // #30 spec version history for a project (ordered by version)
+  http.get('*/api/spec/findByProject', ({ request }) => {
+    const projectId = new URL(request.url).searchParams.get('projectId') ?? '';
+    if (!projectId) return fail('projectId is required');
+    return ok(specsOf(projectId));
   }),
 ];

@@ -6,10 +6,10 @@
  * DEPLOYING, then render the built product in an iframe at previewUrl.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'umi';
+import { history, useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
 import { BannerTitle, Button, Empty, Result, Spin } from '@ead/suid';
-import { RocketOutlined } from '@ead/suid-icons';
+import { HistoryOutlined, RocketOutlined } from '@ead/suid-icons';
 import {
   deployIteration,
   findOneIteration,
@@ -216,6 +216,13 @@ const Preview: React.FC = () => {
         <BannerTitle title={project.name} subTitle="迭代预览" />
         <div>
           <LifecycleBadge state={project.state} />
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => history.push(`/online-code/timeline?id=${project.id}`)}
+            style={{ marginInlineStart: 8 }}
+          >
+            迭代时间线
+          </Button>
           <Button
             type="primary"
             icon={<RocketOutlined />}

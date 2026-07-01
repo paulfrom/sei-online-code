@@ -89,9 +89,17 @@ export interface IterationDto {
   projectId: string;
   specId: string;
   specVersion: number;
+  /** 1-based loop-round ordinal within the project (Phase 4 §1.1) */
+  round: number;
   state: LifecycleState;
   previewUrl: string | null;
+  /** the iteration this round refined from; null for round 1 (Phase 4 §1.1) */
+  parentIterationId: string | null;
+  /** user optimization prose that seeded this round; null for round 1 (Phase 4 §1.1) */
+  feedback: string | null;
   createdDate: string;
+  /** set on ACCEPTED/FAILED/CANCELLED (Phase 4 §1.1) */
+  finishedDate: string | null;
 }
 
 /** Task-level state tokens — verbatim per contract §1.1 / §4. */
@@ -167,6 +175,9 @@ export const SKILL_FIND_BY_PAGE_URL = `${API}/skill/findByPage`;
 
 /** Store URL for the agents list ExtTable (contract ep #21). */
 export const AGENT_FIND_BY_PAGE_URL = `${API}/agent/findByPage`;
+
+/** Store URL for the iteration timeline ExtTable (contract ep #27). */
+export const ITERATION_FIND_BY_PAGE_URL = `${API}/iteration/findByPage`;
 
 /** #1 create project */
 export async function saveProject(params: {
@@ -298,4 +309,41 @@ export async function attachAgentSkills(params: {
   skillIds: string[];
 }): Promise<ResultData<AgentDto>> {
   return request({ url: `${API}/agent/skills`, method: 'POST', data: params });
+}
+
+// --- Phase 4: Full Build Loop (contract eps #25–30) ---
+
+/** #25 accept: PREVIEW → ACCEPTED (sets finishedDate) */
+export async function acceptIteration(iterationId: string): Promise<ResultData<IterationDto>> {
+  return request({ url: `${API}/iteration/accept`, method: 'POST', data: { iterationId } });
+}
+
+/** #26 optimize: feedback re-entry → new Spec version + iteration (round+1) → SPEC_REVIEW */
+export async function optimizeProject(params: {
+  projectId: string;
+  feedback: string;
+}): Promise<ResultData<IterationDto>> {
+  return request({ url: `${API}/project/optimize`, method: 'POST', data: params });
+}
+
+/** #27 timeline: list a project's iterations (filter by projectId, order by round) */
+export async function findIterationsByPage(
+  search: Search,
+): Promise<ResultData<PageResult<IterationDto>>> {
+  return request({ url: `${API}/iteration/findByPage`, method: 'POST', data: search });
+}
+
+/** #28 cancel: abort active iteration → CANCELLED (cascade RUNNING tasks/runs) */
+export async function cancelIteration(iterationId: string): Promise<ResultData<IterationDto>> {
+  return request({ url: `${API}/iteration/cancel`, method: 'POST', data: { iterationId } });
+}
+
+/** #29 retry: from FAILED, re-dispatch the same Spec version → DISPATCHING */
+export async function retryIteration(iterationId: string): Promise<ResultData<IterationDto>> {
+  return request({ url: `${API}/iteration/retry`, method: 'POST', data: { iterationId } });
+}
+
+/** #30 spec version history for a project (ordered by version) */
+export async function findSpecsByProject(projectId: string): Promise<ResultData<SpecDto[]>> {
+  return request({ url: `${API}/spec/findByProject`, method: 'GET', params: { projectId } });
 }

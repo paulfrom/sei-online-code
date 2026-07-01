@@ -7,6 +7,7 @@ export default {
   'menu.onlineCodeSpec': 'Spec Review',
   'menu.onlineCodeDispatch': 'Dispatch',
   'menu.onlineCodePreview': 'Preview',
+  'menu.onlineCodeTimeline': 'Timeline',
   'menu.onlineCodeSkills': 'Skills',
   'menu.onlineCodeAgents': 'Agents',
   'menu.reporting': 'Regulatory Reporting',
