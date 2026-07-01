@@ -1,12 +1,15 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.agent.WorktreeManager;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskState;
+import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.onlinecode.dto.spec.SpecPage;
@@ -51,6 +54,9 @@ public class DispatchService {
     private final RunService runService;
     private final WorktreeManager worktreeManager;
     private final ClaudeRunner claudeRunner;
+    private final AgentService agentService;
+    private final SkillService skillService;
+    private final SkillMaterializer skillMaterializer;
 
     public DispatchService(IterationService iterationService,
                            SpecService specService,
@@ -58,7 +64,10 @@ public class DispatchService {
                            TaskService taskService,
                            RunService runService,
                            WorktreeManager worktreeManager,
-                           ClaudeRunner claudeRunner) {
+                           ClaudeRunner claudeRunner,
+                           AgentService agentService,
+                           SkillService skillService,
+                           SkillMaterializer skillMaterializer) {
         this.iterationService = iterationService;
         this.specService = specService;
         this.projectService = projectService;
@@ -66,6 +75,9 @@ public class DispatchService {
         this.runService = runService;
         this.worktreeManager = worktreeManager;
         this.claudeRunner = claudeRunner;
+        this.agentService = agentService;
+        this.skillService = skillService;
+        this.skillMaterializer = skillMaterializer;
     }
 
     /**
@@ -195,16 +207,75 @@ public class DispatchService {
             run.setState(RunState.RUNNING);
             run.setStartedDate(new Date());
             // TODO(oma-deferred): worktreePath 由 WorkspaceManager + WorktreeManager.addWorktree 实际创建后回填
-            run.setWorktreePath(null);
+            String worktreePath = null;
+            run.setWorktreePath(worktreePath);
             OperateResultWithData<Run> savedRun = runService.save(run);
+
+            // Phase 3：解析 Task.assignedAgent → Agent，前置 instructions 到 prompt，
+            // 并在 spawn 前 materialize 其绑定技能到 worktree（契约 §3/§5）。
+            Agent agent = resolveAgent(task.getAssignedAgent());
+            String prompt = buildPrompt(agent, task.getDescription());
+            // worktreePath 为运行期真实路径（当前为 deferred seam）；materialize 幂等，
+            // path 为空时内部直接跳过，不阻断编译期骨架。
+            materializeSkills(worktreePath, agent);
 
             String runId = savedRun.successful() ? savedRun.getData().getId() : null;
             // 并行 spawn：每任务独立 future，互不阻塞（ADR-0001 并行 worktree 模型）
             CompletableFuture<String> future =
-                    claudeRunner.execute(iteration.getId(), task.getId(), runId, task.getDescription(), null);
+                    claudeRunner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath);
             futures.add(future);
         }
         // 本轮不阻塞等待（compile-only）；运行期由编排层 join 并回收各 Run 终态。
         LOGGER.info("dispatch: 已 fan-out {} 个并行任务 iterationId={}", futures.size(), iteration.getId());
+    }
+
+    /**
+     * 解析 Task.assignedAgent（agent 名）→ Agent 实体。未解析则返回 null，
+     * 调用方回退内置行为（契约 §1.2）。
+     *
+     * @param assignedAgent Task 上的 agent 名
+     * @return 命中的 Agent，未命中为 null
+     */
+    private Agent resolveAgent(String assignedAgent) {
+        if (assignedAgent == null || assignedAgent.isBlank()) {
+            return null;
+        }
+        return agentService.findByName(assignedAgent);
+    }
+
+    /**
+     * 组装 prompt：解析到 agent 则把 instructions 前置到 Task.description 之前（契约 §5）。
+     *
+     * @param agent       已解析 agent（可为 null）
+     * @param description Task 描述（agent prompt seed）
+     * @return 最终 prompt
+     */
+    private String buildPrompt(Agent agent, String description) {
+        String desc = description == null ? "" : description;
+        if (agent == null || agent.getInstructions() == null || agent.getInstructions().isBlank()) {
+            return desc;
+        }
+        return agent.getInstructions() + "\n\n" + desc;
+    }
+
+    /**
+     * spawn 前把 agent 绑定的技能 materialize 到 worktree（契约 §3）。
+     *
+     * @param worktreePath worktree 路径（运行期真实路径；deferred seam 期间可为 null）
+     * @param agent        已解析 agent（可为 null）
+     */
+    private void materializeSkills(String worktreePath, Agent agent) {
+        if (agent == null || agent.getSkillIds() == null || agent.getSkillIds().isEmpty()) {
+            return;
+        }
+        List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
+        for (String skillId : agent.getSkillIds()) {
+            Skill skill = skillService.findOne(skillId);
+            if (skill != null) {
+                payloads.add(new SkillMaterializer.SkillPayload(
+                        skill.getName(), skill.getContent(), skill.getComputedHash()));
+            }
+        }
+        skillMaterializer.materialize(worktreePath, payloads);
     }
 }
