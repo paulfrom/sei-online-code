@@ -1,0 +1,181 @@
+---
+apiVersion: v1
+data:
+  sei.application.env: demo
+  spring.cloud.nacos.discovery.namespace: demo
+  spring.cloud.nacos.password: 123456
+  spring.cloud.nacos.server-addr: nacos.demo.svc:8848
+  spring.cloud.nacos.username: sei_nacos
+  SW_LOGGING_DIR: /var/tmp
+  SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking.demo.svc:11800
+kind: ConfigMap
+metadata:
+  name: global-config-env
+  namespace: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: sei-online-code  name: sei-online-code  namespace: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sei-online-code  template:
+    metadata:
+      labels:
+        app: sei-online-code    spec:
+      affinity:
+        # 亲和性：调度到有特定标签的节点上
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: env
+                operator: In
+                values:
+                - TestEnvironment
+        # 反亲和性：同一节点上不允许有相同标签的Pod
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchExpressions: 
+              - key: app
+                operator: In
+                values: 
+                - sei-online-code
+      volumes:
+      - name: skywalking-agent
+        emptyDir: { }
+      initContainers:
+      - name: agent-container
+        image: rddhub.changhong.com/library/skywalking-java-agent:9.3.0-java21
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: skywalking-agent
+          mountPath: /agent
+        command: [ "/bin/sh" ]
+        args: [ "-c", "cp -R /skywalking/agent /agent/" ]
+      containers:
+      - env:
+        - name: SW_AGENT_NAME
+          value: 'online-code::sei-online-code'
+        - name: JAVA_TOOL_OPTIONS
+          value: '-Xmx1500m -Xms1500m -javaagent:/skywalking/agent/skywalking-agent.jar'
+        # - name: spring.cloud.nacos.discovery.ip
+        #   value: 'sei-online-code.online-code.svc'
+        # - name: spring.cloud.nacos.discovery.port
+        #   value: '8080'
+        # 全局通用配置
+        envFrom:
+        - configMapRef:
+            name: global-config-env
+        image: rddhub.changhong.com/sei/sei-online-code:online-code
+        imagePullPolicy: IfNotPresent
+        name: sei-online-code        ports:
+        - containerPort: 8080
+          name: container-port
+          protocol: TCP
+        resources:
+          limits:
+            cpu: '1'
+            memory: 2048Mi
+          requests:
+            cpu: 200m
+            memory: 2048Mi
+        # 就绪探针（应用就绪后才接受流量）
+        readinessProbe:
+          # 容器启动60s后开始检测
+          initialDelaySeconds: 240
+          # 容器需要在1s内响应
+          timeoutSeconds: 1
+          # 每10s探测一次
+          periodSeconds: 10
+          # 连续探测1成功表示成功
+          successThreshold: 1
+          # 连续探测3次失败表示失败
+          failureThreshold: 3
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+        # 存活探针（容器死锁）
+        livenessProbe:
+          # 容器启动60s后开始检测
+          initialDelaySeconds: 240
+          # 容器需要在1s内响应
+          timeoutSeconds: 1
+          # 每10s探测一次
+          periodSeconds: 10
+          # 连续探测1成功表示成功
+          successThreshold: 1
+          # 连续探测3次失败表示失败
+          failureThreshold: 3
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+        volumeMounts:
+        - name: skywalking-agent
+          mountPath: /skywalking
+      dnsPolicy: ClusterFirst
+      # 镜像拉取密钥
+      imagePullSecrets:
+      - name: harbor-registry-config
+      restartPolicy: Always
+      # 污点容忍度
+      tolerations:
+      - key: "stresstest-node"
+        operator: "Exists"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sei-online-code  namespace: demo
+spec:
+  selector:
+    app: sei-online-code  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+  # 会话保持
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  # NodePort示例
+  # - name: http
+  #   port: 8080
+  #   # 可省略
+  #   nodePort: 30202
+  #   targetPort: 8080
+  #   protocol: TCP
+  # type: NodePort
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+  name: sei-online-code  namespace: demo
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: demo.domain.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: sei-online-code            port:
+              number: 8080
+        path: /sei-online-code
+        # ImplementationSpecific
+        pathType: Prefix

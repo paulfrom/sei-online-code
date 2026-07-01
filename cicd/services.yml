@@ -1,0 +1,44 @@
+defaults:
+  java:
+    build:
+      gradle_task: bootJar
+      docker_context: .
+
+  nodejs:
+    build:
+      node_build_mode: jenkins_tool
+      nodejs_tool: NodeJS16
+      node_docker_image: ccr.ccs.tencentyun.com/brian/node:20-slim-amd64
+      node_options: --max_old_space_size=4096
+      node_install_command: |
+        if [ ! -d node_modules ]; then
+          echo "node_modules not found, run npm install"
+          npm install --unsafe-perm=true --allow-root
+        elif [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ] && git cat-file -e "$GIT_PREVIOUS_SUCCESSFUL_COMMIT^{commit}" 2>/dev/null && git diff --name-only "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" HEAD -- package.json package-lock.json | grep -q .; then
+          echo "package files changed since previous successful build, run npm install"
+          npm install --unsafe-perm=true --allow-root
+        elif git rev-parse HEAD~1 >/dev/null 2>&1 && git diff --name-only HEAD~1 HEAD -- package.json package-lock.json | grep -q .; then
+          echo "package files changed in latest commit, run npm install"
+          npm install --unsafe-perm=true --allow-root
+        else
+          echo "package files unchanged, skip npm install"
+        fi
+      node_build_command: npm run build
+      docker_context: docker
+
+services:
+  sei-online-code:               # 服务名
+    path: backend                # 实际路径
+    type: java                   # 服务类型
+    build:
+      gradle_task: :sei-online-code-service:bootJar     # 构建命令
+    # image、deployment、container、compose_service 都是可选的，不定义时会默认取服务名
+    image: sei-online-code       # Docker 镜像名称，若不定义，默认取服务名
+    deployment: sei-online-code  # Kubernetes 部署名称，若不定义，默认取服务名
+    container: sei-online-code   # Kubernetes 容器名称，若不定义，默认取服务名
+    compose_service: sei-online-code  # Docker Compose 服务名称，若不定义，默认取服务名
+
+  sei-online-code-web:
+    path: frontend
+    type: nodejs
+    image: sei-online-code-web

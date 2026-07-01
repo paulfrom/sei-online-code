@@ -1,0 +1,7 @@
+> Task :compileJava NO-SOURCE
+> Task :ams-api:compileJava UP-TO-DATE
+
+> Task :ams-service:compileJava
+
+> Task :ams-service:compileJava FAILED
+2 actionable tasks: 1 executed, 1 up-to-date

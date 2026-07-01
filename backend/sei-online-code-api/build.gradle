@@ -1,0 +1,81 @@
+plugins {
+    // https://github.com/palantir/gradle-git-version
+    id 'com.palantir.git-version' version '3.0.0'
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+def gitInfo = versionDetails()
+def gitCommitId = gitInfo.gitHash
+
+dependencyManagement {
+    imports {
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}")
+    }
+}
+
+dependencies {
+    // SEI平台依赖包
+    api("com.changhong.sei:sei-core-api:$sei_version")
+    api("com.changhong.sei:sei-bpm-sdk:$sei_version")
+}
+
+//打包源代码jar包
+bootJar { enabled = false }
+jar {
+    enabled = true
+    // 定义为空，这样打包生成的jar文件不会出现plain后缀
+    archiveClassifier = ''
+    manifest {
+        attributes("Created-By": "$project.gradle $project.version (${System.properties['java.vendor']} ${System.properties['java.vm.version']})".toString())
+        attributes("Manifest-Version": "$project.version")
+        attributes("Implementation-Title": "$project.name")
+        attributes("Implementation-Version": gitCommitId)
+        attributes("Implementation-Vendor": "rcsit.cn")
+        attributes("Build-Time": new Date().format("yyyy-MM-dd HH:mm:ss"))
+    }
+}
+
+// 打包sourcesJar任务
+tasks.register('sourcesJar', Jar) {
+    dependsOn classes
+    from sourceSets.main.allSource
+    archiveClassifier = "sources"
+}
+
+
+//上传到nexus
+publishing {
+    // 发布
+    publications {
+        mavenJava(MavenPublication) {
+            //指定group/artifact/version信息
+            groupId "$project.group"
+            artifactId "$project.name"
+            version "$project.version"
+            from components.java
+
+            // 增加 sourcesJar、javadocJar 任务
+            artifact sourcesJar
+//            artifact javadocJar
+        }
+    }
+    // 发布仓库
+    repositories {
+        // 本地仓库位于USER_HOME/.m2/repository
+        mavenLocal()
+        // maven仓库
+        maven {
+            // 凭证
+            credentials {
+                // 仓库发布用户名
+                username "$NEXUS_USERNAME"
+                // 仓库发布用户密码
+                password "$NEXUS_PASSWORD"
+            }
+            // 地址
+            url "$MAVEN_REPO_URL"
+            allowInsecureProtocol = true
+        }
+    }
+}

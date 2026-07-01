@@ -1,0 +1,288 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: common-backend-config
+  namespace: online-code
+data:
+  # 系统环境标识
+  SEI_SYS_ENV: "DEV"
+  # 应用环境标识，对应 sei.application.env
+  SEI_APPLICATION_ENV: "DEV"
+  # Nacos 服务地址
+  SPRING_CLOUD_NACOS_SERVER_ADDR: "nacos:8848"
+  # Nacos 配置命名空间
+  SPRING_CLOUD_NACOS_CONFIG_NAMESPACE: "DEV"
+  # Nacos 服务发现命名空间
+  SPRING_CLOUD_NACOS_DISCOVERY_NAMESPACE: "DEV"
+  # 是否注册到注册中心
+  SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED: "true"
+  # OTel连接地址
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-endpoint:4317"
+  # OTel连接协议
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: common-backend-secret
+  namespace: online-code
+type: Opaque
+data:
+  # echo -n 'nacos' | base64
+  SPRING_CLOUD_NACOS_USERNAME: bmFjb3M=
+  # echo -n 'mypasswd-Vazkyv' | base64
+  SPRING_CLOUD_NACOS_PASSWORD: bXlwYXNzd2QtVmF6a3l2
+  # echo -n '....' | base 64
+  OTEL_EXPORTER_OTLP_HEADERS: QXV0aG9yaXphdGlvbj1CZWFyZXIgYTgyMDBiOTBiNDNiN2ViYWZhMWQ3YWVlYmU=
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: sei-online-code  name: sei-online-code  namespace: online-code
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sei-online-code  template:
+    metadata:
+      labels:
+        app: sei-online-code    spec:
+      # Pod 级安全上下文
+      securityContext:
+        # 文件系统组：用于控制挂载卷权限。挂载卷会自动赋予该组权限，保证容器用户可读写
+        fsGroup: 1000
+      # 节点亲和性和pod反亲和性设置
+      affinity:
+        # 节点亲和性：要求 Pod 调度到带有指定标签的节点上
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-project
+                operator: In
+                values:
+                - ONLINE-CODE
+        # pod反亲和性（硬约束），要求具有相同 app 标签的 Pod 不得调度到同一主机上，用于提升高可用性
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - sei-online-code
+            topologyKey: "kubernetes.io/hostname"
+        # pod反亲和性（软规则），同一节点上不运行具有相同标签的pod，非强制
+        # podAntiAffinity:
+        #   preferredDuringSchedulingIgnoredDuringExecution:
+        #   - weight: 50
+        #     podAffinityTerm:
+        #       labelSelector:
+        #         matchExpressions:
+        #         - key: app
+        #           operator: In
+        #           values:
+        #           - sei-online-code
+        #       topologyKey: "kubernetes.io/hostname"
+      # 共享卷
+      volumes:
+      - name: otel-agent
+        emptyDir: { }
+      # sidecar 注入 OpenTelemetry Java Agent
+      initContainers:
+      - name: otel-agent
+        image: rddhub.changhong.com/library/autoinstrumentation-java:2.24.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: otel-agent
+          mountPath: /agent
+        command: [ "/bin/sh" ]
+        args: [ "-c", "cp -a /javaagent.jar /agent/" ]
+      containers:
+      - env:
+        # 引入javaagent
+        - name: JAVA_TOOL_OPTIONS
+          value: '-javaagent:/otel/javaagent.jar'
+        # 传入到OTel的服务名称
+        - name: OTEL_SERVICE_NAME
+          value: 'sei-online-code'
+        # 传入到OTel的工作空间，环境
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: 'service.namespace=online-code,deployment.environment=online-code,team=rd'
+        # 从 Secret 注入敏感配置
+        - name: SPRING_CLOUD_NACOS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: SPRING_CLOUD_NACOS_USERNAME
+              name: common-backend-secret
+        - name: SPRING_CLOUD_NACOS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: SPRING_CLOUD_NACOS_PASSWORD
+              name: common-backend-secret
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              key: OTEL_EXPORTER_OTLP_HEADERS
+              name: common-backend-secret
+        # 通用ConfigMap
+        envFrom:
+        - configMapRef:
+            name: common-backend-config
+        # -------------- 本地联调场景可启用以下配置，使用 NodePort 暴露服务时，可指定任一工作节点 IP 和唯一端口进行注册 -------------- #
+        # # 对应 spring.cloud.nacos.discovery.ip
+        # - name: SPRING_CLOUD_NACOS_DISCOVERY_IP
+        #   value: 'sei-online-code.online-code.svc'
+        # # 对应 spring.cloud.nacos.discovery.port
+        # - name: SPRING_CLOUD_NACOS_DISCOVERY_PORT
+        #   value: '8080'
+        # -------------- 本地联调场景可启用以上配置，使用 NodePort 暴露服务时，可指定任一工作节点 IP 和唯一端口进行注册 -------------- #
+        image: rddhub.registry.com/sei/sei-online-code:online-code
+        imagePullPolicy: IfNotPresent
+        name: sei-online-code        ports:
+        - containerPort: 8080
+          name: container-port
+          protocol: TCP
+        # Java 服务通常建议内存 requests 与 limits 保持一致，以降低因内存波动导致的调度与稳定性问题
+        # CPU 可适当拉开 requests 与 limits 的差距，以兼顾启动性能和资源利用率
+        resources:
+          limits:
+            cpu: '2'
+            memory: 3Gi
+          requests:
+            cpu: 200m
+            memory: 3Gi
+        volumeMounts:
+        - name: otel-agent
+          mountPath: /otel
+        # 就绪探针（应用就绪后才接受流量）
+        # readinessProbe:
+        #   # 容器启动240s后开始检测
+        #   initialDelaySeconds: 240
+        #   # 容器需要在3s内响应(默认1s)
+        #   timeoutSeconds: 3
+        #   # 每10s探测一次
+        #   periodSeconds: 10
+        #   # 连续探测1成功表示成功
+        #   successThreshold: 1
+        #   # 连续探测3次失败表示失败
+        #   failureThreshold: 3
+        #   httpGet:
+        #     scheme: HTTP
+        #     port: 8080
+        #     path: /actuator/health
+        # 启动探针。Java 服务启动通常较慢，需要预留足够启动时间。特别是在节点重启或同一节点上多个服务同时启动时，若探测窗口设置过短，可能导致容器反复重启。
+        startupProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+          # 最长允许30*10 + 15 = 315s的启动时间
+          initialDelaySeconds: 15
+          failureThreshold: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+        # 存活探针：用于检测容器是否仍正常运行，若应用发生死锁、线程阻塞或无响应，Kubernetes 将根据探针结果重启容器
+        livenessProbe:
+          # 容器启动30s后启动存活探针
+          initialDelaySeconds: 30
+          # 容器需要在3s内响应(默认1s)
+          timeoutSeconds: 3
+          # 每10s探测一次
+          periodSeconds: 10
+          # 连续探测1成功表示成功
+          successThreshold: 1
+          # 连续探测3次失败表示失败
+          failureThreshold: 3
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+        # 容器安全上下文配置（securityContext）
+        # 用于控制容器运行权限、安全策略及文件访问行为，建议在生产环境中显式配置
+        securityContext:
+          # 是否启用特权模式（privileged）, 生产环境应保持关闭
+          # true：容器拥有接近宿主机 root 权限
+          # false：默认值，推荐保持关闭
+          privileged: false
+          # 是否以非 root 用户运行
+          # true：强制容器不能以 root 启动（推荐开启，符合安全基线）
+          # 若镜像默认用户为 root 且未指定 runAsUser，则会启动失败
+          runAsNonRoot: true
+          # 是否启用只读根文件系统
+          # true：容器根目录（/）不可写
+          # false：允许写入根文件系统（适用于未适配只读的应用）
+          # ⚠️ 若开启 true，需要将 /tmp、/home/app 等写路径挂载为 volume
+          readOnlyRootFilesystem: false
+          # 容器运行用户 ID
+          runAsUser: 1000
+          # 容器运行主组 ID
+          runAsGroup: 1000
+          # 是否允许权限提升（如 setuid、sudo 等）false：禁止容器内进程提权，true：允许提权（存在安全风险）
+          allowPrivilegeEscalation: false
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: rddhub-registry
+      restartPolicy: Always
+      # 允许调度到某些污点标记节点
+      # tolerations:
+      # - key: "stresstest-node"
+      #   operator: "Exists"
+      #   effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sei-online-code  namespace: online-code
+spec:
+  ports:
+  - name: sei-online-code    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: sei-online-code  type: ClusterIP
+  # 会话保持
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+---
+# 基于CPU自动扩缩容，最少2个副本，最多5个副本，CPU平均使用率超过70%时触发扩容（集群需要安装metrics-server）
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sei-online-code-hpa
+  namespace: online-code
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sei-online-code  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# NodePort方式
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: sei-online-code
+#   namespace: online-code
+# spec:
+#   selector:
+#     app: sei-online-code
+#   ports:
+#   - name: http
+#     port: 8080
+#     nodePort: 30500
+#     targetPort: 8080
+#     protocol: TCP
+#   type: NodePort

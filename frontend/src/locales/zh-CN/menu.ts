@@ -1,0 +1,21 @@
+/** 开发侧栏 / 路由菜单文案 */
+export default {
+  'menu.dev': '开发菜单',
+  'menu.dashboard': '首页',
+  'menu.demo': 'Demo',
+  'menu.reporting': '监管报送',
+  'menu.reportingPlan': '填报计划',
+  'menu.reportingPlanNew': '新增填报计划',
+  'menu.reportingPlanEdit': '编辑填报计划',
+  'menu.reportingPlanView': '查看填报计划',
+  'menu.reportingPlanTask': '填报任务明细',
+  'menu.reportingSubmission': '数据报送',
+  'menu.reportingFill': '填报',
+  'menu.reportingApplication': '填报申请单',
+  'menu.userLogin': '用户登录',
+  'menu.assetEntry': '资产入库管理',
+  'menu.assetEntryList': '入库单列表',
+  'menu.assetEntryDetail': '入库单详情',
+  'menu.assetEntryApproveEdit': '审批编辑',
+  'menu.assetEntryApproveDetail': '审批详情',
+};
