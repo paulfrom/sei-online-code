@@ -2,7 +2,9 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
+import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.agent.WorktreeManager;
+import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskState;
@@ -57,6 +59,7 @@ public class DispatchService {
     private final AgentService agentService;
     private final SkillService skillService;
     private final SkillMaterializer skillMaterializer;
+    private final WorkspaceManager workspaceManager;
 
     public DispatchService(IterationService iterationService,
                            SpecService specService,
@@ -67,7 +70,8 @@ public class DispatchService {
                            ClaudeRunner claudeRunner,
                            AgentService agentService,
                            SkillService skillService,
-                           SkillMaterializer skillMaterializer) {
+                           SkillMaterializer skillMaterializer,
+                           WorkspaceManager workspaceManager) {
         this.iterationService = iterationService;
         this.specService = specService;
         this.projectService = projectService;
@@ -78,6 +82,7 @@ public class DispatchService {
         this.agentService = agentService;
         this.skillService = skillService;
         this.skillMaterializer = skillMaterializer;
+        this.workspaceManager = workspaceManager;
     }
 
     /**
@@ -112,9 +117,15 @@ public class DispatchService {
             saved.add(r.getData());
         }
 
+        // 派发前解析项目工作区（clone-once + reuse；无模板地址则走脚手架路径），
+        // 将解析出的工作区路径作为各任务 worktree 的基底路径穿入 run seam（契约 Phase 5 §3）。
+        WorkspaceResolveResult workspace = workspaceManager.resolve(iteration.getProjectId());
+        LOGGER.info("dispatch: 工作区已解析 projectId={} path={} source={} provisioned={}",
+                iteration.getProjectId(), workspace.getPath(), workspace.getSource(), workspace.isProvisioned());
+
         // 项目推进 DISPATCHING → DEVELOPING，随后并行 fan-out 各任务执行。
         projectService.transitionState(iteration.getProjectId(), LifecycleState.DEVELOPING);
-        fanOut(iteration, saved);
+        fanOut(iteration, saved, workspace.getPath());
 
         return OperateResultWithData.operationSuccessWithData(saved);
     }
@@ -192,8 +203,9 @@ public class DispatchService {
      *
      * @param iteration 迭代
      * @param tasks     已持久化的任务
+     * @param workspacePath 已解析的项目工作区路径（Phase 5 §3 clone/scaffold 基底）
      */
-    private void fanOut(Iteration iteration, List<Task> tasks) {
+    private void fanOut(Iteration iteration, List<Task> tasks, String workspacePath) {
         List<CompletableFuture<String>> futures = new ArrayList<>(tasks.size());
         for (Task task : tasks) {
             String branch = "task/" + iteration.getId() + "-" + String.format("%04d", task.getSeq());
@@ -206,8 +218,9 @@ public class DispatchService {
             run.setIterationId(iteration.getId());
             run.setState(RunState.RUNNING);
             run.setStartedDate(new Date());
-            // TODO(oma-deferred): worktreePath 由 WorkspaceManager + WorktreeManager.addWorktree 实际创建后回填
-            String worktreePath = null;
+            // Phase 5：worktreePath 以已解析的项目工作区路径为基底（各任务一子路径）；
+            // TODO(oma-deferred): 真实子 worktree 由 WorktreeManager.addWorktree 在此基底下创建后回填精确路径。
+            String worktreePath = workspacePath;
             run.setWorktreePath(worktreePath);
             OperateResultWithData<Run> savedRun = runService.save(run);
 
