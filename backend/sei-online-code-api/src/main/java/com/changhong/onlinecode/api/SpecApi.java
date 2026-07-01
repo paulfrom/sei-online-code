@@ -9,15 +9,20 @@ import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import java.util.List;
 
 /**
- * Spec 管理 API。契约 §3 端点 5/6。
+ * Spec 管理 API。契约 §3 端点 5/6 + Phase 4 §2 端点 30。
  *
  * <ul>
- *   <li>#5 GET  /spec/findOne  —— BaseEntityApi.findOne</li>
- *   <li>#6 POST /spec/confirm  —— 确认 Spec 并启动迭代</li>
+ *   <li>#5  GET  /spec/findOne       —— BaseEntityApi.findOne</li>
+ *   <li>#6  POST /spec/confirm       —— 确认 Spec 并启动迭代</li>
+ *   <li>#30 GET  /spec/findByProject —— 项目的 Spec 版本历史（version 升序）</li>
  * </ul>
  *
  * @author sei-online-code
@@ -31,4 +36,8 @@ public interface SpecApi extends BaseEntityApi<SpecDto> {
     @PostMapping(path = "confirm", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "确认 Spec", description = "确认 Spec 后启动迭代，项目状态流转至 DISPATCHING")
     ResultData<IterationDto> confirm(@RequestBody @Valid ConfirmSpecRequest request);
+
+    @GetMapping(path = "findByProject")
+    @Operation(summary = "Spec 版本历史", description = "返回项目的 Spec 版本历史，按 version 升序（可 diff 的不可变历史）")
+    ResultData<List<SpecDto>> findByProject(@RequestParam("projectId") String projectId);
 }

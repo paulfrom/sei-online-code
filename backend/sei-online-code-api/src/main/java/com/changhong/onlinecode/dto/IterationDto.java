@@ -25,6 +25,15 @@ public class IterationDto extends BaseEntityDto {
     @Schema(description = "Spec 版本号")
     private Integer specVersion;
 
+    @Schema(description = "项目内 1 起的 Build Loop 回合序号", example = "2")
+    private Integer round;
+
+    @Schema(description = "本回合精炼自的上一回合迭代 id；第 1 回合为 null", example = "ITER0001")
+    private String parentIterationId;
+
+    @Schema(description = "进入本回合时用户提交的优化诉求；第 1 回合为 null", example = "把库存列表加上导出按钮")
+    private String feedback;
+
     @Schema(description = "本回合生命周期状态", example = "PREVIEW")
     private LifecycleState state;
 
@@ -33,6 +42,9 @@ public class IterationDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
+
+    @Schema(description = "终态落定时间；未终结为 null")
+    private Date finishedDate;
 
     public String getProjectId() {
         return projectId;
@@ -58,6 +70,30 @@ public class IterationDto extends BaseEntityDto {
         this.specVersion = specVersion;
     }
 
+    public Integer getRound() {
+        return round;
+    }
+
+    public void setRound(Integer round) {
+        this.round = round;
+    }
+
+    public String getParentIterationId() {
+        return parentIterationId;
+    }
+
+    public void setParentIterationId(String parentIterationId) {
+        this.parentIterationId = parentIterationId;
+    }
+
+    public String getFeedback() {
+        return feedback;
+    }
+
+    public void setFeedback(String feedback) {
+        this.feedback = feedback;
+    }
+
     public LifecycleState getState() {
         return state;
     }
@@ -80,5 +116,13 @@ public class IterationDto extends BaseEntityDto {
 
     public void setCreatedDate(Date createdDate) {
         this.createdDate = createdDate;
+    }
+
+    public Date getFinishedDate() {
+        return finishedDate;
+    }
+
+    public void setFinishedDate(Date finishedDate) {
+        this.finishedDate = finishedDate;
     }
 }

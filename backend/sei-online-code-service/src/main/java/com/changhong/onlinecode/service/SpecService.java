@@ -88,4 +88,35 @@ public class SpecService extends BaseEntityService<Spec> {
         }
         return specs.get(0).getVersion() + 1;
     }
+
+    /**
+     * 增量精炼下一个 Spec 版本（Phase 4 §1 反馈再入的 Requirement Agent 接入点）。
+     *
+     * <p>不修改任何既有版本（既有版本不可变，构成可 diff 历史）；产出一个 SPEC_REVIEW 态、
+     * version = prior+1 的新 Spec。feedback 作为需求 Agent 的增量诉求 seed。</p>
+     *
+     * @param projectId 项目 id
+     * @param feedback  本回合优化诉求（Requirement Agent 增量输入）
+     * @return 写操作结果（携带新版本 Spec）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<Spec> refineNextVersion(String projectId, String feedback) {
+        Spec spec = new Spec();
+        spec.setProjectId(projectId);
+        spec.setVersion(nextVersion(projectId));
+        spec.setState(SpecState.SPEC_REVIEW);
+        // TODO(oma-deferred): 接入 Requirement Agent 后基于 prior 版本 + feedback 增量填充
+        //   pages/components/entities/apiContract；本轮仅做版本递增 + 状态编织。
+        return super.save(spec);
+    }
+
+    /**
+     * 项目的 Spec 版本历史，按 version 升序（ep #30，可 diff 的不可变历史）。
+     *
+     * @param projectId 项目 id
+     * @return Spec 列表（version 升序）
+     */
+    public List<Spec> findByProject(String projectId) {
+        return dao.findByProjectIdOrderByVersionAsc(projectId);
+    }
 }

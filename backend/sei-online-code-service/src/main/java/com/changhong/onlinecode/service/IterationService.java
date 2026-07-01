@@ -69,6 +69,8 @@ public class IterationService extends BaseEntityService<Iteration> {
         iteration.setProjectId(spec.getProjectId());
         iteration.setSpecId(specId);
         iteration.setSpecVersion(spec.getVersion());
+        // 首个回合：round=1，无父回合（Phase 4 §1.1 时间线链根）
+        iteration.setRound(1);
         iteration.setState(LifecycleState.DISPATCHING);
         OperateResultWithData<Iteration> saved = super.save(iteration);
         if (saved.notSuccessful()) {

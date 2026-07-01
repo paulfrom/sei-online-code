@@ -1,12 +1,16 @@
 package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.ProjectApi;
+import com.changhong.onlinecode.dto.IterationDto;
 import com.changhong.onlinecode.dto.ProjectDto;
 import com.changhong.onlinecode.dto.ProjectStateDto;
 import com.changhong.onlinecode.dto.SpecDto;
+import com.changhong.onlinecode.dto.request.OptimizeProjectRequest;
 import com.changhong.onlinecode.dto.request.RefineSpecRequest;
+import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
+import com.changhong.onlinecode.service.BuildLoopService;
 import com.changhong.onlinecode.service.ProjectService;
 import com.changhong.onlinecode.service.SpecService;
 import com.changhong.sei.core.controller.BaseEntityController;
@@ -34,10 +38,14 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
 
     private final ProjectService service;
     private final SpecService specService;
+    private final BuildLoopService buildLoopService;
 
-    public ProjectController(ProjectService service, SpecService specService) {
+    public ProjectController(ProjectService service,
+                            SpecService specService,
+                            BuildLoopService buildLoopService) {
         this.service = service;
         this.specService = specService;
+        this.buildLoopService = buildLoopService;
     }
 
     @Override
@@ -57,6 +65,16 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
             return ResultData.fail(result.getMessage());
         }
         return ResultData.success(convertSpecToDto(result.getData()));
+    }
+
+    @Override
+    public ResultData<IterationDto> optimize(OptimizeProjectRequest request) {
+        OperateResultWithData<Iteration> result =
+                buildLoopService.optimize(request.getProjectId(), request.getFeedback());
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(convertIterationToDto(result.getData()));
     }
 
     @Override
@@ -86,6 +104,28 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
         dto.setEntities(spec.getEntities());
         dto.setApiContract(spec.getApiContract());
         dto.setCreatedDate(spec.getCreatedDate());
+        return dto;
+    }
+
+    /**
+     * Iteration 实体 → DTO。Iteration 属另一聚合，独立映射以携带 Phase 4 回合溯源字段。
+     *
+     * @param iteration 迭代实体
+     * @return IterationDto
+     */
+    private IterationDto convertIterationToDto(Iteration iteration) {
+        IterationDto dto = new IterationDto();
+        dto.setId(iteration.getId());
+        dto.setProjectId(iteration.getProjectId());
+        dto.setSpecId(iteration.getSpecId());
+        dto.setSpecVersion(iteration.getSpecVersion());
+        dto.setRound(iteration.getRound());
+        dto.setParentIterationId(iteration.getParentIterationId());
+        dto.setFeedback(iteration.getFeedback());
+        dto.setState(iteration.getState());
+        dto.setPreviewUrl(iteration.getPreviewUrl());
+        dto.setCreatedDate(iteration.getCreatedDate());
+        dto.setFinishedDate(iteration.getFinishedDate());
         return dto;
     }
 }

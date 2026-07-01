@@ -17,8 +17,11 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 /**
- * Spec 管理控制器。实现 {@link SpecApi}，契约 §3 端点 5/6。
+ * Spec 管理控制器。实现 {@link SpecApi}，契约 §3 端点 5/6 + Phase 4 §2 端点 30。
  *
  * @author sei-online-code
  */
@@ -50,8 +53,16 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
         return ResultData.success(convertIterationToDto(result.getData()));
     }
 
+    @Override
+    public ResultData<List<SpecDto>> findByProject(String projectId) {
+        List<SpecDto> dtos = service.findByProject(projectId).stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+        return ResultData.success(dtos);
+    }
+
     /**
-     * Iteration 实体 → DTO。Iteration 属另一聚合，独立映射。
+     * Iteration 实体 → DTO。Iteration 属另一聚合，独立映射（含 Phase 4 回合溯源字段）。
      *
      * @param iteration 迭代实体
      * @return IterationDto
@@ -62,9 +73,13 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
         dto.setProjectId(iteration.getProjectId());
         dto.setSpecId(iteration.getSpecId());
         dto.setSpecVersion(iteration.getSpecVersion());
+        dto.setRound(iteration.getRound());
+        dto.setParentIterationId(iteration.getParentIterationId());
+        dto.setFeedback(iteration.getFeedback());
         dto.setState(iteration.getState());
         dto.setPreviewUrl(iteration.getPreviewUrl());
         dto.setCreatedDate(iteration.getCreatedDate());
+        dto.setFinishedDate(iteration.getFinishedDate());
         return dto;
     }
 }

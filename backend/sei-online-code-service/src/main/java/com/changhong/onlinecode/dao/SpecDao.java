@@ -21,4 +21,12 @@ public interface SpecDao extends BaseEntityDao<Spec> {
      * @return Spec 列表
      */
     List<Spec> findByProjectIdOrderByVersionDesc(String projectId);
+
+    /**
+     * 按项目 id 查询 Spec，版本升序（Spec 版本历史，ep #30）。
+     *
+     * @param projectId 项目 id
+     * @return Spec 列表
+     */
+    List<Spec> findByProjectIdOrderByVersionAsc(String projectId);
 }

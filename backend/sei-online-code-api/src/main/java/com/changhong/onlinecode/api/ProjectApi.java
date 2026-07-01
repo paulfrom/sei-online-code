@@ -1,8 +1,10 @@
 package com.changhong.onlinecode.api;
 
+import com.changhong.onlinecode.dto.IterationDto;
 import com.changhong.onlinecode.dto.ProjectDto;
 import com.changhong.onlinecode.dto.ProjectStateDto;
 import com.changhong.onlinecode.dto.SpecDto;
+import com.changhong.onlinecode.dto.request.OptimizeProjectRequest;
 import com.changhong.onlinecode.dto.request.RefineSpecRequest;
 import com.changhong.sei.core.api.BaseEntityApi;
 import com.changhong.sei.core.api.FindByPageApi;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  *   <li>#3 POST /project/findByPage  —— FindByPageApi.findByPage</li>
  *   <li>#4 POST /project/refineSpec  —— 精炼 Spec</li>
  *   <li>#9 GET  /project/state       —— 轮询生命周期</li>
+ *   <li>#26 POST /project/optimize   —— 反馈再入：增量更新 Spec → 新版本 + 新回合迭代</li>
  * </ul>
  *
  * @author sei-online-code
@@ -38,6 +41,10 @@ public interface ProjectApi extends BaseEntityApi<ProjectDto>, FindByPageApi<Pro
     @PostMapping(path = "refineSpec", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "精炼 Spec", description = "Requirement Agent：将 Project Design 精炼为 Spec，状态流转至 SPEC_REVIEW")
     ResultData<SpecDto> refineSpec(@RequestBody @Valid RefineSpecRequest request);
+
+    @PostMapping(path = "optimize", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "优化项目", description = "反馈再入：从 PREVIEW 携带 feedback，需求 Agent 增量更新 Spec → 新版本，开启新回合迭代（round+1），状态 → SPEC_REVIEW")
+    ResultData<IterationDto> optimize(@RequestBody @Valid OptimizeProjectRequest request);
 
     @GetMapping(path = "state")
     @Operation(summary = "轮询项目生命周期", description = "返回项目当前生命周期状态与当前迭代 id")
