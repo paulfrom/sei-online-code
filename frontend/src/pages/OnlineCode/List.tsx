@@ -36,15 +36,11 @@ const useStyles = createStyles(({ css }) => ({
   `,
 }));
 
+/** states routed to the dispatch (concurrency) view */
+const DISPATCH_STATES: LifecycleState[] = ['DISPATCHING', 'DEVELOPING', 'MERGING'];
+
 /** states from which the user should go straight to the preview page */
-const PREVIEW_STATES: LifecycleState[] = [
-  'DISPATCHING',
-  'DEVELOPING',
-  'MERGING',
-  'DEPLOYING',
-  'PREVIEW',
-  'ACCEPTED',
-];
+const PREVIEW_STATES: LifecycleState[] = ['DEPLOYING', 'PREVIEW', 'ACCEPTED'];
 
 const ProjectList: React.FC = () => {
   const { styles } = useStyles();
@@ -70,6 +66,10 @@ const ProjectList: React.FC = () => {
   };
 
   const handleRowAction = (record: ProjectDto) => {
+    if (DISPATCH_STATES.includes(record.state) && record.currentIterationId) {
+      history.push(`/online-code/dispatch?id=${record.id}`);
+      return;
+    }
     if (PREVIEW_STATES.includes(record.state) && record.currentIterationId) {
       history.push(`/online-code/preview?id=${record.id}`);
       return;
@@ -80,6 +80,7 @@ const ProjectList: React.FC = () => {
   const rowActionLabel = (record: ProjectDto): string => {
     if (record.state === 'DRAFTING') return '解析需求';
     if (record.state === 'SPEC_REVIEW') return '评审 Spec';
+    if (DISPATCH_STATES.includes(record.state)) return '查看派发';
     if (PREVIEW_STATES.includes(record.state)) return '查看预览';
     return '查看';
   };

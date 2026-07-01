@@ -94,8 +94,43 @@ export interface IterationDto {
   createdDate: string;
 }
 
+/** Task-level state tokens — verbatim per contract §1.1 / §4. */
+export type TaskState = 'PENDING' | 'RUNNING' | 'MERGING' | 'MERGED' | 'FAILED' | 'CANCELLED';
+
+/** Run-level state tokens — verbatim per contract §1.2 / §4. */
+export type RunState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+/** TaskDto — one non-overlapping unit of work cut by the Dispatch Agent (contract §1.1). */
+export interface TaskDto {
+  id: string;
+  iterationId: string;
+  title: string;
+  description: string;
+  fileScope: string[];
+  assignedAgent: string;
+  state: TaskState;
+  worktreeBranch: string | null;
+  seq: number;
+  createdDate: string;
+}
+
+/** RunDto — one ClaudeRunner execution of a Task in its worktree (contract §1.2). */
+export interface RunDto {
+  id: string;
+  taskId: string;
+  iterationId: string;
+  state: RunState;
+  worktreePath: string;
+  exitCode: number | null;
+  startedDate: string;
+  finishedDate: string | null;
+}
+
 /** Store URL used directly by ExtTable remotePaging (contract ep #3). */
 export const PROJECT_FIND_BY_PAGE_URL = `${API}/project/findByPage`;
+
+/** Store URL for the task list ExtTable (contract ep #11). */
+export const TASK_FIND_BY_PAGE_URL = `${API}/task/findByPage`;
 
 /** #1 create project */
 export async function saveProject(params: {
@@ -140,4 +175,29 @@ export async function findProjectState(
   id: string,
 ): Promise<ResultData<{ state: LifecycleState; iterationId: string | null }>> {
   return request({ url: `${API}/project/state`, method: 'GET', params: { id } });
+}
+
+/** #10 dispatch: confirmed Spec → disjoint tasks (state DISPATCHING→DEVELOPING) */
+export async function dispatchIteration(iterationId: string): Promise<ResultData<TaskDto[]>> {
+  return request({ url: `${API}/iteration/dispatch`, method: 'POST', data: { iterationId } });
+}
+
+/** #12 load one task */
+export async function findOneTask(id: string): Promise<ResultData<TaskDto>> {
+  return request({ url: `${API}/task/findOne`, method: 'GET', params: { id } });
+}
+
+/** #13 list runs (filter by iterationId / taskId) */
+export async function findRunsByPage(search: Search): Promise<ResultData<PageResult<RunDto>>> {
+  return request({ url: `${API}/run/findByPage`, method: 'POST', data: search });
+}
+
+/** #14 poll one run's state / exitCode */
+export async function findOneRun(id: string): Promise<ResultData<RunDto>> {
+  return request({ url: `${API}/run/findOne`, method: 'GET', params: { id } });
+}
+
+/** #15 merge all task worktrees back (state MERGING→DEPLOYING) */
+export async function mergeIteration(iterationId: string): Promise<ResultData<IterationDto>> {
+  return request({ url: `${API}/iteration/merge`, method: 'POST', data: { iterationId } });
 }

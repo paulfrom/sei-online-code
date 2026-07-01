@@ -61,8 +61,44 @@ export interface IterationDto {
   state: LifecycleState;
   previewUrl: string | null;
   createdDate: string;
-  /** internal: epoch ms when deploy was triggered (drives the polling flip) */
+  /** internal: epoch ms when merge was triggered (drives MERGING→DEPLOYING flip) */
+  _mergeAt?: number;
+  /** internal: epoch ms when deploy was triggered (drives DEPLOYING→PREVIEW flip) */
   _deployAt?: number;
+}
+
+/** Task-level state tokens — verbatim per contract §1.1 / §4. */
+export type TaskState = 'PENDING' | 'RUNNING' | 'MERGING' | 'MERGED' | 'FAILED' | 'CANCELLED';
+
+/** Run-level state tokens — verbatim per contract §1.2 / §4. */
+export type RunState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+/** TaskDto — one non-overlapping unit of work cut by the Dispatch Agent (contract §1.1). */
+export interface TaskDto {
+  id: string;
+  iterationId: string;
+  title: string;
+  description: string;
+  fileScope: string[];
+  assignedAgent: string;
+  state: TaskState;
+  worktreeBranch: string | null;
+  seq: number;
+  createdDate: string;
+}
+
+/** RunDto — one ClaudeRunner execution of a Task in its worktree (contract §1.2). */
+export interface RunDto {
+  id: string;
+  taskId: string;
+  iterationId: string;
+  state: RunState;
+  worktreePath: string;
+  exitCode: number | null;
+  startedDate: string;
+  finishedDate: string | null;
+  /** internal: epoch ms when this run started (drives RUNNING→SUCCEEDED flip) */
+  _startAt?: number;
 }
 
 const now = () => new Date().toISOString().slice(0, 19);
@@ -73,6 +109,12 @@ const nextId = (prefix: string) => `${prefix}${String(seq++).padStart(4, '0')}`;
 /** simulated deploy duration in ms — findOne flips DEPLOYING → PREVIEW after this */
 export const DEPLOY_DURATION_MS = 4000;
 
+/** simulated per-run duration in ms — readRun flips RUNNING → SUCCEEDED after this */
+export const RUN_DURATION_MS = 3000;
+
+/** simulated merge duration in ms — readIteration flips MERGING → DEPLOYING after this */
+export const MERGE_DURATION_MS = 2000;
+
 /** per-project static preview port base (contract §2.3 example uses 41001) */
 let previewPort = 41001;
 
@@ -80,12 +122,16 @@ interface Db {
   projects: Map<string, ProjectDto>;
   specs: Map<string, SpecDto>;
   iterations: Map<string, IterationDto>;
+  tasks: Map<string, TaskDto>;
+  runs: Map<string, RunDto>;
 }
 
 export const db: Db = {
   projects: new Map(),
   specs: new Map(),
   iterations: new Map(),
+  tasks: new Map(),
+  runs: new Map(),
 };
 
 /** Build a demo Spec structure from a project's design prose. */
@@ -216,12 +262,32 @@ export function deployIteration(iterationId: string): IterationDto | null {
 
 /**
  * Read an iteration, advancing DEPLOYING → PREVIEW once the simulated build
- * duration has elapsed. This is the polling fallback (contract §3.1 / F2):
- * the client polls findOne until state === 'PREVIEW'.
+ * duration has elapsed, and MERGING → DEPLOYING once the merge duration has
+ * elapsed. This is the polling fallback (contract §3.1 / F2 / F12).
  */
 export function readIteration(iterationId: string): IterationDto | null {
   const iteration = db.iterations.get(iterationId);
   if (!iteration) return null;
+  // MERGING → DEPLOYING (ep #15 completes async; contract §4)
+  if (
+    iteration.state === 'MERGING' &&
+    iteration._mergeAt &&
+    Date.now() - iteration._mergeAt >= MERGE_DURATION_MS
+  ) {
+    iteration.state = 'DEPLOYING';
+    iteration._deployAt = Date.now();
+    // all tasks finish merging back
+    Array.from(db.tasks.values())
+      .filter((t) => t.iterationId === iterationId)
+      .forEach((t) => {
+        if (t.state === 'MERGING') t.state = 'MERGED';
+      });
+    const project = db.projects.get(iteration.projectId);
+    if (project) {
+      project.state = 'DEPLOYING';
+      project.lastEditedDate = now();
+    }
+  }
   if (
     iteration.state === 'DEPLOYING' &&
     iteration._deployAt &&
@@ -234,6 +300,123 @@ export function readIteration(iterationId: string): IterationDto | null {
       project.state = 'PREVIEW';
       project.lastEditedDate = now();
     }
+  }
+  return iteration;
+}
+
+/**
+ * Dispatch Agent (contract ep #10): cut the confirmed Spec into ≥2 disjoint
+ * tasks by fileScope, spawn one parallel Run per task (state RUNNING), and move
+ * the project DISPATCHING → DEVELOPING. Idempotent: returns existing tasks if
+ * already dispatched.
+ */
+export function dispatchIteration(iterationId: string): TaskDto[] | null {
+  const iteration = db.iterations.get(iterationId);
+  if (!iteration) return null;
+  const project = db.projects.get(iteration.projectId);
+  if (!project) return null;
+
+  const existing = tasksOf(iterationId);
+  if (existing.length) return existing;
+
+  // Cut disjoint tasks from the spec's pages (fallback to a 2-task default).
+  const spec = db.specs.get(iteration.specId);
+  const pages = spec?.pages?.length
+    ? spec.pages
+    : [
+        { key: 'list', title: '列表页', route: '/list', description: '分页列表' },
+        { key: 'detail', title: '详情页', route: '/detail', description: '详情视图' },
+      ];
+
+  const tasks: TaskDto[] = pages.map((page, idx) => {
+    const seq = idx + 1;
+    const iterNum = iterationId.replace(/\D/g, '').slice(-4) || '0001';
+    const task: TaskDto = {
+      id: nextId('TASK'),
+      iterationId,
+      title: page.title,
+      description: `实现 ${page.route} 页面 + 对应 mock`,
+      fileScope: [`src/pages${page.route}.tsx`, `src/mocks/${page.key}.ts`],
+      assignedAgent: 'dev-agent',
+      state: 'RUNNING',
+      worktreeBranch: `task/${iterNum}-${String(seq).padStart(4, '0')}`,
+      seq,
+      createdDate: now(),
+    };
+    db.tasks.set(task.id, task);
+
+    // one parallel Run per task, starts RUNNING
+    const run: RunDto = {
+      id: nextId('RUN'),
+      taskId: task.id,
+      iterationId,
+      state: 'RUNNING',
+      worktreePath: `/tmp/rapid-app-dev/${project.id}/wt-${task.id}`,
+      exitCode: null,
+      startedDate: now(),
+      finishedDate: null,
+      _startAt: Date.now(),
+    };
+    db.runs.set(run.id, run);
+    return task;
+  });
+
+  iteration.state = 'DEVELOPING';
+  project.state = 'DEVELOPING';
+  project.lastEditedDate = now();
+  return tasks;
+}
+
+/** All tasks of an iteration, ordered by dispatch seq. */
+export function tasksOf(iterationId: string): TaskDto[] {
+  return Array.from(db.tasks.values())
+    .filter((t) => t.iterationId === iterationId)
+    .sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * Read a run, advancing RUNNING → SUCCEEDED once the simulated run duration has
+ * elapsed (also marks its task's dev work done, keeping the task RUNNING until
+ * merge). This is the per-run polling fallback for the WS run-log (contract §3).
+ */
+export function readRun(runId: string): RunDto | null {
+  const run = db.runs.get(runId);
+  if (!run) return null;
+  if (run.state === 'RUNNING' && run._startAt && Date.now() - run._startAt >= RUN_DURATION_MS) {
+    run.state = 'SUCCEEDED';
+    run.exitCode = 0;
+    run.finishedDate = now();
+  }
+  return run;
+}
+
+/** All runs of an iteration (optionally scoped to a task), advancing each. */
+export function runsOf(iterationId: string, taskId?: string): RunDto[] {
+  return Array.from(db.runs.values())
+    .filter((r) => r.iterationId === iterationId && (!taskId || r.taskId === taskId))
+    .map((r) => readRun(r.id) as RunDto)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * Merge all task worktrees back (contract ep #15): move tasks RUNNING → MERGING,
+ * project DEVELOPING → MERGING; readIteration then advances MERGING → DEPLOYING
+ * asynchronously. Returns the iteration.
+ */
+export function mergeIteration(iterationId: string): IterationDto | null {
+  const iteration = db.iterations.get(iterationId);
+  if (!iteration) return null;
+  const project = db.projects.get(iteration.projectId);
+  // ensure runs have advanced before merging
+  runsOf(iterationId);
+  tasksOf(iterationId).forEach((t) => {
+    if (t.state === 'RUNNING') t.state = 'MERGING';
+  });
+  iteration.state = 'MERGING';
+  iteration._mergeAt = Date.now();
+  if (project) {
+    project.state = 'MERGING';
+    project.lastEditedDate = now();
   }
   return iteration;
 }

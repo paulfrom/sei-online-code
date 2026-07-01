@@ -5,6 +5,7 @@ export default {
   'menu.onlineCode': 'Online Code',
   'menu.onlineCodeList': 'Projects',
   'menu.onlineCodeSpec': 'Spec Review',
+  'menu.onlineCodeDispatch': 'Dispatch',
   'menu.onlineCodePreview': 'Preview',
   'menu.reporting': 'Regulatory Reporting',
   'menu.reportingPlan': 'Reporting Plan',

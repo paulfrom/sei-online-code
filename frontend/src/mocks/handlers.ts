@@ -10,9 +10,14 @@ import {
   createProject,
   db,
   deployIteration,
+  dispatchIteration,
+  mergeIteration,
   readIteration,
+  readRun,
   refineSpec,
+  runsOf,
   seed,
+  tasksOf,
 } from './db';
 
 seed();
@@ -143,5 +148,56 @@ export const handlers = [
     // advance iteration state if a deploy is in flight so state stays coherent
     if (project.currentIterationId) readIteration(project.currentIterationId);
     return ok({ state: project.state, iterationId: project.currentIterationId });
+  }),
+
+  // #10 dispatch: confirmed Spec → disjoint tasks (state DISPATCHING→DEVELOPING)
+  http.post('*/api/iteration/dispatch', async ({ request }) => {
+    const body = (await request.json()) as { iterationId?: string };
+    const tasks = dispatchIteration(body?.iterationId ?? '');
+    return tasks ? ok(tasks, `已派发 ${tasks.length} 个任务`) : fail('iteration not found');
+  }),
+
+  // #11 list tasks (Search body → PageResult), filter by iterationId
+  http.post('*/api/task/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const iterationId = search?.filters?.find((f) => f.fieldName === 'iterationId')?.value;
+    let rows = Array.from(db.tasks.values());
+    if (iterationId) rows = rows.filter((t) => t.iterationId === String(iterationId));
+    rows = rows.sort((a, b) => a.seq - b.seq);
+    return ok(paginate(rows, search));
+  }),
+
+  // #12 load one task
+  http.get('*/api/task/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const task = db.tasks.get(id);
+    return task ? ok(task) : fail(`task ${id} not found`);
+  }),
+
+  // #13 list runs (Search body → PageResult), filter by iterationId / taskId
+  http.post('*/api/run/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const iterationId = search?.filters?.find((f) => f.fieldName === 'iterationId')?.value;
+    const taskId = search?.filters?.find((f) => f.fieldName === 'taskId')?.value;
+    // advance runs for the scoped iteration so states stay coherent while polling
+    if (iterationId) runsOf(String(iterationId), taskId ? String(taskId) : undefined);
+    let rows = Array.from(db.runs.values());
+    if (iterationId) rows = rows.filter((r) => r.iterationId === String(iterationId));
+    if (taskId) rows = rows.filter((r) => r.taskId === String(taskId));
+    return ok(paginate(rows, search));
+  }),
+
+  // #14 poll one run's state / exitCode
+  http.get('*/api/run/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const run = readRun(id);
+    return run ? ok(run) : fail(`run ${id} not found`);
+  }),
+
+  // #15 merge all task worktrees back (state MERGING→DEPLOYING)
+  http.post('*/api/iteration/merge', async ({ request }) => {
+    const body = (await request.json()) as { iterationId?: string };
+    const iteration = mergeIteration(body?.iterationId ?? '');
+    return iteration ? ok(iteration, '开始合并') : fail('iteration not found');
   }),
 ];

@@ -6,6 +6,7 @@ export default {
   'menu.onlineCode': '在线开发',
   'menu.onlineCodeList': '项目列表',
   'menu.onlineCodeSpec': 'Spec 评审',
+  'menu.onlineCodeDispatch': '任务派发',
   'menu.onlineCodePreview': '预览',
   'menu.reporting': '监管报送',
   'menu.reportingPlan': '填报计划',

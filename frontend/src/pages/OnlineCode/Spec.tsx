@@ -83,7 +83,7 @@ const SpecReview: React.FC = () => {
         return;
       }
       message.success('Spec 已确认，迭代已启动');
-      history.push(`/online-code/preview?id=${spec.projectId}`);
+      history.push(`/online-code/dispatch?id=${spec.projectId}`);
     } finally {
       setConfirming(false);
     }
