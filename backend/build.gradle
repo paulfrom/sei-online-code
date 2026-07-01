@@ -67,6 +67,17 @@ subprojects {
         testAnnotationProcessor "org.projectlombok:lombok:$lombokVersion"
     }
 
+    // 依赖版本收敛：sei-util 通过动态版本范围（commons-io:2.+、commons-beanutils:1.+）
+    // 传递引入这两个组件，在当前镜像仓库环境下会被解析为“带时间戳的 SNAPSHOT”，
+    // 而对应的 SNAPSHOT jar 未被镜像仓库托管，导致依赖无法下载、编译中断。
+    // 这是仓库/环境问题（与业务代码无关），此处将其锁定到稳定的 Release 版本以保证可编译。
+    configurations.configureEach {
+        resolutionStrategy {
+            force 'commons-io:commons-io:2.16.1'
+            force 'commons-beanutils:commons-beanutils:1.9.4'
+        }
+    }
+
     bootJar { enabled = false}
 }
 
