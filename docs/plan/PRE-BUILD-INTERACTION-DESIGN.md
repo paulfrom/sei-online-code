@@ -203,14 +203,64 @@ CREATE INDEX idx_fd_project ON feature_design(project_id);
 
 异步运行结果通过现有 WS Hub（`/ws/run/{runId}`）推送，产物落库后前端按 P2 / P7 刷新。
 
-## 7. 异步执行与错误处理（复用现有机制）
+## 7. 智能体执行层
 
-- **异步运行**：规划 / 设计智能体运行复用现有 `ClaudeRunner` + WS Hub 模式，前端按 `runId` 订阅日志流。生成完成回调更新产物 `content` 并 `status=DRAFT`。
-- **失败态**：智能体运行失败 → 产物 `status=FAILED`，Project 视情况置 `FAILED`；前端展示失败原因 + "重试"按钮（等价重新生成，`modifyHint` 可空）。
+### 执行方式：Java spawn `claude` CLI（沿用现有机制）
+
+规划智能体 / 功能设计智能体 = **两个内置 agent 配置**（prompt + 绑定 skill），由现有 `ClaudeRunner`（ProcessBuilder spawn `claude`）执行，与 Phase 1–5 的执行层同构。不引入 Java AI 框架（Spring AI / LangChain4j）或 Node 中间层，避免第二套智能体写法。
+
+| 智能体 | 触发时机 | 输入 | 输出 |
+|---|---|---|---|
+| 规划智能体 | 新增项目 / 重新生成规划书（P1/P4） | 项目描述 + modifyHint | 规划书 JSON（§2 Plan 结构） |
+| 功能设计智能体 | 确认规划书后批量起 / 单个重新生成（P5/P9） | 规划书 + 某 feature outline + modifyHint | 该功能设计 JSON（§2 FeatureDesign 结构） |
+
+### 技术前提（本轮锁定）
+
+- `claude` CLI 运行于 **API key 模式**（非订阅登录）。并发只受 API 配额约束，无会话数限制。
+- 功能设计智能体**只产 JSON、不读 workspace / 不写代码文件**。因此**不需要 worktree 隔离**，进程可在平台临时目录运行。
+- 规划智能体同样只产 JSON，单进程运行。
+
+### 并发策略
+
+- **规划智能体**：单进程，不并发。同一项目同一时刻只允许一个规划运行（§7 并发约束）。
+- **功能设计智能体**：确认规划书后**并发批量生成**，复用 Phase 2 的 `CompletableFuture` fan-out 模式 + **有界信号量**限流。
+
+```
+// 伪代码：PlanService.confirm
+Semaphore permits = new Semaphore(MAX_CONCURRENT_FD);  // 如 4，可配
+List<CompletableFuture<Void>> futures = features.stream()
+    .map(f -> CompletableFuture.runAsync(() -> {
+        permits.acquire();
+        try {
+          String runId = claudeRunner.spawn(fdAgentConfig, promptFor(f));
+          // WS Hub 按 runId 推日志；完成后回调落库 content + status=DRAFT
+        } finally { permits.release(); }
+    }, executor))
+    .toList();
+```
+
+- **并发上限 `MAX_CONCURRENT_FD`**：可配置（默认 4），防 API 429 与单机资源耗尽。配额超限时 `claude` 进程的 stderr 捕获 429 → 该条 FeatureDesign 置 `FAILED`，不影响其他条；用户可对失败条单独重试（P9）。
+- **`runId` 区分多路流**：每个功能设计智能体一个 `runId`，WS `RunLogFrame` 已带 `runId`（Phase 2），前端按 `featureId` 关联展示各自的生成进度。
+
+### 与现有机制的关系
+
+| 现有机制 | 本流程复用方式 |
+|---|---|
+| `ClaudeRunner`（spawn `claude` + 流式 stdout/stderr） | 直接复用，规划/设计智能体各配一个 agentConfig |
+| WS Hub `/ws/run/{runId}` + `RunLogFrame` | 直接复用，前端按 runId 订阅 |
+| 内置 agent 配置体系（Phase 3 的 agent CRUD + skill 绑定） | 规划/设计智能体作为两个内置 agent 注册，prompt 里点名用哪个 skill |
+| 技能体系（SKILL.md + hash-lock + materialize） | 规划/设计智能体绑定的 skill 由平台预置（具体 skill 内容留给实施计划） |
+| Phase 2 `CompletableFuture` fan-out | 功能设计批量生成的并发骨架 |
+
+> 不复用 WorktreeManager：功能设计智能体不写代码文件，无需 git worktree 隔离。worktree 隔离在后续"执行编码"（P12 交现有 Dispatch）阶段才需要。
+
+## 8. 异步执行与错误处理
+
+- **失败态**：智能体运行失败（含 API 429、进程异常、JSON 解析失败）→ 产物 `status=FAILED`，Project 视情况置 `FAILED`；前端展示失败原因 + "重试"按钮（等价重新生成，`modifyHint` 可空）。批量生成中单条失败不影响其他条。
 - **并发约束**：同一项目同一时刻只允许一个规划运行；同一功能设计同时只允许一个设计运行。后端 Service 层用状态前置校验拦截（`GENERATING` 态拒绝再次发起）。
 - **版本回溯**：编辑 / 重生成保留历史版本（单表多行 + `is_latest`），规划书与每个功能设计各自独立版本链。
 
-## 8. 成功标准
+## 9. 成功标准
 
 - **输入**：项目描述字符串。
 - **输出**：用户走完"新增→规划书确认→各功能设计确认→执行编码"，全部产物落库且状态正确，"执行编码"成功把功能设计 `fileScope` 交给现有 Dispatch。
