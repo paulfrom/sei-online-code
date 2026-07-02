@@ -6,7 +6,7 @@ export default {
     pathRewrite: { '^/mocker.api': '' },
   },
   '/api-gateway/sei-online-code': {
-    target: 'http://127.0.0.1:8080',
+    target: 'http://127.0.0.1:8091',
     changeOrigin: true,
     secure: false,
     headers: {

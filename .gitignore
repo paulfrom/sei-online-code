@@ -60,3 +60,5 @@ SDH20260603003/
 .history/
 *.lock
 node_modules/
+### 本地启动专用配置（含明文数据库密码，禁止入库） ###
+backend/sei-online-code-service/local-config/
