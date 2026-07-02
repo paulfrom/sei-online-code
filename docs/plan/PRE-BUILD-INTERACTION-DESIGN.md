@@ -1,7 +1,7 @@
 # 编码前交互设计 — 规划书 + 功能设计（两层产物）
 
-> 状态：设计稿（待评审）。覆盖编码前的用户交互流程，止于"功能设计 → 现有 Dispatch"。
-> 不重做编码侧（Dispatch/Task/Run）。后端遵循 `eadp-backend`；前端遵循 `suid`。
+> 状态：设计稿（待评审）。覆盖编码前的用户交互流程，止于"功能设计 → 编码执行（FeatureDesignBuildService）"。
+不改动现有 Spec/DispatchService；编码执行由新增 FeatureDesignBuildService 承接。后端遵循 `eadp-backend`；前端遵循 `suid`。
 
 ## 1. 背景与定位
 
@@ -12,15 +12,17 @@
 - 用户可查看 / 修改 / 重新生成规划书
 - 用户确认规划书 → 针对规划书每个功能生成相应**功能设计**（状态：功能设计中）
 - 用户可对每个功能设计查看 / 修改 / 重新生成
-- 用户全部确认后点"执行编码" → 交现有 Dispatch 开始编码
+- 用户全部确认后点"执行编码" → FeatureDesignBuildService 起编码（功能设计=Task，不二次切分）
 
 ### 范围边界
 
-- 前置流程止于"功能设计 → 现有 Dispatch/Task/Run"，编码侧不动。
+- 前置流程止于"功能设计 → 编码执行"，编码执行由**新增 `FeatureDesignBuildService`** 承接（见下），不改动现有 Spec/DispatchService。
 - 功能设计粒度由规划智能体自定（份数与结构不预设）。
 - 修改 / 重新生成保留版本历史。
 - 规划与功能设计生成为异步智能体运行，进度 / 日志复用现有 WS Hub。
-- **功能设计 = Dispatch 输入单元**：P12 执行编码时，每份已确认的功能设计直接作为一个 Task 输入现有 Dispatch，其 `fileScope` 直接复用，Dispatch 不再二次切分。
+- **功能设计 = 编码执行单元（不二次切分）**：每份已确认的功能设计直接作为一个 `Task`（`fileScope` 直接复用），由 `FeatureDesignBuildService` 起一次 `ClaudeRunner` 运行，复用现有 `Run` / WS Hub，但**不走现有 `DispatchService`**（后者输入是 Spec 且会切分 Task，与本设计"功能设计即 Task、不二次切分"矛盾）。
+
+> 衔接决策：现有 `DispatchService` 输入是 Spec 并负责切分 Task，与本设计语义不符。故新增 `FeatureDesignBuildService`：功能设计 → 单个 `Task`（fileScope 复用）→ `ClaudeRunner.execute`（复用 `Run`/WS Hub）。现有 Spec/DispatchService 不改动，新旧两套编码入口并存（Spec 路径与 FeatureDesign 路径），由各自的 controller/service 边界隔离，互不引用。
 
 ## 2. 两层产物
 
@@ -52,7 +54,7 @@ content JSON:
   goal:       string,                // 该功能的用户故事
   design:     object,                // 页面/组件/交互/数据/接口契约片段（智能体按粒度填）
   acceptance: string[],              // 验收点
-  fileScope:  string[]               // 编码时触及的文件边界，最终交给 Dispatch
+  fileScope:  string[]               // 编码时触及的文件边界，最终交给 FeatureDesignBuildService
 }
 
 列:
@@ -65,7 +67,7 @@ content JSON:
 ### 项目状态 `ProjectState`（编码前部分，编码侧复用现有）
 
 ```
-DRAFTING → PLANNING → DESIGNING → READY_TO_BUILD → [交现有 Dispatch]
+DRAFTING → PLANNING → DESIGNING → READY_TO_BUILD → [FeatureDesignBuildService 编码]
                                                     （编码侧：DISPATCHING/DEVELOPING/...）
 任意阶段失败 → FAILED
 ```
@@ -153,9 +155,9 @@ UPDATE feature_design
 -- affected rows = 0 → 已在构建中，返回 409 拒绝
 ```
 
-- 抢占成功 → 交现有 Dispatch（功能设计 = Task 输入单元，`fileScope` 直接复用，不二次切分）。
+- 抢占成功 → 交 `FeatureDesignBuildService`（功能设计 = Task 输入单元，`fileScope` 直接复用，不二次切分）。
 - Run 回调按 `runId` → `feature_id` 定位行，更新 `build_status` 为 `BUILT`/`BUILD_FAILED`。
-- **跨 feature 不互斥**：不同 feature 可并行编码（受现有 Dispatch 的 worktree 隔离与全局并发上限约束，本设计不额外限制）。
+- **跨 feature 不互斥**：不同 feature 可并行编码（受现有 worktree 隔离与全局并发上限约束，本设计不额外限制）。
 
 ### 规划书 / 功能设计失效规则
 
@@ -176,7 +178,7 @@ UPDATE feature_design
                               │     ├─ 每行：查看 / 编辑 / 重新生成 / 确认
                               │     ├─[批量确认]
                               │     └─ 全部 CONFIRMED → [执行编码]亮起
-                              │            └─[执行编码] → 交现有 Dispatch
+                              │            └─[执行编码] → FeatureDesignBuildService
                               │
                               └─ 运行日志 Tab：复用现有 WS 日志流（规划 / 设计生成进度）
 ```
@@ -194,8 +196,8 @@ UPDATE feature_design
 | 编辑功能设计 | 直接改 content | 该条=DRAFT |
 | 重新生成功能设计 | 带 modifyHint 起设计智能体 | version+1；该条=GENERATING→DRAFT |
 | 确认功能设计（单 / 批） | — | 该条=CONFIRMED；全部 CONFIRMED → Project=READY_TO_BUILD |
-| 执行编码（单 feature / 批量） | 条件 UPDATE 抢占 build_status | `design=CONFIRMED` 且 `build_status≠BUILDING` → `BUILDING`，交现有 Dispatch；同 feature 已 BUILDING → 409 拒绝 |
-| 编码完成（Run 回调） | Dispatch/Run 回调 | `BUILDING` → `BUILT`（成功）/ `BUILD_FAILED`（失败） |
+| 执行编码（单 feature / 批量） | 条件 UPDATE 抢占 build_status | `design=CONFIRMED` 且 `build_status≠BUILDING` → `BUILDING`，交 `FeatureDesignBuildService`；同 feature 已 BUILDING → 409 拒绝 |
+| 编码完成（Run 回调） | `FeatureDesignBuildService`/Run 回调 | `BUILDING` → `BUILT`（成功）/ `BUILD_FAILED`（失败） |
 | 执行后修改功能设计 | 编辑(P8)/重生(P9) | `design`→DRAFT/STALE；`build_status`∈{BUILT,BUILD_FAILED}→`STALE`；BUILDING 时拒绝 |
 | 重新执行（重跑 / 重试） | 重新确认后 P12a，或 BUILT 直接 P12a | `STALE`/`BUILT`/`BUILD_FAILED` → `BUILDING` |
 
@@ -263,8 +265,8 @@ CREATE INDEX idx_fd_project ON feature_design(project_id);
 | P9 | POST | `/api/featureDesign/{id}/regenerate` | 重生，body: `{modifyHint?}`；version+1，=GENERATING 起运行；`BUILDING` 时 409 拒绝；完成后 `build_status`→`STALE`（若原 BUILT/BUILD_FAILED） |
 | P10 | POST | `/api/featureDesign/confirm` | 批量确认，body: `{ids:[]}`；逐条→CONFIRMED；全部 CONFIRMED 则 Project=READY_TO_BUILD |
 | P11 | POST | `/api/featureDesign/{id}/confirm` | 单条确认（P10 的便捷版） |
-| P12 | POST | `/api/project/{projectId}/build` | 批量执行编码；对每条 `CONFIRMED` 且 `build_status≠BUILDING` 的 feature 条件 UPDATE 抢占→交 Dispatch；已在 BUILDING 的跳过并返回 |
-| P12a | POST | `/api/featureDesign/{id}/build` | 单 feature 执行编码；校验 `design=CONFIRMED` 且 `build_status≠BUILDING`，条件 UPDATE 抢占，交现有 Dispatch，返回 `{runId}` |
+| P12 | POST | `/api/project/{projectId}/build` | 批量执行编码；对每条 `CONFIRMED` 且 `build_status≠BUILDING` 的 feature 条件 UPDATE 抢占→交 `FeatureDesignBuildService`；已在 BUILDING 的跳过并返回 |
+| P12a | POST | `/api/featureDesign/{id}/build` | 单 feature 执行编码；校验 `design=CONFIRMED` 且 `build_status≠BUILDING`，条件 UPDATE 抢占，交 `FeatureDesignBuildService`，返回 `{runId}` |
 | P13 | GET | `/api/plan/{projectId}/history` | 规划书历史版本列表 |
 | P14 | GET | `/api/featureDesign/{id}/history` | 功能设计历史版本列表 |
 
@@ -288,7 +290,7 @@ CREATE INDEX idx_fd_project ON feature_design(project_id);
 | 内置 agent | 绑定 skill | 职责（agent instructions） | skill 内容（SKILL.md，编码实现） |
 |---|---|---|---|
 | `planning-agent` | `project-planning` | 接收项目描述 + modifyHint，产出规划书 JSON | 规划方法论：如何从描述拆功能项、分配 `featureId`、估技术假设、列 nonGoals；**强制输出 §2 Plan JSON 骨架**（`summary/techAssumptions/features[]/nonGoals`），禁止预估 `fileScope` |
-| `feature-design-agent` | `feature-design` | 接收规划书 + 某 feature outline + modifyHint，产出该功能设计 JSON | 功能设计方法论：从 outline 展开 `goal/design/acceptance[]/fileScope`，粒度自定但骨架固定；`fileScope` 须遵循模板文件边界约定（供下游 Dispatch 复用） |
+| `feature-design-agent` | `feature-design` | 接收规划书 + 某 feature outline + modifyHint，产出该功能设计 JSON | 功能设计方法论：从 outline 展开 `goal/design/acceptance[]/fileScope`，粒度自定但骨架固定；`fileScope` 须遵循模板文件边界约定（供下游 FeatureDesignBuildService 复用） |
 
 实现要点：
 - 两个 skill 作为 **LOCAL seed skill**（与 Phase 3 的 `suid`/`eadp-backend` seed 同模式），SKILL.md 内容由平台源码编码实现，启动时 seed 入库并 hash-lock。
@@ -334,7 +336,7 @@ List<CompletableFuture<Void>> futures = features.stream()
 | 技能体系（SKILL.md + hash-lock + materialize） | 规划/设计智能体绑定 `project-planning`/`feature-design` 两个内置 seed skill，内容由平台编码实现（见 §7 内置 agent 与 skill） |
 | Phase 2 `CompletableFuture` fan-out | 功能设计批量生成的并发骨架 |
 
-> 不复用 WorktreeManager：功能设计智能体不写代码文件，无需 git worktree 隔离。worktree 隔离在后续"执行编码"（P12 交现有 Dispatch）阶段才需要。
+> 不复用 WorktreeManager：功能设计智能体不写代码文件，无需 git worktree 隔离。worktree 隔离在后续"执行编码"（P12/P12a 经 FeatureDesignBuildService）阶段才需要。
 
 ## 8. 异步执行与错误处理
 
@@ -345,5 +347,5 @@ List<CompletableFuture<Void>> futures = features.stream()
 ## 9. 成功标准
 
 - **输入**：项目描述字符串。
-- **输出**：用户走完"新增→规划书确认→各功能设计确认→执行编码"，全部产物落库且状态正确，"执行编码"成功把功能设计 `fileScope` 交给现有 Dispatch。
+- **输出**：用户走完"新增→规划书确认→各功能设计确认→执行编码"，全部产物落库且状态正确，"执行编码"成功把功能设计 `fileScope` 交给 `FeatureDesignBuildService`。
 - **验证**：在平台 UI 端到端跑通；`plan` / `feature_design` 行状态与聚合的 Project 状态一致；规划书改动后功能设计正确转 `STALE`；批量确认后 `READY_TO_BUILD` 自动达成；**同一 feature 并发触发两次 P12a 时第二次返回 409**；**编码完成后修改设计 → `build_status` 转 `STALE`，重新确认后可再次执行**。
