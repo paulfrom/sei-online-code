@@ -209,10 +209,25 @@ CREATE INDEX idx_fd_project ON feature_design(project_id);
 
 规划智能体 / 功能设计智能体 = **两个内置 agent 配置**（prompt + 绑定 skill），由现有 `ClaudeRunner`（ProcessBuilder spawn `claude`）执行，与 Phase 1–5 的执行层同构。不引入 Java AI 框架（Spring AI / LangChain4j）或 Node 中间层，避免第二套智能体写法。
 
-| 智能体 | 触发时机 | 输入 | 输出 |
+| 智能体 | 内置 agent | 绑定 skill | 触发时机 | 输入 | 输出 |
+|---|---|---|---|---|---|
+| 规划智能体 | `planning-agent`（builtin, 不可删） | `project-planning`（builtin seed skill） | 新增项目 / 重新生成规划书（P1/P4） | 项目描述 + modifyHint | 规划书 JSON（§2 Plan 结构） |
+| 功能设计智能体 | `feature-design-agent`（builtin, 不可删） | `feature-design`（builtin seed skill） | 确认规划书后批量起 / 单个重新生成（P5/P9） | 规划书 + 某 feature outline + modifyHint | 该功能设计 JSON（§2 FeatureDesign 结构） |
+
+### 内置 agent 与 skill（系统默认配置，编码实现）
+
+沿用 Phase 3 已建的 Agent/Skill 体系（`Agent`/`Skill` 实体、`builtin=true` 不可删、skill 单文件 `SKILL.md` + sha256 hash-lock、agent↔skill 绑定）。**新增两个内置 agent + 两个内置 seed skill**，由平台在 Flyway seed 阶段写入，非用户运行时创建：
+
+| 内置 agent | 绑定 skill | 职责（agent instructions） | skill 内容（SKILL.md，编码实现） |
 |---|---|---|---|
-| 规划智能体 | 新增项目 / 重新生成规划书（P1/P4） | 项目描述 + modifyHint | 规划书 JSON（§2 Plan 结构） |
-| 功能设计智能体 | 确认规划书后批量起 / 单个重新生成（P5/P9） | 规划书 + 某 feature outline + modifyHint | 该功能设计 JSON（§2 FeatureDesign 结构） |
+| `planning-agent` | `project-planning` | 接收项目描述 + modifyHint，产出规划书 JSON | 规划方法论：如何从描述拆功能项、分配 `featureId`、估技术假设、列 nonGoals；**强制输出 §2 Plan JSON 骨架**（`summary/techAssumptions/features[]/nonGoals`），禁止预估 `fileScope` |
+| `feature-design-agent` | `feature-design` | 接收规划书 + 某 feature outline + modifyHint，产出该功能设计 JSON | 功能设计方法论：从 outline 展开 `goal/design/acceptance[]/fileScope`，粒度自定但骨架固定；`fileScope` 须遵循模板文件边界约定（供下游 Dispatch 复用） |
+
+实现要点：
+- 两个 skill 作为 **LOCAL seed skill**（与 Phase 3 的 `suid`/`eadp-backend` seed 同模式），SKILL.md 内容由平台源码编码实现，启动时 seed 入库并 hash-lock。
+- 两个 agent 作为 **builtin agent**（与 `requirement/dispatch/deploy` 同模式），`builtin=true`，删除接口拒绝；instructions 内点名使用各自绑定 skill。
+- `SkillMaterializer` 在 spawn `claude` 前，将绑定 skill 的 `SKILL.md` 写入运行目录的 `.claude/skills/<name>/`（功能设计智能体用临时目录，不进 worktree，见 §7 技术前提）。
+- 用户可在 Agent 管理 UI 查看这两个内置 agent（只读 badge），但不可删除/改绑定 skill（保证规划/设计产物骨架稳定）。
 
 ### 技术前提（本轮锁定）
 
@@ -249,7 +264,7 @@ List<CompletableFuture<Void>> futures = features.stream()
 | `ClaudeRunner`（spawn `claude` + 流式 stdout/stderr） | 直接复用，规划/设计智能体各配一个 agentConfig |
 | WS Hub `/ws/run/{runId}` + `RunLogFrame` | 直接复用，前端按 runId 订阅 |
 | 内置 agent 配置体系（Phase 3 的 agent CRUD + skill 绑定） | 规划/设计智能体作为两个内置 agent 注册，prompt 里点名用哪个 skill |
-| 技能体系（SKILL.md + hash-lock + materialize） | 规划/设计智能体绑定的 skill 由平台预置（具体 skill 内容留给实施计划） |
+| 技能体系（SKILL.md + hash-lock + materialize） | 规划/设计智能体绑定 `project-planning`/`feature-design` 两个内置 seed skill，内容由平台编码实现（见 §7 内置 agent 与 skill） |
 | Phase 2 `CompletableFuture` fan-out | 功能设计批量生成的并发骨架 |
 
 > 不复用 WorktreeManager：功能设计智能体不写代码文件，无需 git worktree 隔离。worktree 隔离在后续"执行编码"（P12 交现有 Dispatch）阶段才需要。
