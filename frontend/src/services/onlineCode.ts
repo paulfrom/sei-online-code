@@ -5,14 +5,14 @@
  * call sites read `res.data`.
  */
 import { request } from '@ead/suid-utils-react';
-import { AMS_SERVER_PATH } from '@/utils/constants';
+import { PROJECT_SERVER_PATH } from '@/utils/constants';
 
 /**
- * API base. In Phase 1 MSW intercepts by path suffix (`*​/api/...`), so any
+ * API base. In Phase 1 MSW intercepts by path suffix (`*​/...`), so any
  * prefix works; we keep the gateway/service prefix for zero-change backend
  * cutover (ADR-0002).
  */
-const API = `${AMS_SERVER_PATH}/api`;
+const API = `${PROJECT_SERVER_PATH}`;
 
 /** Lifecycle state tokens — verbatim uppercase per contract §4. */
 export type LifecycleState =
