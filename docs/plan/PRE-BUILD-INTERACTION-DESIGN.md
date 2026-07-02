@@ -43,9 +43,10 @@
 
 ### 功能设计（FeatureDesign）— 每个功能项一份，多份
 
-智能体自定粒度，但固定骨架，落库于 `feature_design` 表：
+智能体自定粒度，但固定骨架，落库于 `feature_design` 表。`content` JSON 仅含设计内容；**编码执行生命周期由独立的 `build_status` 列承载**（见 §3 构建状态机），不混入 content：
 
 ```
+content JSON:
 {
   featureId:  string,                // 与 plan.content.features[].featureId 对应
   goal:       string,                // 该功能的用户故事
@@ -53,6 +54,10 @@
   acceptance: string[],              // 验收点
   fileScope:  string[]               // 编码时触及的文件边界，最终交给 Dispatch
 }
+
+列:
+  status        VARCHAR  -- 设计状态: PENDING/GENERATING/DRAFT/CONFIRMED/STALE/FAILED
+  build_status  VARCHAR  -- 构建状态: IDLE/BUILDING/BUILT/BUILD_FAILED/STALE
 ```
 
 ## 3. 状态机
@@ -96,9 +101,65 @@ PENDING → GENERATING → DRAFT → CONFIRMED
 
 `STALE` 态：不可确认；用户须重新生成（`modifyHint` 可空）使其 `DRAFT`。
 
+### 功能设计构建状态 `FeatureDesignBuildStatus`（编码执行生命周期）
+
+`build_status` 与设计 `status` 分离，专门管控"该 feature 的编码执行"，保证 **同一 feature 不会同时编码**、**执行完成后可改可重跑**：
+
+```
+                  ┌─────────── (re-execute, design=CONFIRMED) ───────────┐
+                  ▼                                                     │
+IDLE ──[执行]──> BUILDING ──[完成]──> BUILT                              │
+                   │                    │                                │
+                   │ [失败]             │ [编辑/重生/规划书改动]           │
+                   ▼                    ▼                                │
+              BUILD_FAILED ──────────> STALE ──[重新确认后执行]──> BUILDING
+                   │  (retry, design=CONFIRMED)
+                   └──────────────────────────────> BUILDING
+```
+
+| build_status | 含义 | 可否执行编码 |
+|---|---|---|
+| `IDLE` | 未构建（默认 / 当前设计从未编码） | 是（需 design=CONFIRMED） |
+| `BUILDING` | 编码进行中（互斥态） | **否**（拒绝，防同 feature 并发） |
+| `BUILT` | 上次编码完成 | 是（可重跑） |
+| `BUILD_FAILED` | 上次编码失败 | 是（可重试） |
+| `STALE` | 已构建但设计已改动，产物过时 | 是（需重新确认后执行） |
+
+**执行前置条件**（P12a / P12 统一校验）：`design.status = CONFIRMED` 且 `build_status != BUILDING`。
+
+**状态推进规则**：
+
+| 事件 | design.status | build_status |
+|---|---|---|
+| 执行编码（进入 BUILDING） | CONFIRMED（不变） | 旧态 → `BUILDING` |
+| Run 回调成功 | CONFIRMED（不变） | `BUILDING` → `BUILT` |
+| Run 回调失败 | CONFIRMED（不变） | `BUILDING` → `BUILD_FAILED` |
+| 编辑功能设计（P8） | → `DRAFT` | 若 ∈ {BUILT, BUILD_FAILED} → `STALE`；BUILDING 时**拒绝编辑** |
+| 重新生成功能设计（P9） | → `GENERATING`→`DRAFT` | 同上 |
+| 规划书改动级联 | → `STALE` | 若 ∈ {BUILT, BUILD_FAILED} → `STALE` |
+
+> `BUILT`/`BUILD_FAILED` → `STALE` 仅在"设计被改动"时发生；`STALE` 重新确认后可再次执行。`BUILT` 不经改动也可直接重跑（重新执行编码）。
+
+### 编码执行互斥（per-feature）
+
+- **互斥粒度**：单个 `feature_id`。同一 feature 同时只允许一个 `BUILDING`。
+- **实现**：后端 Service 用**条件 UPDATE** 抢占，天然抗并发，不依赖内存锁：
+
+```sql
+-- 原子抢占：仅当当前非 BUILDING 且设计已确认时才置 BUILDING
+UPDATE feature_design
+   SET build_status = 'BUILDING', updated_at = now()
+ WHERE id = ? AND is_latest = TRUE AND build_status <> 'BUILDING';
+-- affected rows = 0 → 已在构建中，返回 409 拒绝
+```
+
+- 抢占成功 → 交现有 Dispatch（功能设计 = Task 输入单元，`fileScope` 直接复用，不二次切分）。
+- Run 回调按 `runId` → `feature_id` 定位行，更新 `build_status` 为 `BUILT`/`BUILD_FAILED`。
+- **跨 feature 不互斥**：不同 feature 可并行编码（受现有 Dispatch 的 worktree 隔离与全局并发上限约束，本设计不额外限制）。
+
 ### 规划书 / 功能设计失效规则
 
-- Plan 编辑或重新生成提交 → Plan = `DRAFT`；该项目下所有 FeatureDesign 置 `STALE`；Project 退回 `PLANNING`。
+- Plan 编辑或重新生成提交 → Plan = `DRAFT`；该项目下所有 FeatureDesign 的 `status` 置 `STALE`，`build_status` ∈ {BUILT, BUILD_FAILED} 置 `STALE`；Project 退回 `PLANNING`。
 - 这是"允许随时改规划书"的代价：改后已生成的功能设计失效，需重生。
 
 ## 4. 页面流与用户操作
@@ -133,7 +194,10 @@ PENDING → GENERATING → DRAFT → CONFIRMED
 | 编辑功能设计 | 直接改 content | 该条=DRAFT |
 | 重新生成功能设计 | 带 modifyHint 起设计智能体 | version+1；该条=GENERATING→DRAFT |
 | 确认功能设计（单 / 批） | — | 该条=CONFIRMED；全部 CONFIRMED → Project=READY_TO_BUILD |
-| 执行编码 | — | 校验 READY_TO_BUILD；交现有 Dispatch |
+| 执行编码（单 feature / 批量） | 条件 UPDATE 抢占 build_status | `design=CONFIRMED` 且 `build_status≠BUILDING` → `BUILDING`，交现有 Dispatch；同 feature 已 BUILDING → 409 拒绝 |
+| 编码完成（Run 回调） | Dispatch/Run 回调 | `BUILDING` → `BUILT`（成功）/ `BUILD_FAILED`（失败） |
+| 执行后修改功能设计 | 编辑(P8)/重生(P9) | `design`→DRAFT/STALE；`build_status`∈{BUILT,BUILD_FAILED}→`STALE`；BUILDING 时拒绝 |
+| 重新执行（重跑 / 重试） | 重新确认后 P12a，或 BUILT 直接 P12a | `STALE`/`BUILT`/`BUILD_FAILED` → `BUILDING` |
 
 ### 批量确认
 
@@ -169,6 +233,7 @@ CREATE TABLE feature_design (
   feature_id    VARCHAR(128) NOT NULL,            -- 对齐 plan.content.features[].featureId
   version       INT          NOT NULL,
   status        VARCHAR(32)  NOT NULL,            -- PENDING/GENERATING/DRAFT/CONFIRMED/STALE/FAILED
+  build_status  VARCHAR(32)  NOT NULL DEFAULT 'IDLE',  -- IDLE/BUILDING/BUILT/BUILD_FAILED/STALE
   content       JSONB,                            -- {goal,design,acceptance[],fileScope}
   modify_hint   TEXT,
   is_latest     BOOLEAN      NOT NULL DEFAULT TRUE,
@@ -194,11 +259,12 @@ CREATE INDEX idx_fd_project ON feature_design(project_id);
 | P5 | POST | `/api/plan/{projectId}/confirm` | 确认规划书；Plan=CONFIRMED，批量起 FeatureDesign 智能体，Project=DESIGNING |
 | P6 | GET | `/api/featureDesign` | 列表，query: `projectId`，ExtTable remotePaging |
 | P7 | GET | `/api/featureDesign/{id}` | 取单条最新版 |
-| P8 | PUT | `/api/featureDesign/{id}` | 编辑 content；该条→DRAFT |
-| P9 | POST | `/api/featureDesign/{id}/regenerate` | 重生，body: `{modifyHint?}`；version+1，=GENERATING 起运行 |
+| P8 | PUT | `/api/featureDesign/{id}` | 编辑 content；该条→DRAFT；`build_status`∈{BUILT,BUILD_FAILED}→`STALE`；`BUILDING` 时 409 拒绝 |
+| P9 | POST | `/api/featureDesign/{id}/regenerate` | 重生，body: `{modifyHint?}`；version+1，=GENERATING 起运行；`BUILDING` 时 409 拒绝；完成后 `build_status`→`STALE`（若原 BUILT/BUILD_FAILED） |
 | P10 | POST | `/api/featureDesign/confirm` | 批量确认，body: `{ids:[]}`；逐条→CONFIRMED；全部 CONFIRMED 则 Project=READY_TO_BUILD |
 | P11 | POST | `/api/featureDesign/{id}/confirm` | 单条确认（P10 的便捷版） |
-| P12 | POST | `/api/project/{projectId}/build` | 执行编码；校验 READY_TO_BUILD，交现有 Dispatch |
+| P12 | POST | `/api/project/{projectId}/build` | 批量执行编码；对每条 `CONFIRMED` 且 `build_status≠BUILDING` 的 feature 条件 UPDATE 抢占→交 Dispatch；已在 BUILDING 的跳过并返回 |
+| P12a | POST | `/api/featureDesign/{id}/build` | 单 feature 执行编码；校验 `design=CONFIRMED` 且 `build_status≠BUILDING`，条件 UPDATE 抢占，交现有 Dispatch，返回 `{runId}` |
 | P13 | GET | `/api/plan/{projectId}/history` | 规划书历史版本列表 |
 | P14 | GET | `/api/featureDesign/{id}/history` | 功能设计历史版本列表 |
 
@@ -280,4 +346,4 @@ List<CompletableFuture<Void>> futures = features.stream()
 
 - **输入**：项目描述字符串。
 - **输出**：用户走完"新增→规划书确认→各功能设计确认→执行编码"，全部产物落库且状态正确，"执行编码"成功把功能设计 `fileScope` 交给现有 Dispatch。
-- **验证**：在平台 UI 端到端跑通；`plan` / `feature_design` 行状态与聚合的 Project 状态一致；规划书改动后功能设计正确转 `STALE`；批量确认后 `READY_TO_BUILD` 自动达成。
+- **验证**：在平台 UI 端到端跑通；`plan` / `feature_design` 行状态与聚合的 Project 状态一致；规划书改动后功能设计正确转 `STALE`；批量确认后 `READY_TO_BUILD` 自动达成；**同一 feature 并发触发两次 P12a 时第二次返回 409**；**编码完成后修改设计 → `build_status` 转 `STALE`，重新确认后可再次执行**。
