@@ -17,20 +17,20 @@
 | T2 后端上下文 | ✅ 完成 | T3–T8 已实现即证 |
 | T3 枚举 | ✅ 完成 | 9a7a7ae |
 | T4 DTO | ✅ 完成 | 4232335（+ 计划外 `FeatureDesignBuildResultDto`） |
-| T5 Feign API | 🟡 部分 | 8d5f4de：PlanApi/FeatureDesignApi 在；**ProjectApi.build 方法缺失**（Step 3，sub-agent 补中） |
+| T5 Feign API | 🟡 部分 | 8d5f4de：PlanApi/FeatureDesignApi 在；**ProjectApi.build 延后至 T14**（implements 强耦，单独加破构建） |
 | T6 V6 迁移 | ✅ 完成 | e2fc4a9；含 `oc_task.feature_design_id`（D8） |
-| T7 实体+转换器 | 🟡 部分 | 9c8b353：实体/converter 在；**converter 测试缺失**（Step 4，sub-agent 补中） |
-| T8 DAO | 🟡 部分 | 4dcbe2c：接口式（Spring Data JPA，非 *DaoImpl，对齐 AgentDao）；含读方法+`tryAcquireBuildLock`；**缺 `markNonLatest`/`cascadeStale` 写方法 + Testcontainers 测试**（sub-agent 补中） |
+| T7 实体+转换器 | ✅ 完成 | 9c8b353 实体/converter + 09ee879 converter 测试通过 |
+| T8 DAO | 🟡 源码✅/测试延后 | 4dcbe2c+fbd35f0：markNonLatest/cascadeStale 写方法已加（接口式 @Query）；**Testcontainers DAO 测试 @Disabled 延后**（@DataJpaTest+Flyway+方言引导需专项） |
 | T9–T15 | ⬜ 未开始 | PlanService/FeatureDesignService/FeatureDesignBuildService/ProjectStateService/PlanAgentService/Controllers 均缺 |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**当前 fire**：`backend-engineer` sub-agent 补全 T5(Step3) + T7(converter 测试) + T8(DAO 写方法 + Testcontainers + DAO 测试)。
+**本轮完成**：sub-agent + 主循环接管 → T7 converter 测试通过（09ee879）；T8 markNonLatest/cascadeStale 落库（fbd35f0）；T5 Step3 延后至 T14（implements 强耦）；T8 DAO 测试 @Disabled 延后（Testcontainers+@DataJpaTest 引导需专项）。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
 2. `FeatureDesignBuildResultDto` 为计划外新增（T4），用途待 Task 11 确认。
 
-**下一 fire**：验证 sub-agent 产出 → 勾选 T5/7/8 checkbox → 进入 Task 9 PlanService（依赖 markNonLatest/cascadeStale 就绪）。
+**下一 fire**：Task 9 PlanService（backend-engineer sub-agent；依赖 markNonLatest/cascadeStale 已就绪）。T5 Step3 随 T14 补；T8 DAO 测试待 Testcontainers 引导专项。
 
 ---
 
