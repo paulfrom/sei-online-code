@@ -392,3 +392,10 @@ export async function resolveWorkspace(
 ): Promise<ResultData<WorkspaceResolveResult>> {
   return request({ url: `${API}/workspace/resolve`, method: 'GET', params: { projectId } });
 }
+
+// --- Pre-Build Phase: Plan + FeatureDesign (P12) ---
+
+/** #P12 build project (all confirmed FeatureDesigns) */
+export async function buildProject(projectId: string) {
+  return request({ url: `${API}/project/${projectId}/build`, method: 'POST' });
+}
