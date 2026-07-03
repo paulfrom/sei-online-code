@@ -1008,3 +1008,38 @@ Expected: build success
 **4. 可推翻项**：D1（409 机制是否引入新 advice vs 全 200+业务码）、D8（Task 关联字段复用 vs 新增列）—— 用户可在 Task 1 契约冻结前改。
 
 ---
+---
+
+## 修订记录 v3 — PM 可行性验证（2026-07-03，`plan` 技能 Step 2）
+
+> 由 `plan`（PM）技能执行 Step 2，对照实际代码库核对 D1–D15。结论：**假设全部成立，1 处修正**。本节为 Task 1 契约冻结前的权威事实依据，契约撰写不再重复验证。
+
+### 已确认（file:line 证据）
+
+| 决策 | 验证结果 | 证据 |
+|---|---|---|
+| D3 | `dev-agent` 在 DispatchService 硬编码；V3 未 seed → V6 须补 seed | `service/DispatchService.java:50` `DEV_AGENT="dev-agent"`；V3 seeded = requirement-agent/dispatch-agent/deploy-agent |
+| D4 | WS `/ws/run/{iterationId}` 按 iterationId 索引；Run.iterationId 已存在 | `ws/RunLogWebSocketHub.java:32` |
+| D5 | Search/PageResult 包 `com.changhong.sei.core.dto.serach`（旧拼写，6 处）；FindByPageApi/BaseEntityApi 在 `com.changhong.sei.core.api` | grep 命中 |
+| D8 | Task.java(oc_task) 字段：iterationId/title/description/fileScope/assignedAgent/state/worktreeBranch/seq，**无** feature_design_id → V6 须新增列 | `entity/Task.java:35-59` |
+| D9 | V3 oc_skill 含 source/source_type/computed_hash；oc_agent 含 model；skill_ids=TEXT(JSON array，经 StringListConverter) | `db/migration/V3__skill_agent.sql`；`entity/converter/StringListConverter.java` |
+| D14 | findByPage=POST+Search filter；Api 模式 `interface XxxApi extends BaseEntityApi<XxxDto>, FindByPageApi<XxxDto>` | `api/TaskApi.java:21`、`api/ProjectApi.java:37` |
+| D15 | content TEXT+JSON 转换器模式成立；`entity/converter/` 已有 AbstractJsonListConverter/SpecPageListConverter 可参照 | `entity/converter/` 目录 |
+| 分层 | DAO `extends BaseEntityDao<T>`(@Repository)；Service `extends BaseEntityService`；OperateResult(s) 在 `core.service.bo` | `dao/AgentDao.java`、`service/AgentService.java` |
+
+### 修正（C-NEW，覆盖 Global Constraints）
+
+| 编号 | 内容 |
+|---|---|
+| C-NEW | **ID 列长度 VARCHAR(36) 而非 VARCHAR(64)**。Global Constraints 称 `VARCHAR(64)`，但 V3 实际约定 `VARCHAR(36)`（IdGenerator.nextIdStr 36 位）。契约 DDL 与 V6 全部 ID/外键列统一 `VARCHAR(36)`。 |
+
+### V6 seed 规范（对齐 V3 模式）
+
+- 新增 agent：`planning-agent` / `feature-design-agent` / `dev-agent`（均 `builtin=TRUE`；`dev-agent` 的 `skill_ids=NULL`）。
+- 新增 skill：`project-planning` / `feature-design`（LOCAL 指针 stub，同 V3 suid/eadp-backend 模式）。
+- seed ID：固定 36 位助记串（同 V3 `SKILLSEEDSUID000...`/`AGENTSEEDREQUIREMENT000...`）；审计列只设 `created_date=CURRENT_TIMESTAMP`，其余 null。
+- V6 DDL：`oc_plan` / `oc_feature_design`（content `TEXT`，partial unique index `WHERE is_latest=TRUE`）；给 `oc_task` 新增 `feature_design_id VARCHAR(36)`。
+
+### 下一步
+
+Task 1（冻结契约 `docs/contracts/API-CONTRACT-PRE-BUILD.md`）以上述事实为依据直接撰写。完成后 Gate 通过，进入 Track B / Track F。

@@ -347,19 +347,19 @@ interface RunLogFrame {
 
 ```sql
 CREATE TABLE oc_plan (
-    id                  VARCHAR(64)  NOT NULL,
-    project_id          VARCHAR(64)  NOT NULL,
+    id                  VARCHAR(36)  NOT NULL,
+    project_id          VARCHAR(36)  NOT NULL,
     version             INT          NOT NULL,
     status              VARCHAR(32)  NOT NULL,
     content             TEXT         NOT NULL,   -- JSON（D15：非 JSONB，与 SpecPageListConverter 一致）
     modify_hint         TEXT,
     is_latest           BOOLEAN      NOT NULL DEFAULT TRUE,
     -- 审计字段（BaseAuditableEntity）
-    creator_id          VARCHAR(64),
+    creator_id          VARCHAR(36),
     creator_account     VARCHAR(100),
     creator_name        VARCHAR(100),
     created_date        TIMESTAMP,
-    last_editor_id      VARCHAR(64),
+    last_editor_id      VARCHAR(36),
     last_editor_account VARCHAR(100),
     last_editor_name    VARCHAR(100),
     last_edited_date    TIMESTAMP,
@@ -375,8 +375,8 @@ CREATE INDEX idx_plan_project              ON oc_plan (project_id);
 
 ```sql
 CREATE TABLE oc_feature_design (
-    id                  VARCHAR(64)  NOT NULL,
-    project_id          VARCHAR(64)  NOT NULL,
+    id                  VARCHAR(36)  NOT NULL,
+    project_id          VARCHAR(36)  NOT NULL,
     feature_id          VARCHAR(128) NOT NULL,
     version             INT          NOT NULL,
     status              VARCHAR(32)  NOT NULL,
@@ -385,11 +385,11 @@ CREATE TABLE oc_feature_design (
     modify_hint         TEXT,
     is_latest           BOOLEAN      NOT NULL DEFAULT TRUE,
     -- 审计字段（BaseAuditableEntity）
-    creator_id          VARCHAR(64),
+    creator_id          VARCHAR(36),
     creator_account     VARCHAR(100),
     creator_name        VARCHAR(100),
     created_date        TIMESTAMP,
-    last_editor_id      VARCHAR(64),
+    last_editor_id      VARCHAR(36),
     last_editor_account VARCHAR(100),
     last_editor_name    VARCHAR(100),
     last_edited_date    TIMESTAMP,
@@ -406,7 +406,7 @@ CREATE INDEX idx_fd_project                ON oc_feature_design (project_id);
 > **D8 裁决**：读 `Task.java` 确认无合适复用字段后，V6 给 `oc_task` 新增列：
 
 ```sql
-ALTER TABLE oc_task ADD COLUMN feature_design_id VARCHAR(64);
+ALTER TABLE oc_task ADD COLUMN feature_design_id VARCHAR(36);
 CREATE INDEX idx_task_feature_design ON oc_task (feature_design_id);
 ```
 
