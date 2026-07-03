@@ -103,7 +103,7 @@
 **Interfaces:**
 - Produces: 冻结的 P1–P14 + P12a 端点定义、DTO schema、状态枚举、409 机制、WS 路径、seed 结构，作为 Track B / Track F 的共同唯一依据。Track B 与 Track F 只读此契约，互不读对方代码。**契约内容以本 Task 为准；设计稿 §5/§6 的 JSONB/GET 路径为示意，冲突时以 D1–D15 为准。**
 
-- [ ] **Step 1: 写契约文档**，内容包含：
+- [x] **Step 1: 写契约文档**，内容包含：
 
 1. **Scope 表**：In = Plan/FD CRUD + 状态机 + build 互斥 + 内置 agent/skill seed（含 `dev-agent`）+ FeatureDesignBuildService + Testcontainers PG 测试基建；Out = 改动现有 Spec/DispatchService 代码、真实 git clone、多租户。
 2. **Domain payload**：`PlanDto`、`FeatureDesignDto`（含 `status` / `buildStatus` / `version` / `isLatest` / `content`）、`PlanContent`（`summary/techAssumptions/features[]{featureId,title,outline}/nonGoals`）、`FeatureDesignContent`（`featureId/goal/design/acceptance[]/fileScope`）。
@@ -121,7 +121,7 @@
 10. **内置 seed（D3/D9）**：三个 agent（`planning-agent`/`feature-design-agent`/`dev-agent`，均 `builtin=true`）+ 两个 skill（`project-planning`/`feature-design`，LOCAL seed）。`dev-agent` instructions 指向编码执行，`skill_ids=NULL`。seed 列严格对齐 V3（`oc_skill` 含 `source/source_type/computed_hash`，`oc_agent` 含 `model`；`skill_ids` 格式读 `StringListConverter` 确认）。
 11. **前端状态管理（D6）**：用 dva model `src/models/planFeatureDesign.ts`，不用 `useStore`/`projectStore`。
 
-- [ ] **Step 2: 提交契约**
+- [x] **Step 2: 提交契约**
 
 ```bash
 git add docs/contracts/API-CONTRACT-PRE-BUILD.md
