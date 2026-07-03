@@ -1,13 +1,14 @@
 /**
  * F5: BuildActions component with "执行编码" button and build_status badges
- * Polls for BUILDING status updates (no WS client per pre-verified facts)
+ * Uses WS client for real-time logs, falls back to polling on WS failure (P2)
  */
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { Badge, Button, Space, Tooltip, message } from '@ead/suid';
+import { Badge, Button, Space, Tooltip, message, Modal } from '@ead/suid';
 import { PlayCircleOutlined } from '@ead/suid-icons';
 import type { FeatureDesignDto } from '@/services/featureDesign';
+import { subscribeRunLog, type RunLogFrame } from '@/utils/run-log-socket';
 
 const useStyles = createStyles(({ token, css }) => ({
   container: css`
@@ -22,6 +23,18 @@ const useStyles = createStyles(({ token, css }) => ({
     display: flex;
     gap: ${token.marginSM}px;
     flex-wrap: wrap;
+  `,
+  logPanel: css`
+    max-height: 400px;
+    overflow: auto;
+    padding: ${token.paddingSM}px;
+    background: ${token.colorBgContainerDisabled};
+    border-radius: ${token.borderRadius}px;
+    font-family: ${token.fontFamilyCode};
+    font-size: ${token.fontSizeSM}px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
   `,
 }));
 
@@ -57,42 +70,72 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
   const { styles } = useStyles();
   const dispatch = useDispatch();
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const wsCloseRef = useRef<(() => void) | null>(null);
 
   const { projectState, featureDesigns, loading } = useSelector(
     (state: any) => state.planFeatureDesign,
   );
 
-  // Initial fetch on mount
-  useEffect(() => {
-    dispatch({ type: 'planFeatureDesign/fetchProjectState', payload: { projectId } });
-  }, [dispatch, projectId]);
+  // Log panel state
+  const [logVisible, setLogVisible] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const logBodyRef = useRef<HTMLDivElement>(null);
 
-  // Poll when any FD is BUILDING
+  // Auto-scroll logs to bottom
   useEffect(() => {
-    const hasBuilding = featureDesigns?.some(
-      (fd: FeatureDesignDto) => fd.buildStatus === 'BUILDING',
-    );
+    if (logBodyRef.current) {
+      logBodyRef.current.scrollTop = logBodyRef.current.scrollHeight;
+    }
+  }, [logs]);
 
-    if (hasBuilding && !pollingIntervalRef.current) {
+  const appendLog = useCallback((frame: RunLogFrame) => {
+    const logLine = `[${new Date(frame.ts).toLocaleTimeString()}] [${frame.stream}] ${frame.line}`;
+    setLogs((prev) => [...prev, logLine]);
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
+
+  // Start polling fallback (when WS fails
+  const startPollingFallback = useCallback(() => {
+    if (!pollingIntervalRef.current) {
       pollingIntervalRef.current = setInterval(() => {
         dispatch({
           type: 'planFeatureDesign/fetchFeatureDesigns',
           payload: { projectId },
         });
       }, 5000);
-    } else if (!hasBuilding && pollingIntervalRef.current) {
+    }
+  }, [dispatch, projectId]);
+
+  const stopPollingFallback = useCallback(() => {
+    if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
+  }, []);
 
+  // Initial fetch on mount
+  useEffect(() => {
+    dispatch({ type: 'planFeatureDesign/fetchProjectState', payload: { projectId } });
+  }, [dispatch, projectId]);
+
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+      stopPollingFallback();
+      if (wsCloseRef.current) {
+        wsCloseRef.current();
+        wsCloseRef.current = null;
       }
     };
-  }, [dispatch, projectId, featureDesigns]);
+  }, [stopPollingFallback]);
 
   const handleBuild = useCallback(async () => {
+    clearLogs();
+    setLogVisible(true);
+
     const res = await dispatch({
       type: 'planFeatureDesign/buildProject',
       payload: { projectId },
@@ -108,10 +151,50 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
         msg += `（跳过 ${skippedCount} 个已在构建中的功能）`;
       }
       message.success(msg);
+
+      // Subscribe to WS for each started build
+      // TODO: currently iterationId === featureDesignId (FeatureDesignBuildService.java:92)
+      const startedBuilds = results.filter((r: any) => !r.skipped && r.runId && r.id);
+      if (startedBuilds.length > 0) {
+        // For simplicity, subscribe to the first build's logs
+        // TODO: support multiple concurrent builds in separate tabs
+        const { id: featureDesignId, runId } = startedBuilds[0];
+
+        try {
+          const { close } = subscribeRunLog({
+            iterationId: featureDesignId,
+            runId,
+            onLine: appendLog,
+            onTerminal: () => {
+              // Refresh build status on terminal frame
+              dispatch({
+                type: 'planFeatureDesign/fetchFeatureDesigns',
+                payload: { projectId },
+              });
+              // Keep log visible for review
+            },
+            onError: () => {
+              // WS failed, fall back to polling
+              message.warning('实时日志连接失败，已降级为轮询模式');
+              startPollingFallback();
+              if (wsCloseRef.current) {
+                wsCloseRef.current();
+                wsCloseRef.current = null;
+              }
+            },
+          });
+          wsCloseRef.current = close;
+        } catch {
+          // WS connection failed, use polling fallback
+          message.warning('实时日志连接失败，已降级为轮询模式');
+          startPollingFallback();
+        }
+      }
     } else {
       message.error(res?.message || '启动编码失败');
+      setLogVisible(false);
     }
-  }, [dispatch, projectId]);
+  }, [dispatch, projectId, appendLog, clearLogs, startPollingFallback]);
 
   const isReady = projectState === 'READY_TO_BUILD';
   const isBuilding = featureDesigns?.some(
@@ -128,30 +211,59 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
   ) || {};
 
   return (
-    <div className={styles.container}>
-      <Space>
-        {Object.entries(buildStatusCounts).map(([status, count]) => (
-          <Badge
-            key={status}
-            status={buildStatusColorMap[status] as any}
-            text={`${buildStatusTextMap[status]}: ${count}`}
-          />
-        ))}
-        {isBuilding && <span style={{ color: '#faad14' }}>（刷新中...）</span>}
-      </Space>
+    <>
+      <div className={styles.container}>
+        <Space>
+          {Object.entries(buildStatusCounts).map(([status, count]) => (
+            <Badge
+              key={status}
+              status={buildStatusColorMap[status] as any}
+              text={`${buildStatusTextMap[status]}: ${count}`}
+            />
+          ))}
+          {isBuilding && <span style={{ color: '#faad14' }}>（刷新中...）</span>}
+        </Space>
 
-      <Tooltip title={!isReady ? projectStateTextMap[projectState || ''] : ''}>
-        <Button
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          onClick={handleBuild}
-          disabled={!isReady || loading}
-          loading={loading}
-        >
-          执行编码
-        </Button>
-      </Tooltip>
-    </div>
+        <Space>
+          {isBuilding && (
+            <Button size="small" onClick={() => setLogVisible(true)}>
+              查看日志
+            </Button>
+          )}
+          <Tooltip title={!isReady ? projectStateTextMap[projectState || ''] : ''}>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleBuild}
+              disabled={!isReady || loading}
+              loading={loading}
+            >
+              执行编码
+            </Button>
+          </Tooltip>
+        </Space>
+      </div>
+
+      <Modal
+        title="构建日志"
+        open={logVisible}
+        onCancel={() => setLogVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setLogVisible(false)}>
+            关闭
+          </Button>,
+        ]}
+        width={800}
+      >
+        <div ref={logBodyRef} className={styles.logPanel}>
+          {logs.length === 0 ? (
+            <span style={{ color: '#8c8c8c' }}>等待构建开始…</span>
+          ) : (
+            logs.map((line, index) => <div key={index}>{line}</div>)
+          )}
+        </div>
+      </Modal>
+    </>
   );
 };
 
