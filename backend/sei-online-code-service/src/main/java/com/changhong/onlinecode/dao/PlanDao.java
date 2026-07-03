@@ -2,9 +2,11 @@ package com.changhong.onlinecode.dao;
 
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.sei.core.dao.BaseEntityDao;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -38,4 +40,14 @@ public interface PlanDao extends BaseEntityDao<Plan> {
      * @return 全部版本（含非 latest），版本倒序
      */
     List<Plan> findByProjectIdOrderByVersionDesc(String projectId);
+
+    /**
+     * 将项目下所有 is_latest=true 的 Plan 置为 false（标记非最新）。
+     *
+     * @param projectId 项目 id
+     */
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query("UPDATE Plan p SET p.isLatest = false WHERE p.projectId = :projectId AND p.isLatest = true")
+    void markNonLatest(@Param("projectId") String projectId);
 }

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -67,4 +68,27 @@ public interface FeatureDesignDao extends BaseEntityDao<FeatureDesign> {
     @Modifying(clearAutomatically = true)
     @Query("UPDATE FeatureDesign f SET f.buildStatus = :building WHERE f.id = :id AND f.buildStatus <> :building")
     int tryAcquireBuildLock(@Param("id") String id, @Param("building") FeatureDesignBuildStatus building);
+
+    /**
+     * 将项目下某 feature 所有 is_latest=true 的 FD 置为 false（标记非最新）。
+     *
+     * @param projectId 项目 id
+     * @param featureId feature id
+     */
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query("UPDATE FeatureDesign f SET f.isLatest = false WHERE f.projectId = :projectId AND f.featureId = :featureId AND f.isLatest = true")
+    void markNonLatest(@Param("projectId") String projectId, @Param("featureId") String featureId);
+
+    /**
+     * 级联失效（D15）：项目下所有最新版 FD status→STALE，且 build_status∈{BUILT,BUILD_FAILED}→STALE。
+     *
+     * <p>使用 native SQL 以支持 CASE 表达式。
+     *
+     * @param projectId 项目 id
+     */
+    @Modifying(clearAutomatically = true)
+    @Transactional
+    @Query(nativeQuery = true, value = "UPDATE oc_feature_design SET status = 'STALE', build_status = CASE WHEN build_status IN ('BUILT', 'BUILD_FAILED') THEN 'STALE' ELSE build_status END, last_edited_date = NOW() WHERE project_id = :projectId AND is_latest = TRUE")
+    void cascadeStale(@Param("projectId") String projectId);
 }
