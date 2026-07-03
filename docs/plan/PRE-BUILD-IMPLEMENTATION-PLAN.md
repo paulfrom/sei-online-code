@@ -33,17 +33,19 @@
 | F2 MSW handlers | ✅ 完成 | 3220c44：plan/featureDesign handlers（P2–P5/P6–P11/P12a/P14/P12）+ 409 场景 + mock 数据（DRAFT/IDLE、CONFIRMED/BUILT、CONFIRMED/IDLE）；handlers.ts 导入+spread；pnpm build 通过 |
 | F3 PlanTab UI | ✅ 完成 | 2b2a225：PlanTab.tsx（展示/编辑/重生/确认/历史抽屉 + status 联动）+ ProjectDetail.tsx（Tab 容器）；pnpm build 通过 |
 | F4 FeatureDesignTab+Editor | ✅ 完成 | 3601931：FeatureDesignTab.tsx（ExtTable remotePaging + 多选批量确认 + 逐行 查看/编辑/重生/确认/执行编码 + STALE 禁用 Tooltip + status/buildStatus badge）+ FeatureDesignEditor.tsx（ExtModal 查看/编辑 goal/design/acceptance/fileScope + 409 提示）+ ProjectDetail.tsx 挂 "功能设计" Tab；pnpm build 通过 |
-| F5–F6 前端 | ⬜ 未开始 | BuildActions+dva model+badge / pnpm build+MSW 全流程验证 |
+| F5 BuildActions+dva model | ✅ 完成 | （主循环补提交）：BuildActions.tsx（"执行编码"仅 READY_TO_BUILD 启用+Tooltip+调 buildProject+5s 轮询 BUILDING）+ planFeatureDesign.ts（dva model：fetchProjectState 客户端聚合 §4.1/D7/D15 + buildProject effect）+ ProjectDetail.tsx 挂 BuildActions；pnpm build 通过。D4 WS 改轮询（偏差#5） |
+| F6 前端整体验证 | ⬜ 未开始 | pnpm build + MSW 全流程：新建项目→规划书确认→FD 确认→执行编码→build_status 流转 |
 
-**本轮完成**：F4 FeatureDesignTab+Editor（3601931）—— FeatureDesignTab.tsx（ExtTable remotePaging 列 featureId/title/status/buildStatus/version + 多选批量确认 + 逐行 查看/编辑/重生/确认/执行编码 + STALE 行确认禁用+Tooltip）+ FeatureDesignEditor.tsx（ExtModal 查看/编辑 goal/design/acceptance[]/fileScope[]，BUILDING 态编辑 409 提示）+ ProjectDetail.tsx 挂 "功能设计" Tab 传 projectId；@ead/suid + createStyles；**pnpm build 通过**（主循环独立复核）。frontend-engineer sub-agent 起草，主循环 grep 核验关键要素+build+提交。
+**本轮完成**：F5 BuildActions+dva model（主循环补提交）—— BuildActions.tsx（"执行编码"按钮仅 `projectState=READY_TO_BUILD` 启用+Tooltip+调 buildProject+BUILDING 时 5s `setInterval` 轮询 re-fetch FDs）+ planFeatureDesign.ts（dva model：state `projectState/plan/featureDesigns`；`fetchProjectState` 客户端聚合按 §4.1 含 D7 FAILED/D15 空集→DESIGNING/READY_TO_BUILD；`buildProject` effect 调 onlineCode.ts）+ ProjectDetail.tsx 挂 BuildActions 传 projectId；@ead/suid + createStyles；**pnpm build 通过**（主循环独立复核）。frontend-engineer sub-agent 起草但中断未提交，主循环 grep 核验+build+补提交。**偏差#5**：D4 WS 改轮询（前端无 WS 客户端），WS 标记待清理。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
 2. `FeatureDesignBuildResultDto` 为计划外新增（T4），用途待 Task 11 确认。
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
+5. **D4 F5 WS 实现偏差**：前端无既有 WS 客户端（Dispatch.tsx 仅本地 runLogs），build_status 改用**轮询**（任一 FD 处于 BUILDING 时每 5 秒 re-fetch FDs），暂不新建 WS 客户端连接 `/ws/run/{iterationId}`——WS 实现标记为待清理项。
 
-**下一 fire**：F5 BuildActions+dva model（frontend-engineer sub-agent + `suid` skill）—— BuildActions.tsx（项目级 P12 "执行编码"按钮，仅 `resolvePreBuildState=READY_TO_BUILD` 亮起，调 buildProject）+ build_status badge（IDLE/BUILDING/BUILT/BUILD_FAILED/STALE 五色，遵循 design.md 语义色）+ dva model `src/models/planFeatureDesign.ts`（D6，聚合状态 + 各 FD build_status 轮询/WS 订阅；WS `/ws/run/{iterationId}` 按 `frame.runId` 过滤，D4）。其后 F6 前端整体验证（pnpm build + MSW 全流程：新建项目→规划书确认→FD 确认→执行编码→build_status 流转）→ **PM 产品验收**（pm-planner/qa-reviewer 对照契约与设计稿验收标准）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）。
+**下一 fire**：F6 前端整体验证（主循环执行）—— `pnpm build` 复核 + MSW 全流程手动跑通：新建项目→规划书确认→3 FD 确认→执行编码→build_status 流转（IDLE→BUILDING→BUILT）。其后 **PM 产品验收**（pm-planner/qa-reviewer sub-agent 对照契约 + 设计稿验收标准，产出验收报告）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）；D4 WS 客户端待清理。
 
 ---
 

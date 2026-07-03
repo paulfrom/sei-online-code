@@ -10,6 +10,7 @@ import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
 import PlanTab from './PlanTab';
 import FeatureDesignTab from './FeatureDesignTab';
+import BuildActions from './BuildActions';
 
 const useStyles = createStyles(({ token, css }) => ({
   page: css`
@@ -97,6 +98,7 @@ const ProjectDetail: React.FC = () => {
         <BannerTitle title={project.name} subTitle="项目详情" />
         <div></div>
       </div>
+      <BuildActions projectId={projectId} />
       <div className={styles.content}>
         <Tabs items={tabItems} />
       </div>
