@@ -351,7 +351,7 @@ CREATE TABLE oc_plan (
     project_id          VARCHAR(36)  NOT NULL,
     version             INT          NOT NULL,
     status              VARCHAR(32)  NOT NULL,
-    content             TEXT         NOT NULL,   -- JSON（D15：非 JSONB，与 SpecPageListConverter 一致）
+    content             TEXT,                    -- JSON（D15：非 JSONB；GENERATING 态可为 null）
     modify_hint         TEXT,
     is_latest           BOOLEAN      NOT NULL DEFAULT TRUE,
     -- 审计字段（BaseAuditableEntity）
