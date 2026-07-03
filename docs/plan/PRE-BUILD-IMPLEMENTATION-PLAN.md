@@ -21,16 +21,19 @@
 | T6 V6 迁移 | ✅ 完成 | e2fc4a9；含 `oc_task.feature_design_id`（D8） |
 | T7 实体+转换器 | ✅ 完成 | 9c8b353 实体/converter + 09ee879 converter 测试通过 |
 | T8 DAO | 🟡 源码✅/测试延后 | 4dcbe2c+fbd35f0：markNonLatest/cascadeStale 写方法已加（接口式 @Query）；**Testcontainers DAO 测试 @Disabled 延后**（@DataJpaTest+Flyway+方言引导需专项） |
-| T9–T15 | ⬜ 未开始 | PlanService/FeatureDesignService/FeatureDesignBuildService/ProjectStateService/PlanAgentService/Controllers 均缺 |
+| T9 PlanService | 🟡 源码✅/测试延后 | bf51eb4：edit/regenerate/confirm/history + PlanAgentService 桩（T13 填实现）；**测试 @Disabled 延后**（sei-core OperateResultWithData 需 Spring context） |
+| T10–T15 | ⬜ 未开始 | FeatureDesignService/FeatureDesignBuildService/ProjectStateService/PlanAgentService(实现)/Controllers 缺；T5 Step3(ProjectApi.build) 随 T14 |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**本轮完成**：sub-agent + 主循环接管 → T7 converter 测试通过（09ee879）；T8 markNonLatest/cascadeStale 落库（fbd35f0）；T5 Step3 延后至 T14（implements 强耦）；T8 DAO 测试 @Disabled 延后（Testcontainers+@DataJpaTest 引导需专项）。
+**本轮完成**：T9 PlanService（bf51eb4）—— edit/regenerate/confirm/history 全实现 + PlanAgentService 桩；PlanDto 补 `Date createdDate/lastEditedDate`（对齐 ProjectDto 约定）；测试 @Disabled 延后（sei-core OperateResultWithData 需 Spring context，与 T8 DAO 测试同根因）。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
 2. `FeatureDesignBuildResultDto` 为计划外新增（T4），用途待 Task 11 确认。
+3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
+4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：Task 9 PlanService（backend-engineer sub-agent；依赖 markNonLatest/cascadeStale 已就绪）。T5 Step3 随 T14 补；T8 DAO 测试待 Testcontainers 引导专项。
+**下一 fire**：Task 10 FeatureDesignService（backend-engineer sub-agent；FeatureDesignDto 需同 PlanDto 补 audit 字段）。**测试基建专项待办**：T8 DAO 测试 + T9 服务测试均需 `@SpringBootTest` + Testcontainers 基座（sei-core OperateResultWithData/Flyway 需 Spring context）。
 
 ---
 
