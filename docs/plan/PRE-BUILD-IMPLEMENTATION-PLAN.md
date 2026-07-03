@@ -26,11 +26,12 @@
 | T11 FeatureDesignBuildService | 🟡 源码✅/测试延后 | e69d6e5：build（互斥抢占+Task+Run+ClaudeRunner CompletableFuture 回调，D3/D8/D11）+ buildProject 批量；Task.java 加 featureDesignId 映射（D8）；**测试 @Disabled 延后**（TaskService API 对齐 + async 桩待专项） |
 | T12 ProjectStateService | ✅ 完成 | aecef0c：resolvePreBuildState 聚合（D7 FAILED / D15 空集→DESIGNING）；**8 测试全通过**（纯查询无 super.save，无需 bootstrapContext） |
 | T13 PlanAgentService | ✅ 完成 | 9dab6e8：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign 实现（ClaudeRunner `CompletableFuture` + SkillMaterializer + 信号量 + D11 链式落库 DRAFT/FAILED）；**5 测试全通过**（success/parseFailure/noPlan/FD success/empty）。C8 守卫归调用方 |
-| T14 Controllers | ✅ 完成 | 6522b79：PlanController + FeatureDesignController（+findByPage）+ ProjectController.build（补 T5 Step3）+ PreBuildExceptionHandler（ConflictException→409，D1）；编译+全测试通过 |
-| T15 验证 | ⬜ 未开始 | 全量编译+测试验证（T15）+ 前端 F1–F6 |
+| T14 Controllers | ✅ 完成 | 6522b79：PlanController + FeatureDesignController（+findByPage）+ ProjectController.build（补 T5 Step3）+ PreBuildExceptionHandler（ConflictException→409，D1） |
+| T9b P1 触发 | ✅ 完成 | 64a2069：ProjectService.save 新建分支→建初始 Plan(GENERATING,v1) + spawnPlanning；@Lazy 破循环依赖 |
+| T15 后端验证 | ✅ 完成 | 全量 :api+:service compileJava + :service test 通过；**后端 Track B 全部完成** |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**本轮完成**：T14 Controllers（6522b79）—— PlanController + FeatureDesignController（+findByPage）+ ProjectController.build（补 T5 Step3，ProjectApi.build 落地）+ PreBuildExceptionHandler（ConflictException→HTTP 409，D1）；编译+全测试通过。主循环直接实现。
+**本轮完成**：T9b（64a2069）P1 触发 + T15 后端整体验证——ProjectService.save 新建分支建初始 Plan(GENERATING) + spawnPlanning（@Lazy 破循环依赖）；全量编译+测试通过。**后端 Track B（T1–T15）全部完成**。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
@@ -38,7 +39,7 @@
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：T15 后端整体验证（全量编译+测试，补缺口）→ 然后前端 Track F（F1 services + F2 MSW + F3/F4/F5 UI + F6 验证，`suid` skill，独立上下文）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试。
+**下一 fire**：前端 Track F 启动——F1 services（plan.ts/featureDesign.ts）+ F2 MSW handlers。**前端必须独立 sub-agent 上下文 + `suid` skill**（项目规则强制，前后端不混上下文）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）。
 
 ---
 
