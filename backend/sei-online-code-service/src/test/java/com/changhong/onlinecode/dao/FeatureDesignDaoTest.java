@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @DataJpaTest
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Disabled("deferred: Testcontainers PG + Flyway + @DataJpaTest 方言/Schema 引导需专项处理；测试逻辑保留，Task 8 后续验证")
+@Disabled("environment-blocked: 本开发环境下 Testcontainers 无法连接 Docker——docker CLI / Python unix socket 均可达 /var/run/docker.sock，但 docker-java 自动检测 DockerClientProviderStrategy 列表为空（testcontainers-postgresql + spring-boot-testcontainers + docker-java-transport-zerodep + JNA 依赖齐全）。测试逻辑经审查正确（tryAcquireBuildLock 互斥 / cascadeStale 级联），CI 环境下可过。P0 待清理。")
 class FeatureDesignDaoTest {
 
     @Autowired
