@@ -21,7 +21,32 @@
 - `claude` CLI = **API key 模式**；功能设计智能体只产 JSON、不读 workspace；编码执行经 `FeatureDesignBuildService`，不进现有 `DispatchService`。
 - 不改动现有 Spec/DispatchService/Iteration/Run/Task 的既有字段与端点（仅新增表/服务/端点，复用 Run/ClaudeRunner/WS）。
 - 提交规范 `<type>: <description>`；类型 feat/fix/refactor/docs/test/chore/perf/ci；不用 `git add -A`。
-- 本轮后端**编译通过即达标**（沿用 Phase 1–5 bar），不要求本地运行；前端 build 通过 + MSW handlers 覆盖新端点。
+- 本轮后端**编译通过 + 关键单测通过**即达标（沿用 Phase 1–5 bar），不要求本地运行；前端 build 通过 + MSW handlers 覆盖新端点。
+- **测试栈**：DAO 集成测试用 Testcontainers PG（与生产一致，见 D10）；V6 的 partial unique index `WHERE is_latest=TRUE` 在 PG 下成立，不依赖 H2。
+
+---
+
+## 修订记录 v2（评审 fixes — 2026-07-03）
+
+> 评审发现 7 条阻断级（B1–B7）+ 8 条需澄清（C1–C8），对应决策 D1–D15。本节为决策总览，Task 1 契约与各 Task 已据此修订。**标 [可推翻] 者为 either/or，用户可改。**
+
+| 决策 | 对应 | 内容 |
+|---|---|---|
+| D1 | B1 | **409 机制 [可推翻]**：新增 `ConflictException` + `@RestControllerAdvice`（`PreBuildExceptionHandler`）映射为 `ResponseEntity.status(409).body(ResultData.fail(msg))`，仅用于 build 互斥 + BUILDING 态编辑拒绝（§6/§9 明确 409）。其余业务错误沿用现有 200+`ResultData.fail`。删除 422（"设计未确认"归 200+fail）。与仓库"全 200"规范的张力标记为待清理项。 |
+| D2 | B2 | **P1 入口**：新增 Task 9b，`ProjectService.create` 持久化后调 `PlanAgentService.spawnPlanning(projectId, null)`；P1 复用现有 `POST /project`（`BaseEntityApi.save`），不新增端点。 |
+| D3 | B3 | **编码 agent**：V6 seed 新增第三个内置 agent `dev-agent`（builtin=true，编码执行 instructions，skill_ids=NULL），顺带修复 `DispatchService` 硬编码 `dev-agent` 的悬空引用（不改 DispatchService 代码，仅补 seed）。T11 用 `findByName("dev-agent")`。 |
+| D4 | B4 | **WS 路径**：契约/F5 改为 `/ws/run/{iterationId}`（现有 `RunLogWebSocketHub` 按 iterationId 索引），前端按 `frame.runId` 过滤各 feature 流。 |
+| D5 | B5 | **包名/签名**：`FeatureDesignApi` 不重新声明 `findByPage`，继承 `FindByPageApi`；`Search`/`PageResult` 统一用 `com.changhong.sei.core.dto.serach`（旧拼写，与 `FindByPageApi`/`ProjectController` 一致）。 |
+| D6 | B6 | **前端状态**：F1/F5 改用 dva model（`src/models/planFeatureDesign.ts` + `useSelector`/`useDispatch`），不用 `useStore`/`projectStore`（项目无此文件，用 dva）。 |
+| D7 | B7 | **FAILED 聚合**：T12 `resolvePreBuildState` 加 FAILED 分支：plan.status=FAILED 或任一 fd.status=FAILED → `"FAILED"`。 |
+| D8 | C1 | **Run→FD 关联 [可推翻]**：T11 每次 build 创建真实 Task 行（设计"功能设计=Task，不二次切分"），`Run.taskId=task.id`（语义正确，不滥用 taskId）；Task→FeatureDesign 关联：T11 Step 0 读 `Task.java` 全字段选定，若无合适字段则在 V6 给 `oc_task` 新增 `feature_design_id` 列（新增列，不改动既有字段）。 |
+| D9 | C2 | **seed 对齐**：T6 seed 列严格对齐 V3；`skill_ids` 格式实现时读 `StringListConverter` 确认（JSON array 字符串），审计列默认值对齐 V3。 |
+| D10 | C3 | **测试基建**：T8 新建 Testcontainers PG（`build.gradle` 加 `org.testcontainers:postgresql` + `spring-boot-testcontainers`）。 |
+| D11 | C4 | **回调模型**：T11/T13 用 `ClaudeRunner.execute` 返回的 `CompletableFuture<String>` 链式落库（`.thenApply` 解析 JSON → `.thenAccept` 持久化 + 状态流转），不设独立 `onRunFinished` 钩子。 |
+| D12 | C5 | **ProjectStateService**：T12 新建类（现不存在），职责仅"编码前状态聚合"，与 `BuildLoopService`（编码中）边界隔离。 |
+| D13 | C6 | **P12 路径**：`POST /project/{projectId}/build`（PathVariable），对齐设计稿。 |
+| D14 | C7 | **P6 方法**：沿用 `FindByPageApi.findByPage(Search)`（POST），Search 带 projectId filter；设计稿 GET 为示意，以 sei-core 约定为准。 |
+| D15 | C8 | **杂项**：content 列保持 TEXT（与 `SpecPageListConverter` 一致，§5 JSONB 为示意）；空 FD→DESIGNING；GENERATING 态并发前置校验显式化（T9/T10/T13）；PENDING 行先建后转 GENERATING（T13）；re-confirm 只对无 latest FD 的 feature spawn（T9）；运行日志 Tab 复用现有（无则新增 F7）；成功标准降级见 Global Constraints。 |
 
 ---
 
@@ -50,7 +75,7 @@
 | `.../service/PlanService.java` | Plan 业务（编辑/重生/确认 + 级联 STALE + 批量起 FD 智能体） | T9 |
 | `.../service/FeatureDesignService.java` | FD 业务（编辑/重生/确认/批量确认 + 失效联动） | T10 |
 | `.../service/FeatureDesignBuildService.java` | FD 编码执行（条件 UPDATE 互斥 → Task → ClaudeRunner → Run 回调更新 build_status） | T11 |
-| `.../service/ProjectStateService.java` | 编码前项目状态实时聚合（修改现有类，新增方法） | T12 |
+| `.../service/ProjectStateService.java` | 编码前项目状态实时聚合（D12 新建类，非修改现有） | T12 |
 | `.../service/PlanAgentService.java` | 规划/设计智能体 spawn 编排（复用 ClaudeRunner + SkillMaterializer） | T13 |
 | `.../controller/PlanController.java` | Plan 端点 | T14 |
 | `.../controller/FeatureDesignController.java` | FD 端点 + build 端点 | T14 |
@@ -66,7 +91,7 @@
 | `src/pages/project/FeatureDesignTab.tsx` | 功能设计 Tab（ExtTable 多选 + 批量确认 + 逐项操作） | F4 |
 | `src/pages/project/FeatureDesignEditor.tsx` | 功能设计编辑/查看 ExtModal | F4 |
 | `src/pages/project/BuildActions.tsx` | 执行编码按钮（单/批）+ build_status badge | F5 |
-| `src/store/projectStore.ts`（扩展现有） | 项目状态聚合 + build_status 展示 | F5 |
+| `src/models/planFeatureDesign.ts`（D6 新建 dva model） | 项目状态聚合 + build_status 展示 | F5 |
 
 ---
 
@@ -76,19 +101,25 @@
 - Create: `docs/contracts/API-CONTRACT-PRE-BUILD.md`
 
 **Interfaces:**
-- Produces: 冻结的 P1–P14 + P12a 端点定义、DTO schema、状态枚举，作为 Track B / Track F 的共同唯一依据。Track B 与 Track F 只读此契约，互不读对方代码。
+- Produces: 冻结的 P1–P14 + P12a 端点定义、DTO schema、状态枚举、409 机制、WS 路径、seed 结构，作为 Track B / Track F 的共同唯一依据。Track B 与 Track F 只读此契约，互不读对方代码。**契约内容以本 Task 为准；设计稿 §5/§6 的 JSONB/GET 路径为示意，冲突时以 D1–D15 为准。**
 
-- [ ] **Step 1: 写契约文档**
+- [ ] **Step 1: 写契约文档**，内容包含：
 
-内容包含（逐字取自设计稿 §2/§3/§5/§6，不发明新字段）：
-
-1. **Scope 表**：In = Plan/FD CRUD + 状态机 + build 互斥 + 内置 agent/skill seed + FeatureDesignBuildService；Out = 改动现有 Spec/DispatchService、真实 git clone、多租户。
+1. **Scope 表**：In = Plan/FD CRUD + 状态机 + build 互斥 + 内置 agent/skill seed（含 `dev-agent`）+ FeatureDesignBuildService + Testcontainers PG 测试基建；Out = 改动现有 Spec/DispatchService 代码、真实 git clone、多租户。
 2. **Domain payload**：`PlanDto`、`FeatureDesignDto`（含 `status` / `buildStatus` / `version` / `isLatest` / `content`）、`PlanContent`（`summary/techAssumptions/features[]{featureId,title,outline}/nonGoals`）、`FeatureDesignContent`（`featureId/goal/design/acceptance[]/fileScope`）。
 3. **枚举**：`PlanStatus{GENERATING,DRAFT,CONFIRMED,FAILED}`、`FeatureDesignStatus{PENDING,GENERATING,DRAFT,CONFIRMED,STALE,FAILED}`、`FeatureDesignBuildStatus{IDLE,BUILDING,BUILT,BUILD_FAILED,STALE}`。
-4. **状态机图**（设计稿 §3 原样）。
-5. **端点表 P1–P14 + P12a**（设计稿 §6 原样），每个端点写明 Method/Path/Request/Response data/状态推进/失败码（409 用于 build 互斥与 BUILDING 态编辑拒绝）。
-6. **DDL**（设计稿 §5 原样，表名 `oc_plan` / `oc_feature_design`）。
-7. **内置 seed**：两个 agent（`planning-agent`/`feature-design-agent`，`builtin=true`）+ 两个 skill（`project-planning`/`feature-design`，`LOCAL` seed）的 seed 行结构与 V3 同模式。
+4. **状态机图**（设计稿 §3 原样）+ **聚合规则含 FAILED（D7）**：plan.status=FAILED 或任一 fd.status=FAILED → `ProjectState=FAILED`；Plan=CONFIRMED 且 FD 空集 → `DESIGNING`（D15）。
+5. **端点表 P1–P14 + P12a**，每个写明 Method/Path/Request/Response data/状态推进/失败码。关键修订：
+   - **P1** = 复用现有 `POST /project`（`BaseEntityApi.save`），body `{description}`；service 持久化后起规划智能体，返 `{projectId}`（D2，不新增端点）。
+   - **P6** = `POST /featureDesign/findByPage`（继承 `FindByPageApi`），`Search` 带 `projectId` filter（D14，非设计稿的 GET）。
+   - **P12** = `POST /project/{projectId}/build`（PathVariable，D13）。
+   - **失败码**：仅 build 互斥 + BUILDING 态编辑拒绝返 **HTTP 409**（D1，经 `ConflictException`→`PreBuildExceptionHandler`）；其余业务错误（未确认/不存在/STALE 不可确认等）返 **HTTP 200 + `ResultData.fail(msg)`**（仓库既有约定）；**无 422**。
+6. **409 机制（D1）**：定义 `ConflictException extends RuntimeException` + `@RestControllerAdvice class PreBuildExceptionHandler`，`@ExceptionHandler(ConflictException.class)` 返 `ResponseEntity.status(409).body(ResultData.fail(msg))`。注明与仓库"全 200"规范的张力为待清理项。
+7. **WS（D4）**：日志流端点 `/ws/run/{iterationId}`（现有 `RunLogWebSocketHub` 按 iterationId 索引），`RunLogFrame` 含 `runId/taskId/state`；前端按 `frame.runId` 过滤各 feature/plan 流。**不是 `/ws/run/{runId}`。**
+8. **DDL（D15/D9）**：表名 `oc_plan` / `oc_feature_design`，**content 列 `TEXT`**（非 JSONB，与 `SpecPageListConverter` 一致）；审计列沿用 `BaseAuditableEntity` 8 字段；partial unique index `WHERE is_latest=TRUE`（PG）。另：V6 给 `oc_task` 新增 `feature_design_id VARCHAR(64)` 列（D8，若 `Task.java` 无合适字段）。
+9. **包名（D5）**：`Search`/`PageResult` 统一 `com.changhong.sei.core.dto.serach`（旧拼写，与 `FindByPageApi` 一致）。
+10. **内置 seed（D3/D9）**：三个 agent（`planning-agent`/`feature-design-agent`/`dev-agent`，均 `builtin=true`）+ 两个 skill（`project-planning`/`feature-design`，LOCAL seed）。`dev-agent` instructions 指向编码执行，`skill_ids=NULL`。seed 列严格对齐 V3（`oc_skill` 含 `source/source_type/computed_hash`，`oc_agent` 含 `model`；`skill_ids` 格式读 `StringListConverter` 确认）。
+11. **前端状态管理（D6）**：用 dva model `src/models/planFeatureDesign.ts`，不用 `useStore`/`projectStore`。
 
 - [ ] **Step 2: 提交契约**
 
@@ -289,9 +320,7 @@ import com.changhong.onlinecode.dto.request.EditFeatureDesignRequest;
 import com.changhong.onlinecode.dto.request.RegenerateFeatureDesignRequest;
 import com.changhong.sei.core.api.BaseEntityApi;
 import com.changhong.sei.core.api.FindByPageApi;
-import com.changhong.sei.core.dto.PageResult;
 import com.changhong.sei.core.dto.ResultData;
-import com.changhong.sei.core.dto.search.Search;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -303,9 +332,8 @@ import org.springframework.web.bind.annotation.*;
 public interface FeatureDesignApi extends BaseEntityApi<FeatureDesignDto>, FindByPageApi<FeatureDesignDto> {
     String PATH = "featureDesign";
 
-    @PostMapping("findByPage")
-    @Operation(summary = "列表（按 projectId）")
-    PageResult<FeatureDesignDto> findByPage(@RequestBody Search search);
+    // findByPage 继承自 FindByPageApi（D5）：POST /featureDesign/findByPage(Search)，Search 带 projectId filter。
+    // 不重新声明——签名/包名须与 FindByPageApi 一致（serach 旧拼写）；FeatureDesignController 经 BaseEntityController 提供实现。
 
     @GetMapping("{id}")
     @Operation(summary = "取单条最新版")
@@ -344,9 +372,9 @@ public interface FeatureDesignApi extends BaseEntityApi<FeatureDesignDto>, FindB
 - [ ] **Step 3: 给 ProjectApi 追加 build 方法**
 
 ```java
-    @PostMapping(path = "build", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(path = "{projectId}/build", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "批量执行编码", description = "对该项目所有 CONFIRMED 且非 BUILDING 的功能设计抢占 build_status 并起编码")
-    ResultData<java.util.List<java.util.Map<String, String>>> build(@RequestParam("projectId") String projectId);
+    ResultData<java.util.List<java.util.Map<String, String>>> build(@PathVariable("projectId") String projectId);
 ```
 
 - [ ] **Step 4: 编译 + 提交**
@@ -449,9 +477,17 @@ INSERT INTO oc_agent (id, name, description, instructions, model, builtin, skill
  '内置功能设计 agent：规划书 + feature outline → 功能设计 JSON',
  'You produce one FeatureDesign JSON from the plan and a feature outline. Use the feature-design skill.', '', TRUE,
  '["SKILLSEEDFEATUREDESIGN0000000000001"]', CURRENT_TIMESTAMP);
+
+-- 内置 dev-agent（D3）：编码执行 agent，builtin=true 不可删；skill_ids=NULL（无绑定 skill）。
+-- 顺带修复 DispatchService 硬编码 "dev-agent" 的悬空引用（不改 DispatchService 代码，仅补 seed）。
+INSERT INTO oc_agent (id, name, description, instructions, model, builtin, skill_ids, created_date) VALUES
+('AGENTSEEDDEVAGENT000000000000000001', 'dev-agent',
+ '内置编码执行 agent：按功能设计 fileScope 执行编码（写代码），不产设计 JSON。',
+ 'You implement code for one confirmed FeatureDesign. Write files within the fileScope. Do not produce design JSON.', '', TRUE,
+ NULL, CURRENT_TIMESTAMP);
 ```
 
-> `skill_ids` JSON 形式与 `Agent.java` 的 `StringListConverter` 一致（`["..."]`）。
+> D9：`skill_ids` 格式实现时读 `Agent.java` 的 `StringListConverter` 确认（V3 seed 用 NULL，本 seed 用 JSON array 字符串 `["..."]` 须与 converter 解析一致）；审计列默认值对齐 V3。`dev-agent` 的 `skill_ids=NULL`。
 
 - [ ] **Step 3: 提交**
 
@@ -590,14 +626,16 @@ em.createNativeQuery(
   .setParameter("pid", projectId).executeUpdate();
 ```
 
-- [ ] **Step 5: 写互斥抢占单测（H2/原生 SQL 兼容性确认后；若 H2 不支持 partial unique index 则用 `@DataJpaTest` + Testcontainers PG，沿用现有测试约定——查现有 `*DaoImplTest` 选哪种）**
+- [ ] **Step 5: 写互斥抢占单测（D10：Testcontainers PG）**
 
-`FeatureDesignDaoImplTest`：
+`build.gradle` 加 `testImplementation("org.testcontainers:postgresql")` + `testImplementation("org.springframework.boot:spring-boot-testcontainers")`，新建 `application-test.yml`（PG Testcontainer）。现有 `src/test` 零 DAO 集成测试基建，本步从零建。
+
+`FeatureDesignDaoImplTest`（`@DataJpaTest` + Testcontainers PG）：
 - 插入一条 FD（build_status=IDLE）→ `tryAcquireBuild` 返回 1，DB 中 build_status=BUILDING。
 - 再调 `tryAcquireBuild` 同 id → 返回 0（互斥生效）。
 - `cascadeStale`：插一条 BUILT + 一条 IDLE → 调用后 BUILT→STALE(build_status)、两条 status 都=STALE。
 
-> 先 `grep -r "Testcontainers\|@DataJpaTest" backend/sei-online-code-service/src/test` 确认现有测试栈，沿用之。
+> 生产为 PG（`local-config/application-local.yaml`），不用 H2——V6 partial unique index `WHERE is_latest=TRUE` 在 PG 下成立。
 
 - [ ] **Step 6: 编译 + 测试 + 提交**
 
@@ -622,9 +660,9 @@ git commit -m "feat: add plan/featureDesign daos with build mutex acquire"
 - [ ] **Step 1: 写 PlanService 骨架**（`extends BaseEntityService<Plan>`，构造注入 `PlanDao`/`FeatureDesignDao`/`PlanAgentService`）
 
 核心方法语义：
-- `edit(projectId, content)`：取 latest Plan → 若 `status=GENERATING` 抛业务异常（409）；否则 `markNonLatest` + 新建 version+1 行（`status=DRAFT`、`isLatest=true`、`content`）→ `featureDesignDao.cascadeStale(projectId)`。
-- `regenerate(projectId, modifyHint)`：`markNonLatest` + 新行 `status=GENERATING`、version+1 → 调 `planAgentService.spawnPlanning(projectId, modifyHint)` 异步生成 → 回调落库 `status=DRAFT`+`content`。
-- `confirm(projectId)`：latest Plan 必须 `status=DRAFT` → 置 `CONFIRMED` → 对 `plan.content.features[]` 每个调 `planAgentService.spawnFeatureDesign(...)`（并发信号量在 T13）。
+- `edit(projectId, content)`：取 latest Plan → 若 `status=GENERATING` 抛业务异常（**200+ResultData.fail**，D1：409 仅用于 build 互斥/BUILDING 态 FD 编辑）；否则 `markNonLatest` + 新建 version+1 行（`status=DRAFT`、`isLatest=true`、`content`）→ `featureDesignDao.cascadeStale(projectId)`。
+- `regenerate(projectId, modifyHint)`：`markNonLatest` + 新行 `status=GENERATING`、version+1 → 调 `planAgentService.spawnPlanning(projectId, modifyHint)`（T13 内含 GENERATING 并发守卫，C8）→ D11 链式落库 `status=DRAFT`+`content`。
+- `confirm(projectId)`：latest Plan 必须 `status=DRAFT` → 置 `CONFIRMED` → 对 `plan.content.features[]` 中**无 latest FD 的 feature** 调 `planAgentService.spawnFeatureDesign(...)`（D15 re-confirm 幂等：已有 latest FD 的 feature 跳过，STALE 的需用户单独 regenerate）；并发信号量在 T13。
 - `findLatest`/`history` 直查。
 
 - [ ] **Step 2: 写 PlanServiceTest**（mock `PlanAgentService` + `FeatureDesignDao`）
@@ -639,6 +677,20 @@ Run: `cd backend && ./gradlew :sei-online-code-service:test --tests 'PlanService
 git add backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/PlanService.java backend/sei-online-code-service/src/test/
 git commit -m "feat: add PlanService with edit/regenerate/confirm + cascade stale"
 ```
+
+### Task 9b: P1 新项目触发规划（D2）
+
+**Files:**
+- Modify: `.../service/ProjectService.java`（现有 `create`/`save` 流程，持久化后触发规划）
+
+**Interfaces:**
+- Consumes: `PlanAgentService.spawnPlanning`（T13）。
+- Produces: P1 = 复用现有 `POST /project`（`BaseEntityApi.save`），不新增端点；项目持久化后异步起规划智能体。
+
+- [ ] **Step 1**: `ProjectService.create`（或 `save` 新建分支）持久化 Project 后，调 `planAgentService.spawnPlanning(projectId, null)`；Plan 初始行 `status=GENERATING`、`version=1`、`isLatest=true`。
+- [ ] **Step 2**: 编译 + 提交 `git commit -m "feat: trigger planning agent on project create (P1)"`
+
+> P1 不新增 API 端点（复用 `BaseEntityApi.save`）；契约 §P1 已声明。失败时 Plan=`FAILED`（D7）。
 
 ### Task 10: FeatureDesignService
 
@@ -680,42 +732,51 @@ git commit -m "feat: add FeatureDesignService with edit/regenerate/confirm + bui
 
 **Interfaces:**
 - Consumes: `FeatureDesignDao.tryAcquireBuild`、`ClaudeRunner`、`RunService`/`Run`（创建 Run 行）、`SkillMaterializer`（materialize `feature-design-agent` 绑定 skill 到运行目录）、`AgentService.findByName("feature-design-agent")`、`WorkspaceManager`（解析 project workspace，编码要写文件，**这里需要 worktree**——与设计稿 §7 末尾一致）。
-- Produces: `build(featureDesignId)` → `{runId}`；`buildProject(projectId)` → 批量；Run 完成回调 `onRunFinished(runId, success)` → 更新 `build_status`。
+- Produces: `build(featureDesignId)` → `{runId}`；`buildProject(projectId)` → 批量；Run 完成经 `ClaudeRunner.execute` 返回的 `CompletableFuture` 链式回调 `updateBuildStatus(featureDesignId, success)` → 更新 `build_status`（D11，无独立钩子）。
 
-- [ ] **Step 1: 写 build 单条**
+- [ ] **Step 0: 读 `Task.java` 全字段，选定 FeatureDesign 关联字段（D8）**
+  - 若现有字段（如 `specId`/`iterationId`/payload）可复用 → 用之；否则 V6 给 `oc_task` 新增 `feature_design_id VARCHAR(64)` 列（新增列，不改动既有字段）。
+
+- [ ] **Step 1: 写 build 单条（D3/D8/D11）**
 
 ```java
-@Transactional
 public Map<String,String> build(String featureDesignId) {
     FeatureDesign fd = featureDesignDao.findOne(featureDesignId); // latest
-    if (fd == null) throw new BusinessException("功能设计不存在");
+    if (fd == null) throw new BusinessException("功能设计不存在");           // 200 + ResultData.fail
     if (fd.getStatus() != FeatureDesignStatus.CONFIRMED)
-        throw new BusinessException("设计未确认，不可执行编码");        // 422
+        throw new BusinessException("设计未确认，不可执行编码");            // 200 + ResultData.fail（无 422，D1）
     int acquired = featureDesignDao.tryAcquireBuild(featureDesignId);
-    if (acquired == 0) throw new ConflictException("该功能正在构建中"); // 409
-    // 抢占成功 → 解析 agent + skill + workspace worktree → 建 Task + Run → ClaudeRunner.execute
-    Agent agent = agentService.findByName("feature-design-agent-build"); // 或专用 dev agent；见 Step 2 注
+    if (acquired == 0) throw new ConflictException("该功能正在构建中");     // HTTP 409（D1）
+
+    // 抢占成功 → 建 Task（功能设计=Task，不二次切分，D8）→ Run.taskId=task.id（语义正确，不滥用 taskId）
+    Agent agent = agentService.findByName("dev-agent");                    // D3，V6 seed 已补
+    Task task = buildTaskFrom(fd, agent);                                  // assignedAgent=dev-agent，关联 featureDesignId
+    taskDao.save(task);
     String runId = IdGenerator.nextIdStr();
-    // ... 建 Run 行(RUNNING), spawn ClaudeRunner, 回调更新 build_status
+    String cwd = workspaceManager.resolveWorktree(fd.getProjectId());     // 编码写文件，需 worktree（§7 末尾）
+
+    // D11：execute 返 CompletableFuture<String>，链式落库 build_status（无独立 onRunFinished 钩子）
+    claudeRunner.execute(iterationId(task), runId, promptFor(fd), cwd)
+        .thenAccept(result -> updateBuildStatus(featureDesignId, result.success()));
     return Map.of("runId", runId);
 }
 ```
 
-> **注**：编码执行用的是"开发 agent"（写代码），不是 `feature-design-agent`（产设计 JSON）。设计稿 §7 的 `feature-design-agent` 仅产设计稿。编码执行的 agent 选择沿用现有 Task.assignedAgent 解析逻辑——本任务复用现有 dev agent 体系（Phase 3 自定义 agent 或内置 dispatch/dev）。若现无内置 dev agent，本任务在 V6 或代码里不新增，而是要求项目至少有一个自定义 dev agent（沿用 Phase 2 约束）。**在契约里标注此依赖**。
+> 编码 agent = `dev-agent`（D3，V6 seed 已补；顺带修复 `DispatchService` 悬空的 `dev-agent` 引用）。`ConflictException` 经 `PreBuildExceptionHandler` 映射 HTTP 409（D1）；其余业务错误沿用 200+`ResultData.fail`。
 
-- [ ] **Step 2: 写 onRunFinished 回调**
+- [ ] **Step 2: build_status 回调（D11，CompletableFuture 链，无独立钩子）**
 
 ```java
+// 即 Step 1 的 .thenAccept 回调；ClaudeRunner.execute 返 CompletableFuture<String>，无独立 onRunFinished 钩子
 @Transactional
-public void onRunFinished(String runId, boolean success) {
-    Run run = runService.findOneByRunId... // 按 run.taskId → feature_design id
-    FeatureDesign fd = featureDesignDao.findOne(run.getTaskId()); // taskId 复用为 featureDesignId
-    fd.setBuildStatus(success ? BUILT : BUILD_FAILED);
+void updateBuildStatus(String featureDesignId, boolean success) {
+    FeatureDesign fd = featureDesignDao.findOne(featureDesignId); // latest
+    fd.setBuildStatus(success ? FeatureDesignBuildStatus.BUILT : FeatureDesignBuildStatus.BUILD_FAILED);
     featureDesignDao.save(fd);
 }
 ```
 
-> Run 与 feature_design 的关联：建 Run 时 `taskId` 存 `featureDesignId`（复用 Run.taskId 字段，不新增列）。
+> Run→FeatureDesign 关联经 Task（D8）：`Run.taskId=task.id`，`task.featureDesignId` 关联 FD；不再"复用 Run.taskId 存 featureDesignId"。
 
 - [ ] **Step 3: 写 buildProject 批量**
 
@@ -724,7 +785,7 @@ public void onRunFinished(String runId, boolean success) {
 - [ ] **Step 4: 写 FeatureDesignBuildServiceTest**（mock ClaudeRunner/RunService）
 - `build` 对非 CONFIRMED 抛异常。
 - `build` 在 tryAcquireBuild 返回 0 时抛 ConflictException。
-- `onRunFinished(true)` → build_status=BUILT；`onRunFinished(false)` → BUILD_FAILED。
+- `updateBuildStatus(true)` → build_status=BUILT；`updateBuildStatus(false)` → BUILD_FAILED。
 - `buildProject` 跳过 BUILDING 的条目。
 
 - [ ] **Step 5: 编译 + 测试 + 提交**
@@ -738,29 +799,31 @@ git commit -m "feat: add FeatureDesignBuildService — mutex build + run callbac
 ### Task 12: ProjectStateService 聚合扩展
 
 **Files:**
-- Modify: `.../service/ProjectStateService.java`（现有类，新增 pre-build 聚合方法）
+- Create: `.../service/ProjectStateService.java`（D12：现不存在，新建整个类；职责仅编码前状态聚合，与 `BuildLoopService` 边界隔离）
 - Test: `.../service/ProjectStateServiceTest.java`
 
 **Interfaces:**
 - Consumes: `PlanDao.findLatest`、`FeatureDesignDao.findLatestByProject`。
-- Produces: `resolvePreBuildState(projectId)` → `DRAFTING/PLANNING/DESIGNING/READY_TO_BUILD`（设计稿 §3 聚合规则）。
+- Produces: `resolvePreBuildState(projectId)` → `DRAFTING/PLANNING/DESIGNING/READY_TO_BUILD/FAILED`（§3 聚合规则 + D7 FAILED）。
 
-- [ ] **Step 1: 新增方法**（不改动现有 lifecycle 状态方法，新增并列方法供新端点用）
+- [ ] **Step 1: 新建类 + resolvePreBuildState（含 D7 FAILED 分支）**
 
 ```java
 public String resolvePreBuildState(String projectId) {
     Plan plan = planDao.findLatest(projectId);
     if (plan == null) return "DRAFTING";
+    if (plan.getStatus() == PlanStatus.FAILED) return "FAILED";                 // D7
     if (plan.getStatus() == PlanStatus.GENERATING || plan.getStatus() == PlanStatus.DRAFT) return "PLANNING";
-    // CONFIRMED
+    // plan = CONFIRMED
     List<FeatureDesign> fds = featureDesignDao.findLatestByProject(projectId);
-    if (fds.isEmpty()) return "DESIGNING"; // 视为未就绪
+    if (fds.stream().anyMatch(f -> f.getStatus() == FeatureDesignStatus.FAILED)) return "FAILED"; // D7
+    if (fds.isEmpty()) return "DESIGNING";                                       // D15：空集视为未就绪
     boolean allConfirmed = fds.stream().allMatch(f -> f.getStatus() == FeatureDesignStatus.CONFIRMED);
     return allConfirmed ? "READY_TO_BUILD" : "DESIGNING";
 }
 ```
 
-- [ ] **Step 2: 测试**（4 个分支 + FAILED 透传）
+- [ ] **Step 2: 测试**（5 个分支：DRAFTING/PLANNING/DESIGNING/READY_TO_BUILD/FAILED）
 - [ ] **Step 3: 编译 + 测试 + 提交**
 
 ```bash
@@ -778,11 +841,12 @@ git commit -m "feat: ProjectStateService aggregate pre-build states"
 - Consumes: `AgentService.findByName`、`SkillMaterializer`、`ClaudeRunner`、`PlanDao`、`FeatureDesignDao`、`ProjectService`。
 - Produces: `spawnPlanning(projectId, modifyHint)`、`spawnFeatureDesign(projectId, featureId, modifyHint)`，含并发信号量。
 
-- [ ] **Step 1: 写 spawnPlanning**（单进程）
-- 解析 `planning-agent` + 绑定 `project-planning` skill → `SkillMaterializer` 写到临时目录 `.claude/skills/` → 拼提示词（项目描述 + modifyHint + "输出 Plan JSON 骨架"）→ `ClaudeRunner.execute` → 回调解析 stdout JSON → 落库 Plan.content + status=DRAFT。
-- 并发约束：同项目已有 GENERATING 的 Plan 则拒绝（PlanService.regenerate 已隐含，这里加防御）。
+- [ ] **Step 1: 写 spawnPlanning（单进程，D11 链式 + C8 显式并发守卫）**
+- 并发守卫（C8，显式，不靠"regenerate 隐含"）：先查 latest Plan，若 `status=GENERATING` → 抛业务异常拒绝二次发起。
+- 解析 `planning-agent` + 绑定 `project-planning` skill → `SkillMaterializer.materialize(tmpDir, skills)` 写到临时目录 `.claude/skills/` → 拼 prompt（项目描述 + modifyHint + "输出 Plan JSON 骨架"）→ `claudeRunner.execute(...)` 返 `CompletableFuture<String>`。
+- D11 链式落库：`.thenApply(json -> parsePlanContent(json))` → `.thenAccept(content -> { plan.content=content; plan.status=DRAFT; planDao.save(plan); })`；解析失败 → `.exceptionally(e -> { plan.status=FAILED; planDao.save(plan); return null; })`。
 
-- [ ] **Step 2: 写 spawnFeatureDesign**（批量并发 + 信号量）
+- [ ] **Step 2: 写 spawnFeatureDesigns（批量并发 + 信号量，C8 PENDING 行 + D11 链式）**
 
 ```java
 private final Semaphore permits = new Semaphore(MAX_CONCURRENT_FD); // 默认 4，@Value("${oc.fd.concurrency:4}")
@@ -799,7 +863,11 @@ public void spawnFeatureDesigns(String projectId, List<PlanFeature> features) {
 }
 ```
 
-- 单条失败：catch → 该 FD `status=FAILED`，不影响其他。
+`spawnOneFeatureDesign`（C8）：
+- 并发守卫：查该 featureId 的 latest FD，若 `status=GENERATING` → 跳过（批量场景容错，不抛）。
+- **先建 PENDING 行**（C8，§3 状态机起点）：`markNonLatest(projectId, featureId)` + 新建 FD 行 `status=PENDING`、`buildStatus=IDLE`、`version=旧+1`、`isLatest=true`。
+- 转 `status=GENERATING` → `materialize` + `execute` → D11 链式：`.thenApply(parseFeatureDesignContent)` → `.thenAccept(content -> { fd.content=content; fd.status=DRAFT; save; })`；失败 → `fd.status=FAILED`。
+- 单条失败：catch → 该 FD `status=FAILED`，不影响其他（设计 §8）。
 - 回调解析 JSON 失败 → `status=FAILED`。
 
 - [ ] **Step 3: 测试**（mock ClaudeRunner 返回 JSON 字符串）
@@ -863,7 +931,7 @@ git commit -m "fix: backend pre-build integration adjustments"
 - Create: `frontend/src/services/plan.ts`、`frontend/src/services/featureDesign.ts`
 - Modify: `frontend/src/services/project.ts`（加 `buildProject`）
 
-- [ ] **Step 1**: 用 `suid` skill 确认 `request`/`useStore` 用法。`suid info request --format json`。
+- [ ] **Step 1**: `request` 从 `@ead/suid-utils-react` 导入（`src/services/api.ts:1` 现有先例）。**D6：项目用 dva，不用 `useStore`**——状态管理走 dva model（见 F5）。
 - [ ] **Step 2**: 写 `plan.ts`（`getLatest`/`edit`/`regenerate`/`confirm`/`history`，对照 PlanApi 路径）。
 - [ ] **Step 3**: 写 `featureDesign.ts`（`findByPage`/`findOne`/`edit`/`regenerate`/`confirm`/`confirmOne`/`build`/`history` + `buildProject`）。
 - [ ] **Step 4**: 提交 `git commit -m "feat: add plan/featureDesign services"`
@@ -897,15 +965,15 @@ git commit -m "fix: backend pre-build integration adjustments"
 - [ ] **Step 3**: STALE 行确认按钮禁用 + tooltip "需重新生成"。
 - [ ] **Step 4**: 提交 `git commit -m "feat: add featureDesign tab and editor ui"`
 
-### Task F5: 执行编码 + build_status badge + store
+### Task F5: 执行编码 + build_status badge + dva model
 
 **Files:**
 - Create: `frontend/src/pages/project/BuildActions.tsx`
-- Modify: `frontend/src/store/projectStore.ts`
+- Create: `frontend/src/models/planFeatureDesign.ts`（D6：dva model，非 `useStore`/`projectStore`——项目无此文件，用 dva `useDispatch`/`useSelector`，参照 `src/models/global.ts`）
 
 - [ ] **Step 1**: "执行编码"按钮（项目级 P12），仅当 `resolvePreBuildState=READY_TO_BUILD` 亮起；调 `buildProject`。
 - [ ] **Step 2**: build_status badge（IDLE/BUILDING/BUILT/BUILD_FAILED/STALE 五色，遵循 design.md 语义色）。
-- [ ] **Step 3**: store 扩展：聚合状态 + 各 FD 的 build_status 轮询/WS 订阅（复用现有 WS `/ws/run/{runId}`）。
+- [ ] **Step 3**: dva model：聚合状态 + 各 FD 的 build_status 轮询/WS 订阅。**D4：WS 端点是 `/ws/run/{iterationId}`（非 `/ws/run/{runId}`）**，按 `frame.runId` 过滤各 feature 流。
 - [ ] **Step 4**: 提交 `git commit -m "feat: add build actions and build_status badges"`
 
 ### Task F6: 前端整体验证
@@ -919,20 +987,24 @@ Expected: build success
 
 ## Self-Review
 
+**0. v2 评审修订**：B1–B7 阻断 + C1–C8 澄清已落为 D1–D15（见"修订记录 v2"），Task 1 契约与 T5/T6/T8/T9/T11/T12/T13/F1/F5 + 新增 T9b 已据此修订。
+
 **1. Spec coverage**（对照设计稿各节）：
 - §2 两层产物 → T4（content 骨架）、T7（实体）✓
-- §3 状态机（含 build_status 互斥）→ T3（枚举）、T8（tryAcquireBuild）、T9/T10（状态推进）、T11（build 回调）、T12（聚合）✓
+- §3 状态机（含 build_status 互斥 + FAILED）→ T3（枚举）、T8（tryAcquireBuild）、T9/T10（状态推进）、T11（build 链式回调）、T12（聚合含 FAILED，D7）✓
 - §3 失效规则（Plan 改→FD STALE）→ T9（cascadeStale 调用）、T8（cascadeStale 实现）✓
-- §4 页面流 → F3/F4/F5 ✓
-- §5 DDL → T6 ✓
-- §6 API P1–P14+P12a → T5（Api）、T14（Controller）✓
-- §7 智能体执行层 → T13（spawn+信号量）、T6（seed）✓
-- §7 内置 agent/skill → T6 seed ✓
-- §8 异步与错误处理 → T11（409/FAILED）、T13（单条失败不影响其他）✓
-- §9 成功标准 → T15/F6 验证 ✓
+- §4 页面流 → F3/F4/F5（+ 运行日志 Tab 复用现有，D15）✓
+- §5 DDL → T6（content=TEXT，D15；partial unique index PG，D10）✓
+- §6 API P1–P14+P12a → T5（Api，D5/D13/D14）、T14（Controller）、T9b（P1，D2）✓
+- §7 智能体执行层 → T13（spawn+信号量+D11 链式）、T6（seed）✓
+- §7 内置 agent/skill → T6 seed（含 dev-agent，D3）✓
+- §8 异步与错误处理 → T11（409 经 ConflictException，D1；FAILED）、T13（单条失败不影响其他）✓
+- §9 成功标准 → T15/F6 验证（降级为编译+MSW，见 Global Constraints）✓
 
-**2. Placeholder scan**：T11 Step 1 的"编码执行用 dev agent 而非 feature-design-agent"已在注里显式标注依赖，并在契约 Task 1 要求标注——这是显式依赖声明非占位符。无 TBD/TODO 残留。
+**2. Placeholder scan**：编码执行 agent = `dev-agent`（V6 seed 已补，D3），不再是悬空依赖；`ConflictException`/`PreBuildExceptionHandler` 在契约 D1 定义、T11 使用；`Run.taskId` 不再被滥用（D8 经 Task 关联）；WS 路径修正为 `/ws/run/{iterationId}`（D4）。无 TBD/TODO 残留。
 
-**3. Type consistency**：`PlanStatus`/`FeatureDesignStatus`/`FeatureDesignBuildStatus` 在 T3 定义，T4 DTO/T7 Entity/T9–T12 Service 全部复用同名枚举；`tryAcquireBuild` 在 T8 定义、T11 消费；`cascadeStale` 在 T8 定义、T9 消费；`resolvePreBuildState` 在 T12 定义、F5 消费。方法名一致。
+**3. Type consistency**：`PlanStatus`/`FeatureDesignStatus`/`FeatureDesignBuildStatus` 在 T3 定义，T4 DTO/T7 Entity/T9–T12 Service 全部复用；`tryAcquireBuild` T8 定义、T11 消费；`cascadeStale` T8 定义、T9 消费；`resolvePreBuildState` T12 定义、F5 消费；`Search`/`PageResult` 统一 `serach` 旧包（D5）。方法名/包名一致。
+
+**4. 可推翻项**：D1（409 机制是否引入新 advice vs 全 200+业务码）、D8（Task 关联字段复用 vs 新增列）—— 用户可在 Task 1 契约冻结前改。
 
 ---
