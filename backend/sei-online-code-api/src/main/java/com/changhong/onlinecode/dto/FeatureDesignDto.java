@@ -6,6 +6,8 @@ import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.util.Date;
+
 /**
  * FeatureDesignDto DTO。契约 §2.3 —— 功能设计。
  *
@@ -39,6 +41,12 @@ public class FeatureDesignDto extends BaseEntityDto {
 
     @Schema(description = "是否最新版本", example = "true")
     private Boolean isLatest;
+
+    @Schema(description = "创建时间")
+    private Date createdDate;
+
+    @Schema(description = "最后编辑时间")
+    private Date lastEditedDate;
 
     public String getProjectId() {
         return projectId;
@@ -102,5 +110,21 @@ public class FeatureDesignDto extends BaseEntityDto {
 
     public void setIsLatest(Boolean isLatest) {
         this.isLatest = isLatest;
+    }
+
+    public Date getCreatedDate() {
+        return createdDate;
+    }
+
+    public void setCreatedDate(Date createdDate) {
+        this.createdDate = createdDate;
+    }
+
+    public Date getLastEditedDate() {
+        return lastEditedDate;
+    }
+
+    public void setLastEditedDate(Date lastEditedDate) {
+        this.lastEditedDate = lastEditedDate;
     }
 }

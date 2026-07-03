@@ -36,4 +36,15 @@ public class PlanAgentService {
     public void spawnFeatureDesigns(String projectId, List<PlanFeature> features) {
         // TODO(T13): implement — ClaudeRunner + SkillMaterializer + 信号量 + D11 链式落库
     }
+
+    /**
+     * spawn 单个功能设计智能体
+     *
+     * @param projectId 项目 id
+     * @param featureId feature id
+     * @param modifyHint 修改提示
+     */
+    public void spawnFeatureDesign(String projectId, String featureId, String modifyHint) {
+        // TODO(T13): implement — ClaudeRunner + SkillMaterializer + 信号量 + D11 链式落库
+    }
 }
