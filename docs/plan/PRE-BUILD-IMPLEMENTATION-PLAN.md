@@ -936,12 +936,3 @@ Expected: build success
 **3. Type consistency**：`PlanStatus`/`FeatureDesignStatus`/`FeatureDesignBuildStatus` 在 T3 定义，T4 DTO/T7 Entity/T9–T12 Service 全部复用同名枚举；`tryAcquireBuild` 在 T8 定义、T11 消费；`cascadeStale` 在 T8 定义、T9 消费；`resolvePreBuildState` 在 T12 定义、F5 消费。方法名一致。
 
 ---
-
-## Execution Handoff
-
-Plan complete and saved to `docs/plan/PRE-BUILD-IMPLEMENTATION-PLAN.md`. Two execution options:
-
-1. **Subagent-Driven (recommended)** — 按 Track 派发独立 sub-agent（Track B 用 `eadp-backend`、Track F 用 `suid`），任务间评审，符合项目"前后端独立上下文"强制约束。
-2. **Inline Execution** — 本会话内分批执行 + 检查点（注意：项目规范禁止前后端同上下文开发，inline 仅适合单 track 内推进）。
-
-> 因项目 CLAUDE.md 强制"前后端必须分别用不同子 agent 开发，不能在一个上下文中同时开发前后端"，**Track B 与 Track F 必须分两个独立 sub-agent**，不可在同一次 inline 会话里同时改前后端。建议：先 Track B 全部完成（或先 Track F），再另一 track。

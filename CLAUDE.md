@@ -37,5 +37,5 @@
 - Backend MUST NOT reference frontend code (frontend)
 
 ## rules
-- 如果要求前后端同时开发，前后端必须先完成接口契约约定到docs,然后分别使用不同的子agent开发，不能在一个上下文中同时开发前后端
+- 如果要求前后端同时开发，必须使用superpowers进行任务拆分和分派，如果没有插件就安装插件
 - 项目类所有的CLAUDE.md和AGENT.md都是相同约束，你只用了解其中一个
