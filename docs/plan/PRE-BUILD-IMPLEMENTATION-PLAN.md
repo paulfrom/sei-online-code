@@ -22,10 +22,11 @@
 | T7 实体+转换器 | ✅ 完成 | 9c8b353 实体/converter + 09ee879 converter 测试通过 |
 | T8 DAO | 🟡 源码✅/测试延后 | 4dcbe2c+fbd35f0：markNonLatest/cascadeStale 写方法已加（接口式 @Query）；**Testcontainers DAO 测试 @Disabled 延后**（@DataJpaTest+Flyway+方言引导需专项） |
 | T9 PlanService | 🟡 源码✅/测试3/6 | bf51eb4+671fcb5：edit/regenerate/confirm/history + PlanAgentService 桩；**测试 3/6 通过**（rejection 路径，bootstrapContext 模式）；3 success @Disabled（super.save.validateUniqueCode 需 @SpringBootTest） |
-| T10–T15 | ⬜ 未开始 | FeatureDesignService/FeatureDesignBuildService/ProjectStateService/PlanAgentService(实现)/Controllers 缺；T5 Step3(ProjectApi.build) 随 T14 |
+| T10 FeatureDesignService | 🟡 源码✅/测试4/8 | 2cb57e6：edit/regenerate/confirm/confirmOne/history + ConflictException(409)；FeatureDesignDto 补 audit；PlanAgentService 桩加 spawnFeatureDesign；**测试 4/8 通过**（rejection：BUILDING→409、STALE/非DRAFT 拒绝），4 success @Disabled |
+| T11–T15 | ⬜ 未开始 | FeatureDesignBuildService/ProjectStateService/PlanAgentService(实现)/Controllers 缺；T5 Step3(ProjectApi.build) 随 T14 |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**本轮完成**：发现 sei-core 测试模式（`BuildLoopServiceOptimizeTest` 的 `@BeforeAll bootstrapContext` 注入 mock `ApplicationContext` 到 `ApplicationContextHolder`）→ 解锁 PlanServiceTest，3/6 通过（rejection 路径验证 GENERATING/DRAFT 守卫）；3 success 路径 @Disabled（super.save.validateUniqueCode 钩子需 @SpringBootTest，仓库无既有 super.save 单测先例）。
+**本轮完成**：T10 FeatureDesignService（2cb57e6）—— edit/regenerate/confirm/confirmOne/history + ConflictException(409)；FeatureDesignDto 补 audit 字段；PlanAgentService 桩加 spawnFeatureDesign；测试 4/8 通过（rejection：BUILDING→409、STALE/非DRAFT 拒绝，bootstrapContext 模式）。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
@@ -33,7 +34,7 @@
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：Task 10 FeatureDesignService（backend-engineer sub-agent；FeatureDesignDto 需同 PlanDto 补 `Date` audit 字段；**service 测试用 bootstrapContext 模式**——`@BeforeAll` 注入 mock `ApplicationContextHolder`，rejection 路径可单测，super.save success 路径仍需 @SpringBootTest）。T8 DAO 测试仍待 Testcontainers 引导专项。
+**下一 fire**：Task 11 FeatureDesignBuildService（编码执行互斥 + Run 回调；依赖 ConflictException + tryAcquireBuildLock + PlanAgentService 桩均就绪；service 测试用 bootstrapContext 模式，super.save 路径 @Disabled）。T8 DAO 测试仍待 Testcontainers 引导专项。
 
 ---
 
