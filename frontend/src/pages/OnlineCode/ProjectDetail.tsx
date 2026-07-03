@@ -9,6 +9,7 @@ import { ArrowLeftOutlined } from '@ead/suid-icons';
 import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
 import PlanTab from './PlanTab';
+import FeatureDesignTab from './FeatureDesignTab';
 
 const useStyles = createStyles(({ token, css }) => ({
   page: css`
@@ -80,7 +81,7 @@ const ProjectDetail: React.FC = () => {
     {
       key: 'featureDesign',
       label: '功能设计',
-      children: <div>功能设计 (待实现)</div>,
+      children: <FeatureDesignTab projectId={projectId} />,
     },
   ];
 
