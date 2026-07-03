@@ -35,6 +35,9 @@ public class Task extends BaseAuditableEntity {
     @Column(name = "iteration_id", nullable = false, length = 36)
     private String iterationId;
 
+    @Column(name = "feature_design_id", length = 36)
+    private String featureDesignId;
+
     @Column(name = "title", length = 200)
     private String title;
 
@@ -64,6 +67,14 @@ public class Task extends BaseAuditableEntity {
 
     public void setIterationId(String iterationId) {
         this.iterationId = iterationId;
+    }
+
+    public String getFeatureDesignId() {
+        return featureDesignId;
+    }
+
+    public void setFeatureDesignId(String featureDesignId) {
+        this.featureDesignId = featureDesignId;
     }
 
     public String getTitle() {
