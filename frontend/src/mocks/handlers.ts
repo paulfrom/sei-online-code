@@ -33,6 +33,8 @@ import {
   specsOf,
   tasksOf,
 } from './db';
+import { planHandlers } from './handlers/plan';
+import { featureDesignHandlers } from './handlers/featureDesign';
 
 seed();
 
@@ -59,7 +61,7 @@ function paginate<T extends Record<string, any>>(rows: T[], search: Search) {
   if (kw && props.length) {
     const lower = kw.toLowerCase();
     filtered = filtered.filter((r) =>
-      props.some((p) => String(r[p] ?? '').toLowerCase().includes(lower)),
+      props.some((p) => String(r[p] ?? '').toLowerCase().includes(lower))
     );
   }
 
@@ -70,7 +72,7 @@ function paginate<T extends Record<string, any>>(rows: T[], search: Search) {
       filtered = filtered.filter((r) =>
         String(r[f.fieldName] ?? '')
           .toLowerCase()
-          .includes(String(f.value).toLowerCase()),
+          .includes(String(f.value).toLowerCase())
       );
     }
   });
@@ -95,6 +97,9 @@ function paginate<T extends Record<string, any>>(rows: T[], search: Search) {
 }
 
 export const handlers = [
+  ...planHandlers,
+  ...featureDesignHandlers,
+
   // #1 create project
   http.post('*/api/project/save', async ({ request }) => {
     const body = (await request.json()) as { name?: string; design?: string };
@@ -114,7 +119,7 @@ export const handlers = [
   http.post('*/api/project/findByPage', async ({ request }) => {
     const search = (await request.json().catch(() => ({}))) as Search;
     const rows = Array.from(db.projects.values()).sort((a, b) =>
-      a.createdDate < b.createdDate ? 1 : -1,
+      a.createdDate && b.createdDate ? b.createdDate.localeCompare(a.createdDate) : -1
     );
     return ok(paginate(rows, search));
   }),
@@ -243,7 +248,7 @@ export const handlers = [
   http.post('*/api/skill/findByPage', async ({ request }) => {
     const search = (await request.json().catch(() => ({}))) as Search;
     const rows = Array.from(db.skills.values()).sort((a, b) =>
-      a.createdDate < b.createdDate ? 1 : -1,
+      a.createdDate && b.createdDate ? b.createdDate.localeCompare(a.createdDate) : -1
     );
     return ok(paginate(rows, search));
   }),
@@ -292,7 +297,7 @@ export const handlers = [
     // built-in first, then custom by newest
     const rows = Array.from(db.agents.values()).sort((a, b) => {
       if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
-      return a.createdDate < b.createdDate ? 1 : -1;
+      return a.createdDate && b.createdDate ? b.createdDate.localeCompare(a.createdDate) : -1;
     });
     return ok(paginate(rows, search));
   }),

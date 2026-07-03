@@ -154,10 +154,94 @@ export interface WorkspaceResolveResult {
   source: WorkspaceSource;
 }
 
-const now = () => new Date().toISOString().slice(0, 19);
+/** PlanStatus enum (contract §3.1) */
+export type PlanStatus = 'GENERATING' | 'DRAFT' | 'CONFIRMED' | 'FAILED';
+
+/** PlanFeature — part of PlanContent (contract §2.2) */
+export interface PlanFeature {
+  featureId: string;
+  title: string;
+  outline: string;
+}
+
+/** PlanContent (contract §2.2) */
+export interface PlanContent {
+  summary: string;
+  techAssumptions: string[];
+  features: PlanFeature[];
+  nonGoals: string[];
+}
+
+/** PlanDto (contract §2.1) */
+export interface PlanDto {
+  id: string;
+  projectId: string;
+  version: number;
+  status: PlanStatus;
+  content: PlanContent;
+  modifyHint?: string;
+  isLatest: boolean;
+  creatorId?: string;
+  creatorAccount?: string;
+  creatorName?: string;
+  createdDate?: string;
+  lastEditorId?: string;
+  lastEditorAccount?: string;
+  lastEditorName?: string;
+  lastEditedDate?: string;
+}
+
+/** FeatureDesignStatus enum (contract §3.2) */
+export type FeatureDesignStatus =
+  | 'PENDING'
+  | 'GENERATING'
+  | 'DRAFT'
+  | 'CONFIRMED'
+  | 'STALE'
+  | 'FAILED';
+
+/** FeatureDesignBuildStatus enum (contract §3.3) */
+export type FeatureDesignBuildStatus =
+  | 'IDLE'
+  | 'BUILDING'
+  | 'BUILT'
+  | 'BUILD_FAILED'
+  | 'STALE';
+
+/** FeatureDesignContent (contract §2.4) */
+export interface FeatureDesignContent {
+  featureId: string;
+  goal: string;
+  design: Record<string, any>;
+  acceptance: string[];
+  fileScope: string[];
+}
+
+/** FeatureDesignDto (contract §2.3) */
+export interface FeatureDesignDto {
+  id: string;
+  projectId: string;
+  featureId: string;
+  version: number;
+  status: FeatureDesignStatus;
+  buildStatus: FeatureDesignBuildStatus;
+  content?: FeatureDesignContent;
+  modifyHint?: string;
+  isLatest: boolean;
+  creatorId?: string;
+  creatorAccount?: string;
+  creatorName?: string;
+  createdDate?: string;
+  lastEditorId?: string;
+  lastEditorAccount?: string;
+  lastEditorName?: string;
+  lastEditedDate?: string;
+}
+
+export const now = () => new Date().toISOString().slice(0, 19);
 
 let seq = 1;
-const nextId = (prefix: string) => `${prefix}${String(seq++).padStart(4, '0')}`;
+export const nextId = (prefix: string) => `${prefix}${String(seq++).padStart(4, '0')}`;
 
 /** simulated deploy duration in ms — findOne flips DEPLOYING → PREVIEW after this */
 export const DEPLOY_DURATION_MS = 4000;
@@ -189,6 +273,10 @@ interface Db {
   config: PlatformConfigDto | null;
   /** projectId → source of first provisioning (drives clone-once reuse, §3) */
   workspaces: Map<string, WorkspaceSource>;
+  /** Plan entities for pre-build phase */
+  plans?: Map<string, PlanDto>;
+  /** FeatureDesign entities for pre-build phase */
+  featureDesigns?: Map<string, FeatureDesignDto>;
 }
 
 export const db: Db = {
@@ -201,6 +289,8 @@ export const db: Db = {
   agents: new Map(),
   config: null,
   workspaces: new Map(),
+  plans: new Map(),
+  featureDesigns: new Map(),
 };
 
 /** Build a demo Spec structure from a project's design prose. */
