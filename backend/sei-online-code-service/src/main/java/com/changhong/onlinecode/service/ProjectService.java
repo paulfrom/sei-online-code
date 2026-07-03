@@ -1,11 +1,15 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
+import com.changhong.onlinecode.dto.enums.PlanStatus;
+import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,9 +24,13 @@ import java.util.Objects;
 public class ProjectService extends BaseEntityService<Project> {
 
     private final ProjectDao dao;
+    private final PlanDao planDao;
+    private final PlanAgentService planAgentService;
 
-    public ProjectService(ProjectDao dao) {
+    public ProjectService(ProjectDao dao, PlanDao planDao, @Lazy PlanAgentService planAgentService) {
         this.dao = dao;
+        this.planDao = planDao;
+        this.planAgentService = planAgentService;
     }
 
     @Override
@@ -39,10 +47,22 @@ public class ProjectService extends BaseEntityService<Project> {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Project> save(Project entity) {
+        boolean isNew = entity.getId() == null;
         if (Objects.isNull(entity.getState())) {
             entity.setState(LifecycleState.DRAFTING);
         }
-        return super.save(entity);
+        OperateResultWithData<Project> result = super.save(entity);
+        if (result.successful() && isNew) {
+            // T9b (P1, D2): 新项目持久化后触发规划——建初始 Plan 行(GENERATING, v1, isLatest) + spawn
+            Plan plan = new Plan();
+            plan.setProjectId(entity.getId());
+            plan.setVersion(1);
+            plan.setStatus(PlanStatus.GENERATING);
+            plan.setIsLatest(true);
+            planDao.save(plan);
+            planAgentService.spawnPlanning(entity.getId(), null);
+        }
+        return result;
     }
 
     /**
