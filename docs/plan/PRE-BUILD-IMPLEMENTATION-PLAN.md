@@ -25,10 +25,11 @@
 | T10 FeatureDesignService | 🟡 源码✅/测试4/8 | 2cb57e6：edit/regenerate/confirm/confirmOne/history + ConflictException(409)；FeatureDesignDto 补 audit；PlanAgentService 桩加 spawnFeatureDesign；**测试 4/8 通过**（rejection：BUILDING→409、STALE/非DRAFT 拒绝），4 success @Disabled |
 | T11 FeatureDesignBuildService | 🟡 源码✅/测试延后 | e69d6e5：build（互斥抢占+Task+Run+ClaudeRunner CompletableFuture 回调，D3/D8/D11）+ buildProject 批量；Task.java 加 featureDesignId 映射（D8）；**测试 @Disabled 延后**（TaskService API 对齐 + async 桩待专项） |
 | T12 ProjectStateService | ✅ 完成 | aecef0c：resolvePreBuildState 聚合（D7 FAILED / D15 空集→DESIGNING）；**8 测试全通过**（纯查询无 super.save，无需 bootstrapContext） |
-| T13–T15 | ⬜ 未开始 | PlanAgentService(实现)/Controllers 缺；T5 Step3(ProjectApi.build) 随 T14 |
+| T13 PlanAgentService | ✅ 完成 | 9dab6e8：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign 实现（ClaudeRunner `CompletableFuture` + SkillMaterializer + 信号量 + D11 链式落库 DRAFT/FAILED）；**5 测试全通过**（success/parseFailure/noPlan/FD success/empty）。C8 守卫归调用方 |
+| T14–T15 | ⬜ 未开始 | Controllers（PlanController/FeatureDesignController + ProjectApi.build + PreBuildExceptionHandler）、全量验证 |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**本轮完成**：T12 ProjectStateService（aecef0c）—— `resolvePreBuildState` 聚合（DRAFTING/PLANNING/DESIGNING/READY_TO_BUILD/FAILED，含 D7 FAILED + D15 空集→DESIGNING）；**8 测试全通过**（首个完全验证的服务；纯查询无 super.save 无需 bootstrapContext）。sub-agent 连续 5 次未提交，本任务为主循环直接实现（后端单端、小任务，更高效）。
+**本轮完成**：T13 PlanAgentService（9dab6e8）—— 替换 T9 桩为真实实现：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign（ClaudeRunner `CompletableFuture` + SkillMaterializer + 信号量 + D11 链式落库 DRAFT/FAILED）；**5 测试全通过**（D11 成功/解析失败/noPlan/FD success/empty）。sub-agent 产出零，主循环直接实现；C8 并发守卫归调用方（与 T9/T10 预置 GENERATING 协调，注明偏差）。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
@@ -36,7 +37,7 @@
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：Task 13 PlanAgentService 实现（替换 T9 桩：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign —— ClaudeRunner + SkillMaterializer + 信号量 + D11 链式落库；读现有 AgentService/SkillMaterializer/ClaudeRunner API）。其后 T14 Controllers（补 ProjectApi.build + PreBuildExceptionHandler）、T15 验证。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试。
+**下一 fire**：Task 14 Controllers——PlanController（implements PlanApi）+ FeatureDesignController（implements FeatureDesignApi + build 端点）+ ProjectController 加 build（补 T5 Step3）+ PreBuildExceptionHandler（ConflictException→409）。其后 T15 全量编译+测试验证。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试。
 
 ---
 
