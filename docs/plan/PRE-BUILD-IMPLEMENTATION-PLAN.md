@@ -30,10 +30,10 @@
 | T9b P1 触发 | ✅ 完成 | 64a2069：ProjectService.save 新建分支→建初始 Plan(GENERATING,v1) + spawnPlanning；@Lazy 破循环依赖 |
 | T15 后端验证 | ✅ 完成 | 全量 :api+:service compileJava + :service test 通过；**后端 Track B 全部完成** |
 | F1 services | ✅ 完成 | f7e2f2d：plan.ts + featureDesign.ts（类型 PlanDto/FeatureDesignDto/枚举 + 端点 P2–P5/P6–P11/P12a/P14/P13）+ buildProject（onlineCode.ts） |
-| F2 MSW handlers | ⬜ 未开始 | plan/featureDesign handlers 缺（含 409 场景、mock 数据 3 FD 覆盖 DRAFT/CONFIRMED/BUILT） |
+| F2 MSW handlers | ✅ 完成 | 3220c44：plan/featureDesign handlers（P2–P5/P6–P11/P12a/P14/P12）+ 409 场景 + mock 数据（DRAFT/IDLE、CONFIRMED/BUILT、CONFIRMED/IDLE）；handlers.ts 导入+spread；pnpm build 通过 |
 | F3–F6 前端 | ⬜ 未开始 | PlanTab / FeatureDesignTab+Editor / BuildActions+dva model / build 验证 |
 
-**本轮完成**：F1 services（f7e2f2d）—— plan.ts + featureDesign.ts（类型 PlanDto/FeatureDesignDto/枚举 + 端点 P2–P5/P6–P11/P12a/P14/P13/P12）+ buildProject（onlineCode.ts）；frontend-engineer sub-agent 起草，主循环验证+提交。F2 MSW handlers 未完成（sub-agent 截断），下 fire 补。
+**本轮完成**：F2 MSW handlers（3220c44）—— plan/featureDesign handlers（全端点 P2–P5/P6–P11/P12a/P14/P12）+ 409 互斥场景 + mock 数据（3 FD 覆盖 DRAFT/CONFIRMED + build_status IDLE/BUILT）；handlers.ts 导入+spread，db.ts 加类型/数据；**pnpm build 通过**。frontend-engineer sub-agent 起草，主循环验证 build+提交。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
@@ -41,7 +41,7 @@
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：F2 MSW handlers（frontend-engineer sub-agent + `suid` skill，独立上下文）—— plan/featureDesign handlers + mock 数据（3 FD 覆盖 DRAFT/CONFIRMED/BUILT）+ 409 场景。其后 F3 PlanTab UI。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）。
+**下一 fire**：F3 PlanTab UI（frontend-engineer sub-agent + `suid` skill）—— 规划书 Tab：展示 latest Plan（summary/features/nonGoals）+ 编辑模式 + 重生（modifyHint）+ 确认 + 历史版本抽屉；用 ExtTable/ExtModal/Form（`suid info` 查 API）。其后 F4 FeatureDesignTab+Editor、F5 BuildActions+dva model。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）。
 
 ---
 
