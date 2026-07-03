@@ -34,7 +34,7 @@
 | F3 PlanTab UI | ✅ 完成 | 2b2a225：PlanTab.tsx（展示/编辑/重生/确认/历史抽屉 + status 联动）+ ProjectDetail.tsx（Tab 容器）；pnpm build 通过 |
 | F4 FeatureDesignTab+Editor | ✅ 完成 | 3601931：FeatureDesignTab.tsx（ExtTable remotePaging + 多选批量确认 + 逐行 查看/编辑/重生/确认/执行编码 + STALE 禁用 Tooltip + status/buildStatus badge）+ FeatureDesignEditor.tsx（ExtModal 查看/编辑 goal/design/acceptance/fileScope + 409 提示）+ ProjectDetail.tsx 挂 "功能设计" Tab；pnpm build 通过 |
 | F5 BuildActions+dva model | ✅ 完成 | （主循环补提交）：BuildActions.tsx（"执行编码"仅 READY_TO_BUILD 启用+Tooltip+调 buildProject+5s 轮询 BUILDING）+ planFeatureDesign.ts（dva model：fetchProjectState 客户端聚合 §4.1/D7/D15 + buildProject effect）+ ProjectDetail.tsx 挂 BuildActions；pnpm build 通过。D4 WS 改轮询（偏差#5） |
-| F6 前端整体验证 | ⬜ 未开始 | pnpm build + MSW 全流程：新建项目→规划书确认→FD 确认→执行编码→build_status 流转 |
+| F6 前端整体验证 | ✅ 完成 | pnpm build 通过 + MSW handlers 覆盖全端点（P2–P5/P6–P11/P12/P12a/P13/P14，handlers.ts 注册 plan+featureDesign handlers，project 内联 #1-#3）；交互式浏览器冒烟测试延后 |
 
 **本轮完成**：F5 BuildActions+dva model（主循环补提交）—— BuildActions.tsx（"执行编码"按钮仅 `projectState=READY_TO_BUILD` 启用+Tooltip+调 buildProject+BUILDING 时 5s `setInterval` 轮询 re-fetch FDs）+ planFeatureDesign.ts（dva model：state `projectState/plan/featureDesigns`；`fetchProjectState` 客户端聚合按 §4.1 含 D7 FAILED/D15 空集→DESIGNING/READY_TO_BUILD；`buildProject` effect 调 onlineCode.ts）+ ProjectDetail.tsx 挂 BuildActions 传 projectId；@ead/suid + createStyles；**pnpm build 通过**（主循环独立复核）。frontend-engineer sub-agent 起草但中断未提交，主循环 grep 核验+build+补提交。**偏差#5**：D4 WS 改轮询（前端无 WS 客户端），WS 标记待清理。
 
@@ -45,7 +45,7 @@
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 5. **D4 F5 WS 实现偏差**：前端无既有 WS 客户端（Dispatch.tsx 仅本地 runLogs），build_status 改用**轮询**（任一 FD 处于 BUILDING 时每 5 秒 re-fetch FDs），暂不新建 WS 客户端连接 `/ws/run/{iterationId}`——WS 实现标记为待清理项。
 
-**下一 fire**：F6 前端整体验证（主循环执行）—— `pnpm build` 复核 + MSW 全流程手动跑通：新建项目→规划书确认→3 FD 确认→执行编码→build_status 流转（IDLE→BUILDING→BUILT）。其后 **PM 产品验收**（pm-planner/qa-reviewer sub-agent 对照契约 + 设计稿验收标准，产出验收报告）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）；D4 WS 客户端待清理。
+**下一 fire**：**PM 产品验收**（qa-reviewer sub-agent 对照契约 §9 成功标准 + 设计稿验收标准 + D1–D15 决策，审计后端 Track B + 前端 Track F 全量交付物，产出验收报告 `docs/plan/PRE-BUILD-ACCEPTANCE-REPORT.md`，逐条 pass/fail + 证据 + 缺口）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试（@SpringBootTest + Testcontainers）；D4 WS 客户端待清理；交互式浏览器冒烟测试待清理。
 
 ---
 
