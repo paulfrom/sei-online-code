@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.api;
 
+import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.IterationDto;
 import com.changhong.onlinecode.dto.ProjectDto;
 import com.changhong.onlinecode.dto.ProjectStateDto;
@@ -14,6 +15,7 @@ import jakarta.validation.Valid;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -49,4 +51,8 @@ public interface ProjectApi extends BaseEntityApi<ProjectDto>, FindByPageApi<Pro
     @GetMapping(path = "state")
     @Operation(summary = "轮询项目生命周期", description = "返回项目当前生命周期状态与当前迭代 id")
     ResultData<ProjectStateDto> state(@RequestParam("id") String id);
+
+    @PostMapping(path = "{projectId}/build", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "批量执行编码", description = "对该项目所有 CONFIRMED 且非 BUILDING 的功能设计抢占 build_status 并起编码")
+    ResultData<java.util.List<FeatureDesignBuildResultDto>> build(@PathVariable("projectId") String projectId);
 }

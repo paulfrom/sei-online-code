@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.ProjectApi;
+import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.IterationDto;
 import com.changhong.onlinecode.dto.ProjectDto;
 import com.changhong.onlinecode.dto.ProjectStateDto;
@@ -11,6 +12,7 @@ import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.service.BuildLoopService;
+import com.changhong.onlinecode.service.FeatureDesignBuildService;
 import com.changhong.onlinecode.service.ProjectService;
 import com.changhong.onlinecode.service.SpecService;
 import com.changhong.sei.core.controller.BaseEntityController;
@@ -39,13 +41,16 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
     private final ProjectService service;
     private final SpecService specService;
     private final BuildLoopService buildLoopService;
+    private final FeatureDesignBuildService featureDesignBuildService;
 
     public ProjectController(ProjectService service,
                             SpecService specService,
-                            BuildLoopService buildLoopService) {
+                            BuildLoopService buildLoopService,
+                            FeatureDesignBuildService featureDesignBuildService) {
         this.service = service;
         this.specService = specService;
         this.buildLoopService = buildLoopService;
+        this.featureDesignBuildService = featureDesignBuildService;
     }
 
     @Override
@@ -85,6 +90,11 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
         }
         return ResultData.success(
                 new ProjectStateDto(project.getState(), project.getCurrentIterationId()));
+    }
+
+    @Override
+    public ResultData<java.util.List<FeatureDesignBuildResultDto>> build(String projectId) {
+        return ResultData.success(featureDesignBuildService.buildProject(projectId));
     }
 
     /**
