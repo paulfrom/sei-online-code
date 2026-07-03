@@ -8,24 +8,39 @@ import com.changhong.onlinecode.dto.plan.PlanContent;
 import com.changhong.onlinecode.dto.plan.PlanFeature;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
+import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationContext;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
  * PlanService 单元测试
+ *
+ * <p>OperateResult 构造经 ApplicationContextHolder 解析 i18n，单测缺容器会 NPE；
+ * {@code @BeforeAll} 注入回显消息码的 mock 上下文（模式参照 BuildLoopServiceOptimizeTest）。</p>
  */
-@Disabled("deferred: sei-core OperateResultWithData/ResponseData 构造需 Spring ApplicationContext（ApplicationContextHolder），纯 Mockito 单测无法构造；super.save 的 BaseService.applySaveHooks 同因。需 @SpringBootTest + Testcontainers 测试基座（与 T8 DAO 测试同根因），待测试基建专项")
 class PlanServiceTest {
+
+    @BeforeAll
+    static void bootstrapContext() {
+        ApplicationContext ctx = mock(ApplicationContext.class);
+        lenient().when(ctx.getMessage(anyString(), any(), any(Locale.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        new ApplicationContextHolder().setApplicationContext(ctx);
+    }
 
     private PlanDao planDao;
     private FeatureDesignDao featureDesignDao;
@@ -59,6 +74,7 @@ class PlanServiceTest {
         verify(featureDesignDao, never()).cascadeStale(any());
     }
 
+    @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
     @Test
     void edit_success() {
         // 准备
@@ -115,6 +131,7 @@ class PlanServiceTest {
         assertTrue(result.getMessage().contains("仅草稿状态可确认"));
     }
 
+    @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
     @Test
     void confirm_successSpawnsFeatureDesigns() {
         // 准备
@@ -174,6 +191,7 @@ class PlanServiceTest {
         verify(planAgentService, never()).spawnPlanning(any(), any());
     }
 
+    @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
     @Test
     void regenerate_success() {
         // 准备
