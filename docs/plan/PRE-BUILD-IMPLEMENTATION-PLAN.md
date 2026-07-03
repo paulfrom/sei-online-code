@@ -17,7 +17,7 @@
 | T2 后端上下文 | ✅ 完成 | T3–T8 已实现即证 |
 | T3 枚举 | ✅ 完成 | 9a7a7ae |
 | T4 DTO | ✅ 完成 | 4232335（+ 计划外 `FeatureDesignBuildResultDto`） |
-| T5 Feign API | 🟡 部分 | 8d5f4de：PlanApi/FeatureDesignApi 在；**ProjectApi.build 延后至 T14**（implements 强耦，单独加破构建） |
+| T5 Feign API | ✅ 完成 | 8d5f4de + 6522b79：PlanApi/FeatureDesignApi + ProjectApi.build（T14 落地） |
 | T6 V6 迁移 | ✅ 完成 | e2fc4a9；含 `oc_task.feature_design_id`（D8） |
 | T7 实体+转换器 | ✅ 完成 | 9c8b353 实体/converter + 09ee879 converter 测试通过 |
 | T8 DAO | 🟡 源码✅/测试延后 | 4dcbe2c+fbd35f0：markNonLatest/cascadeStale 写方法已加（接口式 @Query）；**Testcontainers DAO 测试 @Disabled 延后**（@DataJpaTest+Flyway+方言引导需专项） |
@@ -26,10 +26,11 @@
 | T11 FeatureDesignBuildService | 🟡 源码✅/测试延后 | e69d6e5：build（互斥抢占+Task+Run+ClaudeRunner CompletableFuture 回调，D3/D8/D11）+ buildProject 批量；Task.java 加 featureDesignId 映射（D8）；**测试 @Disabled 延后**（TaskService API 对齐 + async 桩待专项） |
 | T12 ProjectStateService | ✅ 完成 | aecef0c：resolvePreBuildState 聚合（D7 FAILED / D15 空集→DESIGNING）；**8 测试全通过**（纯查询无 super.save，无需 bootstrapContext） |
 | T13 PlanAgentService | ✅ 完成 | 9dab6e8：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign 实现（ClaudeRunner `CompletableFuture` + SkillMaterializer + 信号量 + D11 链式落库 DRAFT/FAILED）；**5 测试全通过**（success/parseFailure/noPlan/FD success/empty）。C8 守卫归调用方 |
-| T14–T15 | ⬜ 未开始 | Controllers（PlanController/FeatureDesignController + ProjectApi.build + PreBuildExceptionHandler）、全量验证 |
+| T14 Controllers | ✅ 完成 | 6522b79：PlanController + FeatureDesignController（+findByPage）+ ProjectController.build（补 T5 Step3）+ PreBuildExceptionHandler（ConflictException→409，D1）；编译+全测试通过 |
+| T15 验证 | ⬜ 未开始 | 全量编译+测试验证（T15）+ 前端 F1–F6 |
 | F1–F6 前端 | ⬜ 未开始 | frontend 无 plan/featureDesign 文件 |
 
-**本轮完成**：T13 PlanAgentService（9dab6e8）—— 替换 T9 桩为真实实现：spawnPlanning/spawnFeatureDesigns/spawnFeatureDesign（ClaudeRunner `CompletableFuture` + SkillMaterializer + 信号量 + D11 链式落库 DRAFT/FAILED）；**5 测试全通过**（D11 成功/解析失败/noPlan/FD success/empty）。sub-agent 产出零，主循环直接实现；C8 并发守卫归调用方（与 T9/T10 预置 GENERATING 协调，注明偏差）。
+**本轮完成**：T14 Controllers（6522b79）—— PlanController + FeatureDesignController（+findByPage）+ ProjectController.build（补 T5 Step3，ProjectApi.build 落地）+ PreBuildExceptionHandler（ConflictException→HTTP 409，D1）；编译+全测试通过。主循环直接实现。
 
 **已记录偏差**：
 1. DAO 用 Spring Data JPA 接口式（非计划的 *DaoImpl），对齐 `AgentDao`——计划 *DaoImpl 模式标记为待清理项。
@@ -37,7 +38,7 @@
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
 
-**下一 fire**：Task 14 Controllers——PlanController（implements PlanApi）+ FeatureDesignController（implements FeatureDesignApi + build 端点）+ ProjectController 加 build（补 T5 Step3）+ PreBuildExceptionHandler（ConflictException→409）。其后 T15 全量编译+测试验证。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试。
+**下一 fire**：T15 后端整体验证（全量编译+测试，补缺口）→ 然后前端 Track F（F1 services + F2 MSW + F3/F4/F5 UI + F6 验证，`suid` skill，独立上下文）。**测试基建专项**待办：T8 DAO + T9/T10 success + T11 测试。
 
 ---
 
