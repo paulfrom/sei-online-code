@@ -36,16 +36,16 @@
 | F5 BuildActions+dva model | ✅ 完成 | （主循环补提交）：BuildActions.tsx（"执行编码"仅 READY_TO_BUILD 启用+Tooltip+调 buildProject+5s 轮询 BUILDING）+ planFeatureDesign.ts（dva model：fetchProjectState 客户端聚合 §4.1/D7/D15 + buildProject effect）+ ProjectDetail.tsx 挂 BuildActions；pnpm build 通过。D4 WS 改轮询（偏差#5） |
 | F6 前端整体验证 | ✅ 完成 | pnpm build 通过 + MSW handlers 覆盖全端点（P2–P5/P6–P11/P12/P12a/P13/P14，handlers.ts 注册 plan+featureDesign handlers，project 内联 #1-#3）；交互式浏览器冒烟测试延后 |
 
-**本轮完成**：P0 T8 调查（32386dd）—— Testcontainers 在本开发环境**无法连接 Docker**（docker CLI / Python unix socket 均可达 `/var/run/docker.sock`，但 docker-java 自动检测 `DockerClientProviderStrategy` 列表为空；testcontainers-postgresql + spring-boot-testcontainers + docker-java-transport-zerodep + JNA 依赖齐全，SELinux Enforcing）。T8/T9/T10/T11 的 DB 测试均受此环境阻断；测试代码经审查正确（tryAcquireBuildLock 互斥 / cascadeStale 级联），`@Disabled` 改记真实环境阻断原因，`application-test.yml` 补 `PostgreSQLDialect`。**P0 本地阻断，测试代码就绪待 CI 验证**。**P3 偏差#1 已解决**（接口式为代码库正典，见下）。
+**本轮完成**：P2 D4 WS 客户端（c1fa4fd）—— 新建 `frontend/src/utils/run-log-socket.ts`（WebSocket 客户端：subscribe/runId 过滤/终帧 `frame.state` 检测/close/NDJSON 解析）+ BuildActions 集成（build 启动后 `subscribeRunLog` 订阅 `/ws/run/{featureDesignId}` 按 runId 过滤显示日志，终帧 onTerminal 触发 `fetchFeatureDesigns` 重取 build_status 替代 5s 盲轮询；WS 失败降级轮询兜底，dev 环境无真实后端不崩）；依赖后端 iterationId=featureDesignId 映射（`FeatureDesignBuildService:92`，代码注释标注）；**pnpm build 通过**（主循环独立复核 grep+build）。frontend-engineer sub-agent 实现+提交，主循环验证。**偏差#5 解决**（D4 WS 落地）。前序：P0 本地环境阻断待 CI（32386dd）、P3 已解决（b54571d）。
 
 **已记录偏差**：
 1. ~~DAO 用 Spring Data JPA 接口式（非计划的 \*DaoImpl）~~ **已解决（P3）**：对齐 `AgentDao` 接口式为代码库正典（Global Constraints "严格遵从代码库既有规范；规范一致性优先于个人技术偏好"），计划 *DaoImpl 模式作废，不回退。
 2. `FeatureDesignBuildResultDto` 为计划外新增（T4），用途待 Task 11 确认。
 3. PlanAgentService 为桩（T9 占位，签名 `spawnPlanning`/`spawnFeatureDesigns`），T13 须填实现勿重建；FeatureDesignDto 需同 PlanDto 补 `Date createdDate/lastEditedDate`（T10）。
 4. PlanDto/ProjectDto/AgentDto 均 redeclare `Date` audit 字段（代码库约定，契约 §2.1 的 ISO-8601 String 由 Jackson 序列化）。
-5. **D4 F5 WS 实现偏差**：前端无既有 WS 客户端（Dispatch.tsx 仅本地 runLogs），build_status 改用**轮询**（任一 FD 处于 BUILDING 时每 5 秒 re-fetch FDs），暂不新建 WS 客户端连接 `/ws/run/{iterationId}`——WS 实现标记为待清理项。
+5. ~~**D4 F5 WS 实现偏差**：前端无既有 WS 客户端……build_status 改用轮询~~ **已解决（P2，c1fa4fd）**：`run-log-socket.ts` WS 客户端落地，订阅 `/ws/run/{iterationId}` 按 `frame.runId` 过滤，终帧 `frame.state` 触发 build_status 重 fetch，替换 5s 盲轮询（WS 失败降级轮询兜底）。
 
-**下一 fire**：**P0 本地环境阻断**（Testcontainers 无法连 Docker），T8 测试代码就绪待 CI。转向 **P2 D4 WS 客户端**（frontend-engineer sub-agent：实现 `/ws/run/{iterationId}` 客户端按 `frame.runId` 过滤各 feature 流，替换 BuildActions 的 5s 轮询，兑现 D4）→ **P1 交互式浏览器端到端冒烟**（chrome-devtools 跑通新建项目→规划书确认→FD 确认→执行编码→build_status 流转，设计稿 §9#1）。**P3 已解决**（偏差#1）。详见 `docs/plan/PRE-BUILD-ACCEPTANCE-REPORT.md`。
+**下一 fire**：**P1 交互式浏览器端到端冒烟**（最后一项）—— 启动 frontend dev server（MSW mock 后端），chrome-devtools 跑通：新建项目→规划书确认→3 FD 确认→执行编码→build_status 流转（设计稿 §9#1）。**注意**：MSW 不模拟异步 build_status 流转，须确认 MSW 是否返静态 BUILT 或需补 handler；UI 渲染/点击/无运行时错误为冒烟重点。**P0 本地阻断待 CI**、**P2/P3 已解决**。P1 完成后 P0–P3 全部收尾（P0 待 CI 环境）。
 
 ---
 
