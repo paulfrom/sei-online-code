@@ -3,14 +3,15 @@
 > 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
 > 分支 `feat/align-skill-multaca`（本地，未推送）。
 
-## 状态（截至 PR3 完成）
+## 状态（截至 PR4 完成）
 
 - **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
 - **PR2 已完成**（commit `2b165b8`）：弃持久化 hash，name 去重 + 409，V8 迁移
 - **PR3 已完成**（Phase 4，commit `fc22c00`）：来源→config JSONB，删 SkillSourceType，V9 迁移；后端 compileTestJava + skill/Converter 测试全过，前端 umi build 通过，V9 已应用本地库
-- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V9。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
-- **已验证**：`compileTestJava` 通过；`*SkillServiceTest`(4)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(3)+`*PlanContentConverterTest`+`*FeatureDesignContentConverterTest` 全过；V9 schema 已确认（`source`/`source_type` 列已删，`config TEXT` 已加，4 行回填 `{"origin":"local:..."}`，`uk_skill_name` 保留）；前端 `pnpm build` 通过
-- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟
+- **PR4 已完成**（Phase 5，oc_skill_file，未提交）：新建 SkillFile 实体+DAO+SkillFileDto；Skill 加 @Transient files + SkillService populate(findOne/findByPage) + importSkill 持久化 files；SkillMaterializer 多文件+越界 guard；DispatchService/PlanAgentService 带 files（PlanAgentService 由 SkillDao 改注 SkillService 以 populate files，同步改 PlanAgentServiceTest）；迁移 V10。compileTestJava + `*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3)+`*PlanAgentServiceTest`(6) 全过；V10 已应用本地库（schema 确认：pk(id)/uk(skill_id,path)/idx(skill_id)/FK CASCADE）
+- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V10。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
+- **已验证**：`compileTestJava` 通过；`*SkillServiceTest`(5)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(6)+`*PlanAgentServiceTest`(6) 全过；V10 schema 已确认（`oc_skill_file`：id/skill_id/path/content+审计列，pk(id)/uk(skill_id,path)/idx(skill_id)/fk_skill_file_skill ON DELETE CASCADE）。PR3 既有验证（V9 schema、前端 `pnpm build`）不受 PR4 影响
+- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟（导入带 files 的技能触发 dispatch 验证 materialize 多文件写出）
 
 ## 决策汇总（用户已拍板）
 
@@ -126,10 +127,67 @@
 - `mocks/handlers.ts`：import handler body
 - `pages/OnlineCode/Skills.tsx`：originTypeMeta + 表单 origin + 列读 config.origin + 删 Select/SkillSourceType
 
+## 续作：PR4 = Phase 5（oc_skill_file 辅助文件）—— ✅ 已完成
+
+**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`AgentSkill.java`+`AgentSkillDao.java`（flat 实体+DAO 范例）/ 契约 Phase 3 §1.1（deferred 的 per-file `FileRef[]`）+ §6（hash recipe，normative）现状 → 按下文实施。
+
+**设计决策（分析后选定）**：
+1. **hash recipe 不变**。契约 §6 normative 且 "must update THIS file first"（更新 defer 到 PR5）；更关键——import 以 name 去重 + **无 skill update 端点** → 辅助文件导入后不可变 → hash 是否覆盖 files 对幂等无影响。`SkillHasher`/`getComputedHash()` 零改动，files 不进 lock。若未来加 update 端点，需回头把 files 纳入 hash（TODO）。
+2. **SkillFile.skill_id 加 FK + ON DELETE CASCADE**（与 `AgentSkill.skill_id` 为 `builtin:` synthetic id 预留而不加 FK 不同——本表是真实 oc_skill 子行）；删技能级联清辅助文件，service 无需 delete。
+3. **DTO 映射复用 Agent populate 模式**：已核实 `BaseEntityController.convertToDto` 用 **ModelMapper**（深递归），自动把 `Skill.files: List<SkillFile>` → `SkillDto.files: List<SkillFileDto>`（只拷贝同名 path/content，审计字段不泄漏）。故 Skill 加 `@Transient List<SkillFile> files`，`SkillService` override `findOne`/`findByPage` populate——**controller 无需 override**。
+4. **路径校验走 bean-validation**：`SkillFileDto.path` 加 `@NotBlank`+`@Pattern(^(?!/)(?!.*(?:^|/)\.\.(?:/|$)).+$)`（禁绝对/`..` 段，允许子目录），`ImportSkillRequest.files` 加 `@Valid` 级联 → 400 自动出，免新增异常类。materializer 再加 `normalize()+startsWith(dir)` 越界 guard（defense-in-depth）。
+5. **PR4 后端 only**（resume doc PR4 行未列前端）；前端 `files[]` 类型/mock/UI 同步留 PR5（契约漂移已接受，与 PR2–4 既有模式一致）。
+
+**Phase 5 任务**：
+1. 新建 `dto/skill/SkillFileDto.java`（api 模块）：path（@NotBlank+@Pattern）+ content，Serializable+@Schema+无参+全参构造 ✅
+2. `SkillDto.java`：加 `List<SkillFileDto> files`（初始化空 ArrayList）+ accessors ✅
+3. `ImportSkillRequest.java`：加 `@Valid List<SkillFileDto> files` + accessors ✅
+4. 新建 `entity/SkillFile.java`（service 模块）：flat 实体 extends BaseAuditableEntity，列 skill_id/path/content TEXT，`@Table(indexes={uk(skill_id,path), idx(skill_id)})`，对称 AgentSkill ✅
+5. 新建 `dao/SkillFileDao.java`：`findBySkillId`+`findBySkillIdIn`（无 deleteBySkillId——FK CASCADE 覆盖）✅
+6. `Skill.java`：加 `@Transient List<SkillFile> files`+accessors；Javadoc 补注「辅助文件经 oc_skill_file，不进 §6 hash」；`getComputedHash()` 不动 ✅
+7. `SkillService.java`：注入 SkillFileDao；`importSkill` 签名 += `List<SkillFileDto> files` → save Skill 后 `persistFiles`（DTO→entity+saveAll）+ 回填到返回 skill；override `findOne`/`findByPage` 调 `populateFiles`（单查/批 IN 查避免 N+1）✅
+8. `SkillController.importSkill`：传 `request.getFiles()` ✅
+9. `SkillMaterializer.java`：`SkillPayload` 加 `List<SkillFileRef> files`（保留 3-arg 便捷构造，旧测试不破）；新增 `record SkillFileRef(path,content)`；`writeSkill` 写 SKILL.md+.lock 后 `writeAuxFiles`（`resolve(path).normalize()`+`startsWith(dir)` 越界 guard+建父目录+writeString）；幂等仍由 `.lock==computedHash` gate ✅
+10. `DispatchService.java`：`materializeSkills` 构造 SkillPayload 时 `toFileRefs(skill)` 映射 files（4-arg 构造）✅
+11. `PlanAgentService.java`：**SkillDao → SkillService**（field/ctor/import/usage；skillDao 仅 findOne 一处用，SkillService.findOne 是 drop-in 且 populate files；镜像 DispatchService，消除 dao/service 不一致）；`toFileRefs` helper；4-arg SkillPayload ✅
+12. `PlanAgentServiceTest.java`：SkillDao mock → SkillService mock（同包免 import），ctor 调用同步改；测试未触及 skill 加载路径（agents 无 skillIds），无需新增 stub ✅
+13. 新迁移 `V10__skill_file.sql`：建 oc_skill_file + 审计列 + pk/uk/idx + FK CASCADE，无 seed ✅
+14. `SkillServiceTest`：现有 4 测保留；`importSkill_throwsConflictWhenNameExists` 调用补 `null` files；`importSkill_insertsWhenNameFree` 传 2 files+stub saveAll+断言回填；新增 `findOne_populatesFiles`（stub `skillDao.findOne`——`BaseService.findOne` 经 `getDao().findOne(id)`，非 findById）✅
+15. `SkillMaterializerTest`：现有 3 测保留（3-arg 构造）；新增「多文件含嵌套子目录写入」「越界 `../escape` 跳过」「带 files 幂等」3 测 ✅
+16. 应用 V10 到本地库；`compileTestJava` + `*SkillServiceTest`/`*SkillMaterializerTest`/`*SkillConfigConverterTest`/`*PlanAgentServiceTest` 全过；`\d oc_skill_file` schema 确认 ✅
+
+**Phase 5 注意**：
+- `BaseService.findOne(id)` 经 `getDao().findOne(id)`（`BaseEntityDao` 空接口，`findOne` 抽象，非 JpaRepository.findById）——单测 stub `skillDao.findOne(id)` 返回实体，**不是** `findById(...).thenReturn(Optional)`（与 AgentServiceTest 的 findById stub 路径不同，因 AgentServiceTest 未断言 findOne 非空）。
+- `PlanAgentService` 改注 `SkillService` 是 PR4 必要改动：原 `skillDao.findOne` 不 populate @Transient files，无法带 files materialize；改用 `SkillService.findOne` 与 DispatchService 对齐。ctor 签名变更 → PlanAgentServiceTest 同步改 mock 类型。
+- 辅助文件不进 §6 hash → `.lock` 仍只覆盖 SKILL.md 五元组；import 不可变 → 幂等成立。契约 §1.1「single-file only, FileRef[] deferred」文字更新整体 defer 到 PR5（代码层 FileRef[] 已落地；§6 recipe 文字不变，仍准确）。
+- 前端 `onlineCode.ts`/`mocks` 的 `files[]` 同步留 PR5（PR4 后端 only，契约漂移已接受）。
+- 内置技能 `references/**` vendor 到 classpath + `BuiltInSkillRegistry` 在 PR5 处理；PR4 表与管道就绪，PR5 填内容。
+
+## PR4 改动文件（Phase 5，未提交）
+
+**新建**：
+- `dto/skill/SkillFileDto.java`（api 模块）：path（@NotBlank+@Pattern）+ content
+- `entity/SkillFile.java`（service 模块）：flat 实体，对称 AgentSkill
+- `dao/SkillFileDao.java`：findBySkillId / findBySkillIdIn
+- `db/migration/V10__skill_file.sql`：建 oc_skill_file + uk/idx + FK CASCADE，无 seed
+
+**修改（后端）**：
+- `dto/SkillDto.java`：加 `List<SkillFileDto> files`
+- `dto/request/ImportSkillRequest.java`：加 `@Valid List<SkillFileDto> files`
+- `entity/Skill.java`：加 `@Transient List<SkillFile> files` + Javadoc（不进 hash）
+- `service/SkillService.java`：注入 SkillFileDao；importSkill += files 持久化；override findOne/findByPage + populateFiles
+- `controller/SkillController.java`：importSkill 传 getFiles()
+- `agent/SkillMaterializer.java`：SkillPayload += files + SkillFileRef record；writeAuxFiles + 越界 guard
+- `service/DispatchService.java`：toFileRefs + 4-arg SkillPayload
+- `service/PlanAgentService.java`：SkillDao→SkillService + toFileRefs + 4-arg SkillPayload
+- `test/.../SkillServiceTest.java`：补 files 入参 + findOne_populatesFiles（5 测）
+- `test/.../SkillMaterializerTest.java`：+3 测（多文件/越界/幂等，共 6 测）
+- `test/.../PlanAgentServiceTest.java`：SkillDao mock→SkillService mock
+
 ## 后续 Phase 概要（详见各 Phase 实施时再展开）
 
 - **PR3 = Phase 4**（来源→config JSONB）—— ✅ 已完成（commit `fc22c00`）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；删 SkillSourceType 枚举（origin 前缀编码类型）；SkillHasher 参数 source→origin；前端 Skills.tsx/onlineCode.ts/db.ts/handlers.ts 改读 config.origin；迁移 V9。详见下文 PR3 段落。
-- **PR4 = Phase 5**（oc_skill_file）：新建 SkillFile 实体+DAO；SkillDto 加 files[]；SkillMaterializer 写多文件；DispatchService/PlanAgentService 带 files。迁移 V10。
+- **PR4 = Phase 5**（oc_skill_file）—— ✅ 已完成（未提交）：新建 `SkillFile` 实体+DAO+`SkillFileDto`；Skill 加 `@Transient files` + `SkillService` populate(findOne/findByPage)+importSkill 持久化；`SkillMaterializer` 多文件+越界 guard；`DispatchService`/`PlanAgentService` 带 files（PlanAgentService 改注 SkillService）；迁移 V10。hash recipe 不变（files 不进 lock）。详见上文 PR4 段落。
 - **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §1.1/§1.2/§3/§4/§6、PRE-BUILD §10。
 
 ## 验证检查点（每个 PR 必过）
