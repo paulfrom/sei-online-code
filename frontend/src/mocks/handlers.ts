@@ -220,26 +220,31 @@ export const handlers = [
     return iteration ? ok(iteration, '开始合并') : fail('iteration not found');
   }),
 
-  // #16 import a skill; dedup by name
+  // #16 import a skill; dedup by name (409 on conflict)
   http.post('*/api/skill/import', async ({ request }) => {
     const body = (await request.json()) as {
       name?: string;
       description?: string;
       config?: { origin?: string };
       content?: string;
+      files?: Array<{ path?: string; content?: string }>;
     };
     if (!body?.name) return fail('name is required');
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(body.name)) {
       return fail('name 必须匹配 ^[a-z0-9][a-z0-9-]{0,63}$');
     }
     if (!body?.content) return fail('content is required');
+    const files = (body.files ?? [])
+      .filter((f) => f && f.path)
+      .map((f) => ({ path: f.path as string, content: f.content ?? '' }));
     const skill = importSkill({
       name: body.name,
       description: body.description ?? '',
       config: { origin: body.config?.origin ?? `inline:${body.name}` },
       content: body.content,
+      files,
     });
-    return ok(skill, '技能已导入');
+    return skill ? ok(skill, '技能已导入') : fail(`技能名已存在: ${body.name}`);
   }),
 
   // #17 list skills (Search body → PageResult)

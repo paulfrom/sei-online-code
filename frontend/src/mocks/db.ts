@@ -114,6 +114,12 @@ export interface SkillConfig {
   origin: string;
 }
 
+/** SkillFileDto — an auxiliary file attached to a skill (Phase 5 §1.1). */
+export interface SkillFileDto {
+  path: string;
+  content: string;
+}
+
 /** SkillDto — an importable, hash-locked instruction bundle (Phase 3 §1.1). */
 export interface SkillDto {
   id: string;
@@ -121,6 +127,7 @@ export interface SkillDto {
   description: string;
   config: SkillConfig;
   content: string;
+  files: SkillFileDto[];
   computedHash: string;
   createdDate: string;
 }
@@ -850,30 +857,33 @@ function computeSkillHash(s: {
 }
 
 /**
- * Import + hash-lock a skill (contract ep #16). Idempotent by hash: if a skill
- * with the same `computedHash` already exists, return it unchanged (no new row).
+ * Import + hash-lock a skill (contract ep #16). Dedup by name: returns null when
+ * a skill with the same name already exists (handler maps to 409). Auxiliary
+ * `files` are stored but excluded from the §6 hash lock (import is immutable).
  */
 export function importSkill(input: {
   name: string;
   description: string;
   config: SkillConfig;
   content: string;
-}): SkillDto {
+  files?: SkillFileDto[];
+}): SkillDto | null {
+  const existing = Array.from(db.skills.values()).find((s) => s.name === input.name);
+  if (existing) return null;
+
   const computedHash = computeSkillHash({
     config: input.config,
     name: input.name,
     description: input.description,
     content: input.content,
   });
-  const existing = Array.from(db.skills.values()).find((s) => s.computedHash === computedHash);
-  if (existing) return existing;
-
   const skill: SkillDto = {
     id: nextId('SKIL'),
     name: input.name,
     description: input.description,
     config: input.config,
     content: input.content,
+    files: input.files ?? [],
     computedHash,
     createdDate: now(),
   };

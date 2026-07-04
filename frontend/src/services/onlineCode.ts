@@ -139,6 +139,12 @@ export interface SkillConfig {
   origin: string;
 }
 
+/** SkillFileDto — an auxiliary file attached to a skill (Phase 5 §1.1: path + content). */
+export interface SkillFileDto {
+  path: string;
+  content: string;
+}
+
 /** SkillDto — an importable, hash-locked instruction bundle (Phase 3 §1.1). */
 export interface SkillDto {
   id: string;
@@ -146,6 +152,8 @@ export interface SkillDto {
   description: string;
   config: SkillConfig;
   content: string;
+  /** auxiliary files (references/**); not part of the §6 hash lock */
+  files: SkillFileDto[];
   /** server-authoritative lock; FE never recomputes (contract §6) */
   computedHash: string;
   createdDate: string;
@@ -277,6 +285,7 @@ export async function importSkill(params: {
   description: string;
   config: SkillConfig;
   content: string;
+  files?: SkillFileDto[];
 }): Promise<ResultData<SkillDto>> {
   return request({ url: `${API}/skill/import`, method: 'POST', data: params });
 }

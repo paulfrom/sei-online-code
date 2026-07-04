@@ -21,7 +21,7 @@ import {
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
-import { DeleteOutlined, EyeOutlined, ImportOutlined } from '@ead/suid-icons';
+import { DeleteOutlined, EyeOutlined, ImportOutlined, PlusOutlined } from '@ead/suid-icons';
 import {
   SKILL_FIND_BY_PAGE_URL,
   deleteSkill,
@@ -68,6 +68,7 @@ interface ImportForm {
   description: string;
   origin: string;
   content: string;
+  files?: Array<{ path: string; content: string }>;
 }
 
 const Skills: React.FC = () => {
@@ -96,6 +97,7 @@ const Skills: React.FC = () => {
         description: values.description ?? '',
         config: { origin: values.origin || `inline:${values.name}` },
         content: values.content,
+        files: (values.files ?? []).filter((f) => f.path && f.content),
       });
       if (!res.success || !res.data) {
         message.error(res.message ?? '导入失败');
@@ -173,7 +175,7 @@ const Skills: React.FC = () => {
       <ExtModal
         open={importOpen}
         title="导入技能"
-        subTitle="导入后由服务端计算 Hash 锁，相同内容重复导入幂等"
+        subTitle="导入后由服务端计算 Hash 锁，同名技能重复导入返回 409"
         confirmLoading={importing}
         onCancel={() => setImportOpen(false)}
         onOk={() => form.submit()}
@@ -214,6 +216,59 @@ const Skills: React.FC = () => {
           >
             <Input.TextArea rows={8} placeholder="# 技能标题\n\n技能正文（frontmatter + markdown）" />
           </Form.Item>
+          <Form.Item label="辅助文件（可选，对应 references/**）">
+            <Form.List name="files">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name: fieldName, ...restField }) => (
+                    <div
+                      key={key}
+                      style={{
+                        border: '1px solid #f0f0f0',
+                        padding: 12,
+                        marginBottom: 8,
+                        borderRadius: 4,
+                      }}
+                    >
+                      <Form.Item
+                        {...restField}
+                        name={[fieldName, 'path']}
+                        label="路径"
+                        rules={[
+                          { required: true, message: '请输入路径' },
+                          {
+                            pattern: /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/,
+                            message: '禁止绝对路径或 .. 段',
+                          },
+                        ]}
+                      >
+                        <Input placeholder="例如：references/dao.md" allowClear />
+                      </Form.Item>
+                      <Form.Item
+                        {...restField}
+                        name={[fieldName, 'content']}
+                        label="内容"
+                        rules={[{ required: true, message: '请输入内容' }]}
+                      >
+                        <Input.TextArea rows={4} placeholder="辅助文件正文" />
+                      </Form.Item>
+                      <Button
+                        type="link"
+                        color="danger"
+                        icon={<DeleteOutlined />}
+                        onClick={() => remove(fieldName)}
+                      >
+                        删除该文件
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />} block>
+                    添加辅助文件
+                  </Button>
+                </>
+              )}
+            </Form.List>
+          </Form.Item>
         </Form>
       </ExtModal>
 
@@ -226,6 +281,17 @@ const Skills: React.FC = () => {
         destroyOnHidden
       >
         <pre className={styles.content}>{viewing?.content}</pre>
+        {viewing?.files?.length ? (
+          <div style={{ marginTop: 12 }}>
+            <div className={styles.hash}>辅助文件 ({viewing.files.length})</div>
+            {viewing.files.map((f) => (
+              <div key={f.path} style={{ marginBottom: 8 }}>
+                <div className={styles.hash}>{f.path}</div>
+                <pre className={styles.content}>{f.content}</pre>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </ExtModal>
     </div>
   );
