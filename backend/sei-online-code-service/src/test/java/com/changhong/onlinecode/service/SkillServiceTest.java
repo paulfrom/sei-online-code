@@ -2,9 +2,12 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.AgentSkillDao;
 import com.changhong.onlinecode.dao.SkillDao;
+import com.changhong.onlinecode.dao.SkillFileDao;
 import com.changhong.onlinecode.dto.skill.SkillConfig;
+import com.changhong.onlinecode.dto.skill.SkillFileDto;
 import com.changhong.onlinecode.entity.AgentSkill;
 import com.changhong.onlinecode.entity.Skill;
+import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.exception.ConflictException;
 import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResult;
@@ -42,13 +45,15 @@ class SkillServiceTest {
 
     private SkillDao skillDao;
     private AgentSkillDao agentSkillDao;
+    private SkillFileDao skillFileDao;
     private SkillService skillService;
 
     @BeforeEach
     void setUp() {
         skillDao = mock(SkillDao.class);
         agentSkillDao = mock(AgentSkillDao.class);
-        skillService = new SkillService(skillDao, agentSkillDao);
+        skillFileDao = mock(SkillFileDao.class);
+        skillService = new SkillService(skillDao, agentSkillDao, skillFileDao);
         // BaseService.validateUniqueCode 调 getDao().getEntityClass() 做 ICodeUnique 判定，
         // mock 默认返回 null 会 NPE；Skill 非 ICodeUnique，返回 Skill.class 即短路成功。
         lenient().when(skillDao.getEntityClass()).thenReturn(Skill.class);
@@ -88,23 +93,53 @@ class SkillServiceTest {
 
         assertThrows(ConflictException.class,
                 () -> skillService.importSkill("suid", "desc", new SkillConfig("local:suid"),
-                        "# content"));
+                        "# content", null));
         verify(skillDao, never()).save(any(Skill.class));
     }
 
     @Test
     void importSkill_insertsWhenNameFree() {
         // WHY: 名字空闲时必须真正落库写入，否则导入无声失败、agent 绑定到不存在的技能。
+        //      Phase 5：辅助文件必须随技能一并持久化并回填到返回值，否则 materialize 漏写文件。
         when(skillDao.findByName("new-skill")).thenReturn(null);
         Skill persisted = new Skill();
         persisted.setId("SKIL_NEW");
         persisted.setName("new-skill");
         when(skillDao.save(any(Skill.class))).thenReturn(persisted);
+        when(skillFileDao.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
+        List<SkillFileDto> files = List.of(
+                new SkillFileDto("resources/foo.md", "# foo"),
+                new SkillFileDto("scripts/run.sh", "echo hi"));
         OperateResultWithData<Skill> result = skillService.importSkill(
-                "new-skill", "desc", new SkillConfig("local:new"), "# content");
+                "new-skill", "desc", new SkillConfig("local:new"), "# content", files);
 
         assertFalse(result.notSuccessful());
         assertEquals("new-skill", result.getData().getName());
+        List<SkillFile> persistedFiles = result.getData().getFiles();
+        assertEquals(2, persistedFiles.size(), "辅助文件应随导入持久化并回填");
+        assertEquals("SKIL_NEW", persistedFiles.get(0).getSkillId(), "辅助文件应绑定到新技能 id");
+        verify(skillFileDao).saveAll(any());
+    }
+
+    @Test
+    void findOne_populatesFiles() {
+        // WHY: findOne 返回的 Skill 必须带 files[]（契约 §1.1 FileRef[]），供 DTO 映射与
+        //      materialize 调用方读取——populate 在 service 层完成，DAO 不碰 @Transient。
+        Skill skill = new Skill();
+        skill.setId("SKIL_X");
+        skill.setName("suid");
+        when(skillDao.findOne("SKIL_X")).thenReturn(skill);
+        SkillFile f1 = new SkillFile();
+        f1.setSkillId("SKIL_X");
+        f1.setPath("resources/a.md");
+        f1.setContent("a");
+        when(skillFileDao.findBySkillId("SKIL_X")).thenReturn(List.of(f1));
+
+        Skill loaded = skillService.findOne("SKIL_X");
+
+        assertEquals("SKIL_X", loaded.getId());
+        assertEquals(1, loaded.getFiles().size(), "findOne 应 populate 辅助文件");
+        assertEquals("resources/a.md", loaded.getFiles().get(0).getPath());
     }
 }

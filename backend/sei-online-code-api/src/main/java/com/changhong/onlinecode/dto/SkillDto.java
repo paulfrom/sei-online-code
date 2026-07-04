@@ -1,10 +1,13 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.skill.SkillConfig;
+import com.changhong.onlinecode.dto.skill.SkillFileDto;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 
 /**
  * Skill DTO。契约 Phase 3 §1.1 —— 可导入、hash 锁定的指令包。
@@ -32,6 +35,9 @@ public class SkillDto extends BaseEntityDto {
 
     @Schema(description = "内容锁（sha256），服务端权威计算", example = "sha256:ab12...")
     private String computedHash;
+
+    @Schema(description = "辅助文件列表（相对路径 + 正文），随 SKILL.md 一并 materialize")
+    private List<SkillFileDto> files = new ArrayList<>();
 
     @Schema(description = "创建时间")
     private Date createdDate;
@@ -82,5 +88,13 @@ public class SkillDto extends BaseEntityDto {
 
     public void setCreatedDate(Date createdDate) {
         this.createdDate = createdDate;
+    }
+
+    public List<SkillFileDto> getFiles() {
+        return files;
+    }
+
+    public void setFiles(List<SkillFileDto> files) {
+        this.files = files;
     }
 }

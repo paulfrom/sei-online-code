@@ -4,7 +4,6 @@ import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
-import com.changhong.onlinecode.dao.SkillDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
@@ -15,6 +14,7 @@ import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Skill;
+import com.changhong.onlinecode.entity.SkillFile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +50,7 @@ public class PlanAgentService {
     private final PlanDao planDao;
     private final FeatureDesignDao featureDesignDao;
     private final AgentService agentService;
-    private final SkillDao skillDao;
+    private final SkillService skillService;
     private final ProjectService projectService;
     private final ClaudeRunner claudeRunner;
     private final SkillMaterializer skillMaterializer;
@@ -60,12 +60,12 @@ public class PlanAgentService {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
-                            SkillDao skillDao, ProjectService projectService, ClaudeRunner claudeRunner,
+                            SkillService skillService, ProjectService projectService, ClaudeRunner claudeRunner,
                             SkillMaterializer skillMaterializer) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
-        this.skillDao = skillDao;
+        this.skillService = skillService;
         this.projectService = projectService;
         this.claudeRunner = claudeRunner;
         this.skillMaterializer = skillMaterializer;
@@ -171,9 +171,10 @@ public class PlanAgentService {
             List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
             if (agent != null && agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
-                    Skill s = skillDao.findOne(sid);
+                    Skill s = skillService.findOne(sid);
                     if (s != null) {
-                        payloads.add(new SkillMaterializer.SkillPayload(s.getName(), s.getContent(), s.getComputedHash()));
+                        payloads.add(new SkillMaterializer.SkillPayload(
+                                s.getName(), s.getContent(), s.getComputedHash(), toFileRefs(s)));
                     }
                 }
             }
@@ -183,6 +184,17 @@ public class PlanAgentService {
             LOGGER.warn("materializeSkills failed, fallback to tmp root", e);
             return Path.of(System.getProperty("java.io.tmpdir"));
         }
+    }
+
+    /** Skill 辅助文件 → materializer SkillFileRef（与 DispatchService 一致，files 经 SkillService.findOne populate）。 */
+    private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
+        List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
+        if (skill.getFiles() != null) {
+            for (SkillFile f : skill.getFiles()) {
+                refs.add(new SkillMaterializer.SkillFileRef(f.getPath(), f.getContent()));
+            }
+        }
+        return refs;
     }
 
     private String buildPlanningPrompt(Project project, String modifyHint) {

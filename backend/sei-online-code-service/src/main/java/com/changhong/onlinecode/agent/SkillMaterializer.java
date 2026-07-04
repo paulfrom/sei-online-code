@@ -16,14 +16,20 @@ import java.util.List;
  * <p>在每次 per-task {@link ClaudeRunner} spawn 前，把已解析 agent 绑定的技能写入
  * worktree 的 {@code .claude/skills/<name>/}：</p>
  * <pre>
- * dir/SKILL.md = skill.content
- * dir/.lock    = skill.computedHash   // 复现标记
+ * dir/SKILL.md          = skill.content
+ * dir/.lock             = skill.computedHash   // 复现标记
+ * dir/&lt;file.path&gt;      = file.content         // Phase 5：辅助文件（含子目录）
  * </pre>
  *
- * <p>幂等：磁盘上 {@code .lock} 与 {@code computedHash} 一致则跳过重写。本阶段
- * compile-only，但 materializer 是真实可单测的方法；真实 worktree 路径解析与 spawn
- * 仍是 Phase 2 的 {@code TODO(oma-deferred)} 运行期接缝。{@code .claude/skills/} 布局
- * 与 CLI 对齐。</p>
+ * <p>幂等：磁盘上 {@code .lock} 与 {@code computedHash} 一致则跳过重写（SKILL.md 与辅助文件一并跳过）。
+ * 辅助文件<b>不进</b> §6 hash recipe——{@code .lock} 仍只覆盖 SKILL.md 五元组；import 以 name 去重且无
+ * update 端点 → 辅助文件导入后不可变 → 不影响幂等。本阶段 compile-only，但 materializer 是真实可单测
+ * 的方法；真实 worktree 路径解析与 spawn 仍是 Phase 2 的 {@code TODO(oma-deferred)} 运行期接缝。
+ * {@code .claude/skills/} 布局与 CLI 对齐。</p>
+ *
+ * <p>路径安全：辅助文件 path 经 service 层 @Valid 校验（禁绝对/{@code ..} 段）；materializer 再加
+ * {@code normalize() + startsWith(dir)} 越界 guard 作 defense-in-depth，越界路径 warn + 跳过，绝不写出
+ * 技能目录之外。</p>
  *
  * @author sei-online-code
  */
@@ -36,15 +42,34 @@ public class SkillMaterializer {
     private static final String LOCK_FILE = ".lock";
 
     /**
-     * 待 materialize 的单个技能载体（name / content / computedHash）。
+     * 待 materialize 的单个技能载体（name / content / computedHash / files）。
      *
-     * <p>刻意与 {@code Skill} 实体解耦，便于单测直接构造、也避免 materializer 依赖持久层。</p>
+     * <p>刻意与 {@code Skill} 实体解耦，便于单测直接构造、也避免 materializer 依赖持久层。
+     * {@code files} 为相对 {@code .claude/skills/<name>/} 的辅助文件列表。</p>
      *
      * @param name         技能名（映射目录名）
      * @param content      SKILL.md 正文
      * @param computedHash 内容锁（写入 .lock，用于幂等比对）
+     * @param files        辅助文件列表（可空，规范化为空列表）
      */
-    public record SkillPayload(String name, String content, String computedHash) {
+    public record SkillPayload(String name, String content, String computedHash,
+                               List<SkillFileRef> files) {
+        public SkillPayload(String name, String content, String computedHash) {
+            this(name, content, computedHash, List.of());
+        }
+
+        public SkillPayload {
+            files = files == null ? List.of() : files;
+        }
+    }
+
+    /**
+     * 辅助文件载体（相对路径 + 正文）。与 {@code SkillFile} 实体解耦。
+     *
+     * @param path    相对技能目录的路径（允许子目录）
+     * @param content 文件正文
+     */
+    public record SkillFileRef(String path, String content) {
     }
 
     /**
@@ -84,7 +109,7 @@ public class SkillMaterializer {
         Path dir = skillsRoot.resolve(skill.name());
         Path lock = dir.resolve(LOCK_FILE);
 
-        // 幂等：已有 .lock 且与 computedHash 一致 → 跳过重写
+        // 幂等：已有 .lock 且与 computedHash 一致 → 跳过重写（SKILL.md + 辅助文件一并跳过）
         if (Files.exists(lock)) {
             String onDisk = Files.readString(lock, StandardCharsets.UTF_8);
             if (skill.computedHash() != null && skill.computedHash().equals(onDisk)) {
@@ -97,6 +122,33 @@ public class SkillMaterializer {
                 skill.content() == null ? "" : skill.content(), StandardCharsets.UTF_8);
         Files.writeString(lock,
                 skill.computedHash() == null ? "" : skill.computedHash(), StandardCharsets.UTF_8);
+        writeAuxFiles(dir, skill);
         return true;
+    }
+
+    /**
+     * 写入辅助文件到 {@code <dir>/<path>}，含子目录。越界路径（normalize 后不在 dir 下）warn + 跳过。
+     *
+     * @param dir   技能目录 {@code <worktree>/.claude/skills/<name>}
+     * @param skill 技能载体
+     * @throws IOException 父目录创建或文件写入失败
+     */
+    private void writeAuxFiles(Path dir, SkillPayload skill) throws IOException {
+        for (SkillFileRef file : skill.files()) {
+            if (file == null || file.path() == null || file.path().isBlank()) {
+                continue;
+            }
+            Path resolved = dir.resolve(file.path()).normalize();
+            if (!resolved.startsWith(dir)) {
+                LOGGER.warn("materialize: 辅助文件路径越界，跳过 name={} path={}", skill.name(), file.path());
+                continue;
+            }
+            Path parent = resolved.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(resolved,
+                    file.content() == null ? "" : file.content(), StandardCharsets.UTF_8);
+        }
     }
 }

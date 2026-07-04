@@ -12,6 +12,7 @@ import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Skill;
+import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.onlinecode.dto.spec.SpecPage;
@@ -286,9 +287,20 @@ public class DispatchService {
             Skill skill = skillService.findOne(skillId);
             if (skill != null) {
                 payloads.add(new SkillMaterializer.SkillPayload(
-                        skill.getName(), skill.getContent(), skill.getComputedHash()));
+                        skill.getName(), skill.getContent(), skill.getComputedHash(), toFileRefs(skill)));
             }
         }
         skillMaterializer.materialize(worktreePath, payloads);
+    }
+
+    /** Skill 辅助文件 → materializer SkillFileRef（files 经 SkillService.findOne populate）。 */
+    private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
+        List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
+        if (skill.getFiles() != null) {
+            for (SkillFile f : skill.getFiles()) {
+                refs.add(new SkillMaterializer.SkillFileRef(f.getPath(), f.getContent()));
+            }
+        }
+        return refs;
     }
 }

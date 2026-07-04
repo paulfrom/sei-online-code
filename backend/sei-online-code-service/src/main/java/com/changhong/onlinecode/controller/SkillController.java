@@ -49,7 +49,8 @@ public class SkillController extends BaseEntityController<Skill, SkillDto>
                 request.getName(),
                 request.getDescription(),
                 request.getConfig(),
-                request.getContent());
+                request.getContent(),
+                request.getFiles());
         if (result.notSuccessful()) {
             return ResultData.fail(result.getMessage());
         }

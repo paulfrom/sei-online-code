@@ -4,7 +4,6 @@ import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
-import com.changhong.onlinecode.dao.SkillDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.entity.Agent;
@@ -39,7 +38,7 @@ class PlanAgentServiceTest {
     private PlanDao planDao;
     private FeatureDesignDao featureDesignDao;
     private AgentService agentService;
-    private SkillDao skillDao;
+    private SkillService skillService;
     private ProjectService projectService;
     private ClaudeRunner claudeRunner;
     private SkillMaterializer skillMaterializer;
@@ -50,12 +49,12 @@ class PlanAgentServiceTest {
         planDao = mock(PlanDao.class);
         featureDesignDao = mock(FeatureDesignDao.class);
         agentService = mock(AgentService.class);
-        skillDao = mock(SkillDao.class);
+        skillService = mock(SkillService.class);
         projectService = mock(ProjectService.class);
         claudeRunner = mock(ClaudeRunner.class);
         skillMaterializer = mock(SkillMaterializer.class);
         service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillDao, projectService, claudeRunner, skillMaterializer);
+                skillService, projectService, claudeRunner, skillMaterializer);
     }
 
     @Test
