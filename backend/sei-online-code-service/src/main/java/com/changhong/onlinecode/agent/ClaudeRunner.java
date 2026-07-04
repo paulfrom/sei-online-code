@@ -2,6 +2,8 @@ package com.changhong.onlinecode.agent;
 
 import com.changhong.onlinecode.dto.run.RunLogFrame;
 import com.changhong.onlinecode.ws.RunLogWebSocketHub;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -28,13 +30,20 @@ import java.util.concurrent.CompletableFuture;
  * @author sei-online-code
  */
 @Component
-public class ClaudeRunner {
+public class ClaudeRunner implements CliRunner {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ClaudeRunner.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
+    @Override
+    public String tool() {
+        return "claude";
+    }
+
     /** claude 可执行文件路径，允许由环境变量覆盖，缺省为 PATH 中的 "claude"。 */
     private final String executable;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ClaudeRunner() {
         String env = System.getenv("CLAUDE_EXECUTABLE_PATH");
@@ -49,6 +58,7 @@ public class ClaudeRunner {
      * @param cwd         工作目录（可为 null，表示继承当前目录）
      * @return 完成后携带聚合 stdout 的 future
      */
+    @Override
     public CompletableFuture<String> execute(String iterationId, String prompt, String cwd) {
         return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd));
     }
@@ -63,6 +73,7 @@ public class ClaudeRunner {
      * @param cwd         工作目录（可为 null）
      * @return 完成后携带聚合 stdout 的 future
      */
+    @Override
     public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
                                              String prompt, String cwd) {
         return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd));
@@ -106,6 +117,7 @@ public class ClaudeRunner {
             stderrPump.join();
             String finalState = code == 0 ? "PREVIEW" : "FAILED";
             emit(iterationId, taskId, runId, "system", "DONE", finalState);
+            return code == 0 ? extractResultJson(output.toString(), iterationId) : null;
         } catch (IOException e) {
             LOGGER.warn("claude spawn failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
@@ -113,7 +125,39 @@ public class ClaudeRunner {
             Thread.currentThread().interrupt();
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
         }
-        return output.toString();
+        return null;
+    }
+
+    /**
+     * 从 claude {@code --output-format json} 的 stdout 提取 {@code result} 字段并剥离 markdown 围栏，
+     * 返回供调用方直接解析的 JSON 串。envelope 解析失败或 result 缺失时返回 null（调用方走 fallback）。
+     */
+    private String extractResultJson(String stdout, String iterationId) {
+        try {
+            JsonNode node = objectMapper.readTree(stdout);
+            JsonNode result = node.path("result");
+            String text = result.isMissingNode() ? stdout.trim() : result.asText();
+            String stripped = stripFences(text);
+            return stripped.isBlank() ? null : stripped;
+        } catch (Exception e) {
+            LOGGER.warn("claude result envelope parse failed, iterationId={}, rawHead={}",
+                    iterationId, stdout.substring(0, Math.min(stdout.length(), 200)));
+            return null;
+        }
+    }
+
+    private String stripFences(String text) {
+        String t = text.trim();
+        if (t.startsWith("```")) {
+            int firstNl = t.indexOf('\n');
+            if (firstNl > 0) {
+                t = t.substring(firstNl + 1);
+            }
+            if (t.endsWith("```")) {
+                t = t.substring(0, t.length() - 3);
+            }
+        }
+        return t.trim();
     }
 
     /**
@@ -126,8 +170,10 @@ public class ClaudeRunner {
         List<String> args = new ArrayList<>();
         args.add(executable);
         args.add("-p");
-        // TODO(oma-deferred): 接入 stream-json 协议（--output-format stream-json 等）与控制帧放行
         args.add(prompt);
+        args.add("--output-format");
+        args.add("json");
+        // TODO(oma-deferred): 接入 stream-json 协议与控制帧放行（当前用 result json 一次性取回）
         return args;
     }
 

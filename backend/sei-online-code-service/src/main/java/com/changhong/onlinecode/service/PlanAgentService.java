@@ -1,7 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
@@ -53,7 +54,7 @@ public class PlanAgentService {
     private final AgentService agentService;
     private final SkillService skillService;
     private final ProjectService projectService;
-    private final ClaudeRunner claudeRunner;
+    private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -62,14 +63,14 @@ public class PlanAgentService {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
-                            SkillService skillService, ProjectService projectService, ClaudeRunner claudeRunner,
+                            SkillService skillService, ProjectService projectService, CliRunnerRegistry cliRunnerRegistry,
                             SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
         this.skillService = skillService;
         this.projectService = projectService;
-        this.claudeRunner = claudeRunner;
+        this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
     }
@@ -89,7 +90,8 @@ public class PlanAgentService {
         Path workdir = materializeSkills(agent);
 
         String iterationId = projectId; // 规划阶段无 Run，用 projectId 作日志键
-        CompletableFuture<String> future = claudeRunner.execute(iterationId, prompt, workdir.toString());
+        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
+        CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString());
         future.thenApply(json -> parseJson(json, PlanContent.class))
                 .thenAccept(content -> {
                     plan.setContent(content);
@@ -133,8 +135,14 @@ public class PlanAgentService {
                 .filter(x -> featureId.equals(x.getFeatureId()))
                 .findFirst().orElse(null);
         if (fd == null) {
-            LOGGER.warn("spawnFeatureDesign: no FD for projectId={} featureId={}, skip", projectId, featureId);
-            return;
+            // confirm 路径不预建 FD：此处创建首版 PENDING 行（version=1, is_latest=TRUE），
+            // 下方 setStatus 再置 GENERATING。regenerate 路径由 caller 预建 GENERATING 行，同样复用下方逻辑。
+            fd = new FeatureDesign();
+            fd.setProjectId(projectId);
+            fd.setFeatureId(featureId);
+            fd.setVersion(1);
+            fd.setStatus(FeatureDesignStatus.PENDING);
+            fd.setIsLatest(true);
         }
         fd.setStatus(FeatureDesignStatus.GENERATING);
         featureDesignDao.save(fd);
@@ -145,19 +153,42 @@ public class PlanAgentService {
         Path workdir = materializeSkills(agent);
 
         String iterationId = projectId + ":" + featureId;
-        CompletableFuture<String> future = claudeRunner.execute(iterationId, prompt, workdir.toString());
-        future.thenApply(json -> parseJson(json, FeatureDesignContent.class))
+        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
+        CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString());
+        final FeatureDesign target = fd;
+        future.thenApply(json -> {
+                    // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
+                    // TODO(oma-deferred): 真实 claude 路径稳定后评估是否保留 fallback。
+                    if (json == null || json.isBlank()) {
+                        return cannedFeatureDesign(featureId);
+                    }
+                    return parseJson(json, FeatureDesignContent.class);
+                })
                 .thenAccept(content -> {
-                    fd.setContent(content);
-                    fd.setStatus(FeatureDesignStatus.DRAFT);
-                    featureDesignDao.save(fd);
+                    target.setContent(content);
+                    target.setStatus(FeatureDesignStatus.DRAFT);
+                    featureDesignDao.save(target);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
-                    fd.setStatus(FeatureDesignStatus.FAILED);
-                    featureDesignDao.save(fd);
+                    target.setStatus(FeatureDesignStatus.FAILED);
+                    featureDesignDao.save(target);
                     return null;
                 });
+    }
+
+    /**
+     * claude CLI 不可用时的确定性 fallback 内容（backend rule 11）。
+     * 仅本地无 claude 环境跑通链路时触发；真实环境 claude 返回有效 JSON 时不触发。
+     */
+    private FeatureDesignContent cannedFeatureDesign(String featureId) {
+        FeatureDesignContent c = new FeatureDesignContent();
+        c.setFeatureId(featureId);
+        c.setGoal("fallback: claude CLI 不可用");
+        c.setDesign(objectMapper.createArrayNode());
+        c.setAcceptance(List.of("fallback"));
+        c.setFileScope(List.of("src/fallback/" + featureId + ".tsx"));
+        return c;
     }
 
     private <T> T parseJson(String json, Class<T> type) {
@@ -216,6 +247,8 @@ public class PlanAgentService {
         String hint = modifyHint == null ? "" : modifyHint;
         return "规划书：" + (plan == null ? "" : plan.getContent())
                 + "\nfeatureId：" + featureId + "\n修改提示：" + hint
-                + "\n输出 FeatureDesign JSON 骨架：featureId/goal/design/acceptance[]/fileScope";
+                + "\n输出 FeatureDesign JSON 骨架：featureId/goal/design/acceptance[]/fileScope"
+                + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
+                + "design 为任意 JSON 对象，acceptance/fileScope 为字符串数组";
     }
 }

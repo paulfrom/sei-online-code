@@ -1,7 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.agent.WorktreeManager;
@@ -57,7 +58,7 @@ public class DispatchService {
     private final TaskService taskService;
     private final RunService runService;
     private final WorktreeManager worktreeManager;
-    private final ClaudeRunner claudeRunner;
+    private final CliRunnerRegistry cliRunnerRegistry;
     private final AgentService agentService;
     private final SkillService skillService;
     private final SkillMaterializer skillMaterializer;
@@ -70,7 +71,7 @@ public class DispatchService {
                            TaskService taskService,
                            RunService runService,
                            WorktreeManager worktreeManager,
-                           ClaudeRunner claudeRunner,
+                           CliRunnerRegistry cliRunnerRegistry,
                            AgentService agentService,
                            SkillService skillService,
                            SkillMaterializer skillMaterializer,
@@ -82,7 +83,7 @@ public class DispatchService {
         this.taskService = taskService;
         this.runService = runService;
         this.worktreeManager = worktreeManager;
-        this.claudeRunner = claudeRunner;
+        this.cliRunnerRegistry = cliRunnerRegistry;
         this.agentService = agentService;
         this.skillService = skillService;
         this.skillMaterializer = skillMaterializer;
@@ -238,9 +239,11 @@ public class DispatchService {
             materializeSkills(worktreePath, agent);
 
             String runId = savedRun.successful() ? savedRun.getData().getId() : null;
+            // 按 agent.cliTool 选 runner（null/未知 → 默认 claude，向后兼容）
+            CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
             // 并行 spawn：每任务独立 future，互不阻塞（ADR-0001 并行 worktree 模型）
             CompletableFuture<String> future =
-                    claudeRunner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath);
+                    runner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath);
             futures.add(future);
         }
         // 本轮不阻塞等待（compile-only）；运行期由编排层 join 并回收各 Run 终态。

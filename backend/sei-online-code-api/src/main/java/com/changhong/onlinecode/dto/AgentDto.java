@@ -28,6 +28,9 @@ public class AgentDto extends BaseEntityDto {
     @Schema(description = "模型；空串表示由 CLI 自行解析默认值", example = "")
     private String model;
 
+    @Schema(description = "CLI 工具：claude/codex，空表示默认 claude", example = "claude")
+    private String cliTool;
+
     @Schema(description = "是否内置（requirement/dispatch/deploy 为 true，不可删除）", example = "false")
     private Boolean builtin;
 
@@ -67,6 +70,14 @@ public class AgentDto extends BaseEntityDto {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public String getCliTool() {
+        return cliTool;
+    }
+
+    public void setCliTool(String cliTool) {
+        this.cliTool = cliTool;
     }
 
     public Boolean getBuiltin() {

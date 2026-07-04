@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
@@ -58,7 +59,7 @@ class FeatureDesignBuildServiceTest {
     @Mock
     private RunService runService;
     @Mock
-    private ClaudeRunner claudeRunner;
+    private CliRunnerRegistry cliRunnerRegistry;
     @Mock
     private WorkspaceManager workspaceManager;
 
@@ -71,7 +72,7 @@ class FeatureDesignBuildServiceTest {
                 agentService,
                 taskService,
                 runService,
-                claudeRunner,
+                cliRunnerRegistry,
                 workspaceManager
         );
     }
@@ -222,7 +223,9 @@ class FeatureDesignBuildServiceTest {
         when(taskService.save(any(Task.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedTask));
         when(workspaceManager.resolve(projId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
-        when(claudeRunner.execute(anyString(), anyString(), anyString(), anyString(), anyString()))
+        CliRunner runner = mock(CliRunner.class);
+        when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
+        when(runner.execute(anyString(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture("success"));
 
         // 执行

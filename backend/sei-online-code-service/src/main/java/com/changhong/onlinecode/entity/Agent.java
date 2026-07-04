@@ -46,6 +46,13 @@ public class Agent extends BaseAuditableEntity {
     @Column(name = "model", length = 100)
     private String model;
 
+    /**
+     * CLI 工具名（如 "claude" / "codex"）。null/空 → 默认 claude（向后兼容）。
+     * 对齐 multica runtime profile 的 protocol_family 维度——per-agent 选择 spawn 的 CLI。
+     */
+    @Column(name = "cli_tool", length = 50)
+    private String cliTool;
+
     @Column(name = "builtin", nullable = false)
     private Boolean builtin = Boolean.FALSE;
 
@@ -86,6 +93,14 @@ public class Agent extends BaseAuditableEntity {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public String getCliTool() {
+        return cliTool;
+    }
+
+    public void setCliTool(String cliTool) {
+        this.cliTool = cliTool;
     }
 
     public Boolean getBuiltin() {

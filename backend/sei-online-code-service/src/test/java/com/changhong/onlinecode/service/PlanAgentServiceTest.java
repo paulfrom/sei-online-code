@@ -1,7 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
@@ -41,7 +42,8 @@ class PlanAgentServiceTest {
     private AgentService agentService;
     private SkillService skillService;
     private ProjectService projectService;
-    private ClaudeRunner claudeRunner;
+    private CliRunnerRegistry cliRunnerRegistry;
+    private CliRunner runner;
     private SkillMaterializer skillMaterializer;
     private BuiltInSkillRegistry builtInSkillRegistry;
     private PlanAgentService service;
@@ -53,11 +55,13 @@ class PlanAgentServiceTest {
         agentService = mock(AgentService.class);
         skillService = mock(SkillService.class);
         projectService = mock(ProjectService.class);
-        claudeRunner = mock(ClaudeRunner.class);
+        cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        runner = mock(CliRunner.class);
+        when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillService, projectService, claudeRunner, skillMaterializer, builtInSkillRegistry);
+                skillService, projectService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry);
     }
 
     @Test
@@ -71,7 +75,7 @@ class PlanAgentServiceTest {
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
-        when(claudeRunner.execute(eq("p1"), anyString(), anyString()))
+        when(runner.execute(eq("p1"), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(json));
 
         service.spawnPlanning("p1", "hint");
@@ -90,7 +94,7 @@ class PlanAgentServiceTest {
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
-        when(claudeRunner.execute(anyString(), anyString(), anyString()))
+        when(runner.execute(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture("not json"));
 
         service.spawnPlanning("p1", null);
@@ -104,7 +108,7 @@ class PlanAgentServiceTest {
     void spawnPlanning_noPlan_skips() {
         when(planDao.findLatestByProjectId("p1")).thenReturn(null);
         service.spawnPlanning("p1", null);
-        verify(claudeRunner, never()).execute(anyString(), anyString(), anyString());
+        verify(runner, never()).execute(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -119,7 +123,7 @@ class PlanAgentServiceTest {
         when(planDao.findLatestByProjectId("p1")).thenReturn(new Plan());
         when(agentService.findByName("feature-design-agent")).thenReturn(new Agent());
         String json = "{\"featureId\":\"feat1\",\"goal\":\"g\",\"design\":null,\"acceptance\":[],\"fileScope\":[]}";
-        when(claudeRunner.execute(eq("p1:feat1"), anyString(), anyString()))
+        when(runner.execute(eq("p1:feat1"), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(json));
 
         service.spawnFeatureDesign("p1", "feat1", null);
@@ -135,6 +139,6 @@ class PlanAgentServiceTest {
     @Test
     void spawnFeatureDesigns_empty_skips() {
         service.spawnFeatureDesigns("p1", List.of());
-        verify(claudeRunner, never()).execute(anyString(), anyString(), anyString());
+        verify(runner, never()).execute(anyString(), anyString(), anyString());
     }
 }

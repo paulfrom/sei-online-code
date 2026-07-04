@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.ClaudeRunner;
+import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
@@ -35,7 +36,7 @@ public class FeatureDesignBuildService {
     private final AgentService agentService;
     private final TaskService taskService;
     private final RunService runService;
-    private final ClaudeRunner claudeRunner;
+    private final CliRunnerRegistry cliRunnerRegistry;
     private final WorkspaceManager workspaceManager;
 
     public FeatureDesignBuildService(
@@ -43,14 +44,14 @@ public class FeatureDesignBuildService {
             AgentService agentService,
             TaskService taskService,
             RunService runService,
-            ClaudeRunner claudeRunner,
+            CliRunnerRegistry cliRunnerRegistry,
             WorkspaceManager workspaceManager
     ) {
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
         this.taskService = taskService;
         this.runService = runService;
-        this.claudeRunner = claudeRunner;
+        this.cliRunnerRegistry = cliRunnerRegistry;
         this.workspaceManager = workspaceManager;
     }
 
@@ -118,9 +119,10 @@ public class FeatureDesignBuildService {
         }
         Run savedRun = runResult.getData();
 
-        // 7. 异步执行编码（D11：链式回调）
+        // 7. 异步执行编码（D11：链式回调）——按 dev-agent.cliTool 选 runner
         String prompt = buildPrompt(fd);
-        CompletableFuture<String> executeFuture = claudeRunner.execute(
+        CliRunner runner = cliRunnerRegistry.resolve(devAgent.getCliTool());
+        CompletableFuture<String> executeFuture = runner.execute(
                 savedTask.getIterationId(),
                 savedTask.getId(),
                 savedRun.getId(),
