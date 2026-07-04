@@ -2,7 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.AgentSkillDao;
 import com.changhong.onlinecode.dao.SkillDao;
-import com.changhong.onlinecode.dto.enums.SkillSourceType;
+import com.changhong.onlinecode.dto.skill.SkillConfig;
 import com.changhong.onlinecode.entity.AgentSkill;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.exception.ConflictException;
@@ -87,8 +87,8 @@ class SkillServiceTest {
         when(skillDao.findByName("suid")).thenReturn(existing);
 
         assertThrows(ConflictException.class,
-                () -> skillService.importSkill("suid", "desc", "local:suid",
-                        SkillSourceType.LOCAL, "# content"));
+                () -> skillService.importSkill("suid", "desc", new SkillConfig("local:suid"),
+                        "# content"));
         verify(skillDao, never()).save(any(Skill.class));
     }
 
@@ -102,7 +102,7 @@ class SkillServiceTest {
         when(skillDao.save(any(Skill.class))).thenReturn(persisted);
 
         OperateResultWithData<Skill> result = skillService.importSkill(
-                "new-skill", "desc", "local:new", SkillSourceType.LOCAL, "# content");
+                "new-skill", "desc", new SkillConfig("local:new"), "# content");
 
         assertFalse(result.notSuccessful());
         assertEquals("new-skill", result.getData().getName());

@@ -1,6 +1,6 @@
 package com.changhong.onlinecode.dto;
 
-import com.changhong.onlinecode.dto.enums.SkillSourceType;
+import com.changhong.onlinecode.dto.skill.SkillConfig;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -24,11 +24,8 @@ public class SkillDto extends BaseEntityDto {
     @Schema(description = "技能描述", example = "@ead/suid component library skill")
     private String description;
 
-    @Schema(description = "导入来源", example = "local:suid")
-    private String source;
-
-    @Schema(description = "来源类型", example = "LOCAL")
-    private SkillSourceType sourceType;
+    @Schema(description = "技能配置（承载来源 origin）")
+    private SkillConfig config;
 
     @Schema(description = "SKILL.md 正文（frontmatter + markdown）")
     private String content;
@@ -55,20 +52,12 @@ public class SkillDto extends BaseEntityDto {
         this.description = description;
     }
 
-    public String getSource() {
-        return source;
+    public SkillConfig getConfig() {
+        return config;
     }
 
-    public void setSource(String source) {
-        this.source = source;
-    }
-
-    public SkillSourceType getSourceType() {
-        return sourceType;
-    }
-
-    public void setSourceType(SkillSourceType sourceType) {
-        this.sourceType = sourceType;
+    public void setConfig(SkillConfig config) {
+        this.config = config;
     }
 
     public String getContent() {

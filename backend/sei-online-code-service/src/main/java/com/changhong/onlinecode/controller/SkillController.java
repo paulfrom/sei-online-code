@@ -48,8 +48,7 @@ public class SkillController extends BaseEntityController<Skill, SkillDto>
         OperateResultWithData<Skill> result = service.importSkill(
                 request.getName(),
                 request.getDescription(),
-                request.getSource(),
-                request.getSourceType(),
+                request.getConfig(),
                 request.getContent());
         if (result.notSuccessful()) {
             return ResultData.fail(result.getMessage());

@@ -1,14 +1,14 @@
 package com.changhong.onlinecode.entity;
 
-import com.changhong.onlinecode.dto.enums.SkillSourceType;
+import com.changhong.onlinecode.dto.skill.SkillConfig;
+import com.changhong.onlinecode.entity.converter.SkillConfigConverter;
 import com.changhong.onlinecode.service.support.SkillHasher;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
@@ -17,7 +17,7 @@ import jakarta.persistence.Transient;
  * Skill 实体。契约 Phase 3 §1.1 —— 可导入、hash 锁定的指令包（单文件 SKILL.md）。
  *
  * <p>Phase 3 起弃持久化 hash：{@code computedHash} 不再落库，改为 {@link Transient} 运行时按 §6
- * length-prefixed sha256 从 (v1|source|name|description|content) 计算。导入去重以 {@code name}
+ * length-prefixed sha256 从 (v1|config.origin|name|description|content) 计算。导入去重以 {@code name}
  * 为键（DB 层 {@code uk_skill_name} 唯一约束 + service 层 ConflictException 409），不再按 hash
  * 幂等。{@code computedHash} 仍由 materializer 写入 worktree {@code .lock} 作复现标记。本阶段仅单文件，
  * 无 FileRef[]。{@code name} 必须匹配 {@code ^[a-z0-9][a-z0-9-]{0,63}$}（materialize 为目录名）。</p>
@@ -39,12 +39,9 @@ public class Skill extends BaseAuditableEntity {
     @Column(name = "description", length = 500)
     private String description;
 
-    @Column(name = "source", length = 500)
-    private String source;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "source_type", nullable = false, length = 20)
-    private SkillSourceType sourceType;
+    @Convert(converter = SkillConfigConverter.class)
+    @Column(name = "config", columnDefinition = "TEXT")
+    private SkillConfig config;
 
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
@@ -65,20 +62,12 @@ public class Skill extends BaseAuditableEntity {
         this.description = description;
     }
 
-    public String getSource() {
-        return source;
+    public SkillConfig getConfig() {
+        return config;
     }
 
-    public void setSource(String source) {
-        this.source = source;
-    }
-
-    public SkillSourceType getSourceType() {
-        return sourceType;
-    }
-
-    public void setSourceType(SkillSourceType sourceType) {
-        this.sourceType = sourceType;
+    public void setConfig(SkillConfig config) {
+        this.config = config;
     }
 
     public String getContent() {
@@ -90,7 +79,7 @@ public class Skill extends BaseAuditableEntity {
     }
 
     /**
-     * 内容锁（运行时计算，不落库）。按 §6 recipe 从 (v1|source|name|description|content) 计算，
+     * 内容锁（运行时计算，不落库）。按 §6 recipe 从 (v1|config.origin|name|description|content) 计算，
      * 供 materializer {@code .lock} 复现标记与 DTO 返回使用。Phase 3 起导入去重改以 {@code name}
      * 为键，hash 不再参与持久化去重。
      *
@@ -98,7 +87,7 @@ public class Skill extends BaseAuditableEntity {
      */
     @Transient
     public String getComputedHash() {
-        return SkillHasher.compute(source, name, description, content);
+        return SkillHasher.compute(config == null ? null : config.getOrigin(), name, description, content);
     }
 
     @Override

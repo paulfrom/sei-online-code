@@ -10,7 +10,7 @@ import java.security.NoSuchAlgorithmException;
  * <pre>
  * h = sha256()
  * writePart(h, "v1")
- * writePart(h, source)
+ * writePart(h, origin)
  * writePart(h, name)
  * writePart(h, description)
  * writePart(h, content)
@@ -34,13 +34,13 @@ public final class SkillHasher {
     /**
      * 按 §6 recipe 计算技能内容锁。
      *
-     * @param source      导入来源
+     * @param origin      导入来源（取自 {@code config.origin}，Phase 4 起取代原 source 列）
      * @param name        技能名
      * @param description 技能描述
      * @param content     SKILL.md 正文
      * @return 形如 {@code sha256:<hex>} 的内容锁
      */
-    public static String compute(String source, String name, String description, String content) {
+    public static String compute(String origin, String name, String description, String content) {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -49,7 +49,7 @@ public final class SkillHasher {
             throw new IllegalStateException("SHA-256 不可用", e);
         }
         writePart(digest, "v1");
-        writePart(digest, source);
+        writePart(digest, origin);
         writePart(digest, name);
         writePart(digest, description);
         writePart(digest, content);

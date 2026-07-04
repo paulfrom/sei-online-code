@@ -2,7 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.AgentSkillDao;
 import com.changhong.onlinecode.dao.SkillDao;
-import com.changhong.onlinecode.dto.enums.SkillSourceType;
+import com.changhong.onlinecode.dto.skill.SkillConfig;
 import com.changhong.onlinecode.entity.AgentSkill;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.exception.ConflictException;
@@ -45,19 +45,19 @@ public class SkillService extends BaseEntityService<Skill> {
      * 导入技能：以 name 为去重键，同名已存在则 409 拒绝，否则 insert。
      *
      * <p>Phase 3 起弃 hash 去重——materialize 目录名以 {@code name} 为准，同名必然冲突，
-     * 故同名（无论内容是否相同）直接拒绝。{@code computedHash} 不再持久化，由实体运行时计算。</p>
+     * 故同名（无论内容是否相同）直接拒绝。{@code computedHash} 不再持久化，由实体运行时计算。
+     * Phase 4 起来源信息改入 {@code config}（multica 维度 d）。</p>
      *
      * @param name        技能名（唯一，materialize 为目录名）
      * @param description 技能描述
-     * @param source      导入来源
-     * @param sourceType  来源类型
+     * @param config      技能配置（承载来源 origin）
      * @param content     SKILL.md 正文
      * @return 写操作结果（携带导入的技能）
      * @throws ConflictException 同名技能已存在（HTTP 409）
      */
     @Transactional(rollbackFor = Exception.class)
-    public OperateResultWithData<Skill> importSkill(String name, String description, String source,
-                                                    SkillSourceType sourceType, String content) {
+    public OperateResultWithData<Skill> importSkill(String name, String description, SkillConfig config,
+                                                    String content) {
         // name 去重：同名已存在直接 409（materialize 目录名冲突）
         Skill existing = dao.findByName(name);
         if (Objects.nonNull(existing)) {
@@ -67,8 +67,7 @@ public class SkillService extends BaseEntityService<Skill> {
         Skill skill = new Skill();
         skill.setName(name);
         skill.setDescription(description);
-        skill.setSource(source);
-        skill.setSourceType(sourceType);
+        skill.setConfig(config);
         skill.setContent(content);
         return super.save(skill);
     }

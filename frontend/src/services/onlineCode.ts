@@ -134,16 +134,17 @@ export interface RunDto {
   finishedDate: string | null;
 }
 
-/** Skill import source kind (Phase 3 contract §1.1). */
-export type SkillSourceType = 'GITHUB' | 'LOCAL' | 'INLINE';
+/** SkillConfig — origin-bearing config (Phase 4, multica dim d: source→config JSONB). */
+export interface SkillConfig {
+  origin: string;
+}
 
 /** SkillDto — an importable, hash-locked instruction bundle (Phase 3 §1.1). */
 export interface SkillDto {
   id: string;
   name: string;
   description: string;
-  source: string;
-  sourceType: SkillSourceType;
+  config: SkillConfig;
   content: string;
   /** server-authoritative lock; FE never recomputes (contract §6) */
   computedHash: string;
@@ -251,12 +252,11 @@ export async function mergeIteration(iterationId: string): Promise<ResultData<It
 
 // --- Phase 3: Skills + Custom Agents (contract eps #16–24) ---
 
-/** #16 import + hash-lock a skill; idempotent by hash (server returns computedHash) */
+/** #16 import a skill; dedup by name (server returns computedHash) */
 export async function importSkill(params: {
   name: string;
   description: string;
-  source: string;
-  sourceType: SkillSourceType;
+  config: SkillConfig;
   content: string;
 }): Promise<ResultData<SkillDto>> {
   return request({ url: `${API}/skill/import`, method: 'POST', data: params });

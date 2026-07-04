@@ -220,13 +220,12 @@ export const handlers = [
     return iteration ? ok(iteration, '开始合并') : fail('iteration not found');
   }),
 
-  // #16 import + hash-lock a skill; idempotent by hash
+  // #16 import a skill; dedup by name
   http.post('*/api/skill/import', async ({ request }) => {
     const body = (await request.json()) as {
       name?: string;
       description?: string;
-      source?: string;
-      sourceType?: 'GITHUB' | 'LOCAL' | 'INLINE';
+      config?: { origin?: string };
       content?: string;
     };
     if (!body?.name) return fail('name is required');
@@ -237,8 +236,7 @@ export const handlers = [
     const skill = importSkill({
       name: body.name,
       description: body.description ?? '',
-      source: body.source ?? `inline:${body.name}`,
-      sourceType: body.sourceType ?? 'INLINE',
+      config: { origin: body.config?.origin ?? `inline:${body.name}` },
       content: body.content,
     });
     return ok(skill, '技能已导入');

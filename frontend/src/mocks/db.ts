@@ -109,16 +109,17 @@ export interface RunDto {
   _startAt?: number;
 }
 
-/** SkillSourceType — verbatim per Phase 3 contract §1.1. */
-export type SkillSourceType = 'GITHUB' | 'LOCAL' | 'INLINE';
+/** SkillConfig — origin-bearing config (Phase 4, multica dim d). */
+export interface SkillConfig {
+  origin: string;
+}
 
 /** SkillDto — an importable, hash-locked instruction bundle (Phase 3 §1.1). */
 export interface SkillDto {
   id: string;
   name: string;
   description: string;
-  source: string;
-  sourceType: SkillSourceType;
+  config: SkillConfig;
   content: string;
   computedHash: string;
   createdDate: string;
@@ -838,14 +839,14 @@ function digest(parts: string[]): string {
   return `sha256:${(h >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-/** compute a skill's lock over ("v1", source, name, description, content) — §6 order */
+/** compute a skill's lock over ("v1", config.origin, name, description, content) — §6 order */
 function computeSkillHash(s: {
-  source: string;
+  config: SkillConfig;
   name: string;
   description: string;
   content: string;
 }): string {
-  return digest(['v1', s.source, s.name, s.description, s.content]);
+  return digest(['v1', s.config.origin, s.name, s.description, s.content]);
 }
 
 /**
@@ -855,12 +856,11 @@ function computeSkillHash(s: {
 export function importSkill(input: {
   name: string;
   description: string;
-  source: string;
-  sourceType: SkillSourceType;
+  config: SkillConfig;
   content: string;
 }): SkillDto {
   const computedHash = computeSkillHash({
-    source: input.source,
+    config: input.config,
     name: input.name,
     description: input.description,
     content: input.content,
@@ -872,8 +872,7 @@ export function importSkill(input: {
     id: nextId('SKIL'),
     name: input.name,
     description: input.description,
-    source: input.source,
-    sourceType: input.sourceType,
+    config: input.config,
     content: input.content,
     computedHash,
     createdDate: now(),
@@ -956,15 +955,13 @@ function seedSkillsAndAgents(): void {
   const suid = importSkill({
     name: 'suid',
     description: '@ead/suid 组件库开发技能',
-    source: 'local:suid',
-    sourceType: 'LOCAL',
+    config: { origin: 'local:suid' },
     content: '# SUID Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/suid。',
   });
   importSkill({
     name: 'eadp-backend',
     description: 'sei-core 分层架构后端开发技能',
-    source: 'local:eadp-backend',
-    sourceType: 'LOCAL',
+    config: { origin: 'local:eadp-backend' },
     content: '# EADP Backend Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/eadp-backend。',
   });
 

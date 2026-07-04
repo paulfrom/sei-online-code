@@ -4,8 +4,8 @@
  * + a read-only content viewer (ep #18 shape already on the row).
  *
  * `computedHash` is the server-authoritative lock (contract §6); the FE only
- * displays it and never recomputes. Re-importing identical content is
- * idempotent on the server (same hash → existing row returned).
+ * displays it and never recomputes. Re-importing an existing name is rejected
+ * by the server (409, dedup by name).
  */
 import React, { useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
@@ -17,7 +17,6 @@ import {
   Form,
   Input,
   Popconfirm,
-  Select,
   Tag,
   message,
 } from '@ead/suid';
@@ -28,7 +27,7 @@ import {
   deleteSkill,
   importSkill,
 } from '@/services/onlineCode';
-import type { SkillDto, SkillSourceType } from '@/services/onlineCode';
+import type { SkillConfig, SkillDto } from '@/services/onlineCode';
 
 const useStyles = createStyles(({ token, css }) => ({
   page: css`
@@ -56,22 +55,18 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
 }));
 
-const SOURCE_TYPE_META: Record<SkillSourceType, { color: string; label: string }> = {
-  GITHUB: { color: 'blue', label: 'GitHub' },
-  LOCAL: { color: 'green', label: '本地' },
-  INLINE: { color: 'gold', label: '内联' },
-};
-
-const SOURCE_TYPE_OPTIONS = (Object.keys(SOURCE_TYPE_META) as SkillSourceType[]).map((k) => ({
-  value: k,
-  label: SOURCE_TYPE_META[k].label,
-}));
+/** derive a source-type tag from the origin prefix (multica dim d: type encoded in origin) */
+function originTypeMeta(origin?: string): { color: string; label: string } {
+  if (!origin) return { color: 'default', label: '未知' };
+  if (origin.startsWith('github:')) return { color: 'blue', label: 'GitHub' };
+  if (origin.startsWith('local:')) return { color: 'green', label: '本地' };
+  return { color: 'gold', label: '内联' };
+}
 
 interface ImportForm {
   name: string;
   description: string;
-  sourceType: SkillSourceType;
-  source: string;
+  origin: string;
   content: string;
 }
 
@@ -99,8 +94,7 @@ const Skills: React.FC = () => {
       const res = await importSkill({
         name: values.name,
         description: values.description ?? '',
-        sourceType: values.sourceType,
-        source: values.source ?? `inline:${values.name}`,
+        config: { origin: values.origin || `inline:${values.name}` },
         content: values.content,
       });
       if (!res.success || !res.data) {
@@ -134,14 +128,19 @@ const Skills: React.FC = () => {
     { title: '描述', dataIndex: 'description', expandUnusedSpace: true },
     {
       title: '来源类型',
-      dataIndex: 'sourceType',
+      dataIndex: 'config',
       width: 100,
-      render: (t: SkillSourceType) => {
-        const meta = SOURCE_TYPE_META[t] ?? { color: 'default', label: t };
+      render: (c: SkillConfig | undefined) => {
+        const meta = originTypeMeta(c?.origin);
         return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
-    { title: '来源', dataIndex: 'source', width: 180 },
+    {
+      title: '来源',
+      dataIndex: 'config',
+      width: 180,
+      render: (c: SkillConfig | undefined) => c?.origin ?? '-',
+    },
     {
       title: 'Hash 锁',
       dataIndex: 'computedHash',
@@ -184,7 +183,6 @@ const Skills: React.FC = () => {
           form={form}
           onFinish={handleImport}
           layout="vertical"
-          initialValues={{ sourceType: 'INLINE' }}
         >
           <Form.Item
             name="name"
@@ -203,14 +201,7 @@ const Skills: React.FC = () => {
             <Input placeholder="技能用途简述" allowClear />
           </Form.Item>
           <Form.Item
-            name="sourceType"
-            label="来源类型"
-            rules={[{ required: true, message: '请选择来源类型' }]}
-          >
-            <Select options={SOURCE_TYPE_OPTIONS} />
-          </Form.Item>
-          <Form.Item
-            name="source"
+            name="origin"
             label="来源"
             tooltip="github:<owner>/<repo>[/path] | local:<name> | inline"
           >
