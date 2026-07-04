@@ -50,3 +50,47 @@
 - 单测：`CodexSandboxConfigTest`/`CodexRunnerTest`/`CliRunnerRegistryTest`/`PlanAgentServiceTest`/`AgentServiceTest` 全过。
 - 前端 `pnpm build`：通过。
 - `FeatureDesignBuildServiceTest`：`@Disabled`（既有延期，非本轮引入），保证编译通过。
+
+## 交接给下一会话（2026-07-04）
+
+### 当前状态
+- PR1 已完成并合并到 main（commit `4db3a30`），`feat/align-skill-multica` 与 main 同步。
+- 多 CLI runner 抽象已就位：`CliRunner` 接口 + `ClaudeRunner` + `CodexRunner`（`codex exec --json` 一次性）+ `CodexSandboxConfig` + `CliRunnerRegistry`；`Agent.cliTool` 端到端打通。
+- 验证：`compileTestJava` 绿、目标单测全过、`pnpm build` 过、V12 已应用 pg17。**但 codex 路径从未对真实 codex 跑过——PR1 最大风险。**
+
+### `codex exec --help` 实证（2026-07-04，本机 codex 已装）
+取代 PR1 的假设/TODO：
+- `--json` ✓ "Print events to stdout as JSONL"（PR1 用法正确）
+- **`-o, --output-last-message <FILE>`** → 把最终消息写文件，**可替代 PR1 的 NDJSON `item.text` 猜解**（绕过未验证风险）
+- `-m, --model <MODEL>` → model 注入（PR1 TODO，flag 已确认）
+- `-s, --sandbox <read-only|workspace-write|danger-full-access>` ✓（与 `CodexSandboxConfig` 一致）
+- `-c key=value` → config 覆盖；`--ignore-user-config` → 不加载用户 config.toml（auth 仍用 CODEX_HOME）；`--ephemeral` → 不持久化 session；`--skip-git-repo-check` → 非 git 仓库可跑
+- 代理：codex alias 带 `HTTPS_PROXY/HTTP_PROXY=http://127.0.0.1:20171`；Java ProcessBuilder 不继承 shell alias，后端 JVM 需自带该 env，否则 codex 无法访问 OpenAI。
+
+### 推荐下一步：PR1.1 加固 codex 基座（有界）
+1. `CodexRunner.buildArgs` 加 `-o <tempfile>`，结果从文件读（替代 `extractResultJson` 的 NDJSON 猜解）；`runBlocking` 末尾读文件、删文件。
+2. `-m <agent.model>` 当 model 非空时注入——需让 runner 感知 `agent.model`（`execute` 签名加 model 参数，或 3 个调用方传 `agent.getModel()` 进 runner）。同步给 `ClaudeRunner` 加 `--model`（既有同样缺口）。
+3. real-codex e2e 测试（env-gated，对齐 `ClaudeRunnerRealClaudeTest`）：确定性 echo prompt，断言 future 完成且结果非空。
+4. 代理 env：`CodexRunner` 透传 `HTTPS_PROXY/HTTP_PROXY`（ProcessBuilder 默认继承 JVM env，但显式文档化）；或 `dev-start.sh` 注入。
+5. 更新本文档把 PR1.1 标完成、挪 TODO。
+
+### 恢复命令（下一会话）
+```bash
+cd /home/paul/project/sei-online-code
+git checkout feat/align-skill-multica          # 与 main 同步，任一皆可
+# 验证 PR1 基线
+cd backend && ./gradlew :sei-online-code-service:test \
+  --tests "*CodexRunnerTest" --tests "*CodexSandboxConfigTest" --tests "*CliRunnerRegistryTest" --console=plain
+# 真实 codex 可用性 + -o 输出验证
+codex exec --help | head
+codex exec "echo PONG" --json -o /tmp/codex-out.txt --skip-git-repo-check && cat /tmp/codex-out.txt
+```
+
+### 开放 TODO（PR1 遗留，PR1.1 闭环）
+- `codex exec --json` NDJSON 字段未核实 → PR1.1 用 `-o` 绕过
+- `--model` 未注入（claude/codex 均缺）→ PR1.1 补
+- real-codex e2e 未加 → PR1.1 加
+- 代理 env 未透传 → PR1.1 处理
+
+### 后续 PR（PR1.1 之后，按优先级）
+见上方"后续 PR（未做）"段：codex memory / multi_agent / skill_strip / user_skills / home-link / MCP / AGENTS.md brief / app-server 协议 / 第二 vendor。
