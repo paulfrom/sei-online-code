@@ -278,6 +278,7 @@ export const handlers = [
       description?: string;
       instructions?: string;
       model?: string;
+      cliTool?: string;
     };
     if (!body?.name) return fail('name is required');
     if (body.id) {
@@ -290,6 +291,7 @@ export const handlers = [
       description: body.description ?? '',
       instructions: body.instructions ?? '',
       model: body.model ?? '',
+      cliTool: body.cliTool ?? '',
     });
     return ok(agent, '保存成功');
   }),

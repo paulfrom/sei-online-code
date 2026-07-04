@@ -139,6 +139,7 @@ export interface AgentDto {
   description: string;
   instructions: string;
   model: string;
+  cliTool: string;
   builtin: boolean;
   skillIds: string[];
   createdDate: string;
@@ -912,6 +913,7 @@ export function saveAgent(input: {
   description: string;
   instructions: string;
   model: string;
+  cliTool: string;
 }): AgentDto {
   if (input.id) {
     const existing = db.agents.get(input.id);
@@ -920,6 +922,7 @@ export function saveAgent(input: {
       existing.description = input.description;
       existing.instructions = input.instructions;
       existing.model = input.model;
+      existing.cliTool = input.cliTool;
       return existing;
     }
   }
@@ -929,6 +932,7 @@ export function saveAgent(input: {
     description: input.description,
     instructions: input.instructions,
     model: input.model ?? '',
+    cliTool: input.cliTool ?? '',
     builtin: false,
     skillIds: [],
     createdDate: now(),
@@ -972,6 +976,7 @@ function seedSkillsAndAgents(): void {
       description,
       instructions: '',
       model: '',
+      cliTool: 'claude',
       builtin: true,
       skillIds: [],
       createdDate: now(),
@@ -988,6 +993,7 @@ function seedSkillsAndAgents(): void {
     description: '按 EADP 契约实现 SUID 页面',
     instructions: '你负责实现单个页面，遵循 @ead/suid 组件库规范。',
     model: '',
+    cliTool: 'claude',
   });
   attachAgentSkills(devAgent.id, ['builtin:suid']);
 }

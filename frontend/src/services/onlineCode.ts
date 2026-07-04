@@ -167,6 +167,8 @@ export interface AgentDto {
   instructions: string;
   /** "" = let CLI resolve its own default */
   model: string;
+  /** CLI 工具：claude/codex，"" = 默认 claude（multica runtime profile protocol_family 维度） */
+  cliTool: string;
   /** true for the 3 seeded agents (requirement/dispatch/deploy), non-deletable */
   builtin: boolean;
   skillIds: string[];
@@ -312,6 +314,7 @@ export async function saveAgent(params: {
   description: string;
   instructions: string;
   model: string;
+  cliTool: string;
 }): Promise<ResultData<AgentDto>> {
   return request({ url: `${API}/agent/save`, method: 'POST', data: params });
 }

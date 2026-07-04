@@ -46,6 +46,7 @@ interface AgentForm {
   description: string;
   instructions: string;
   model: string;
+  cliTool: string;
   skillIds: string[];
 }
 
@@ -89,6 +90,7 @@ const Agents: React.FC = () => {
       description: record.description,
       instructions: record.instructions,
       model: record.model,
+      cliTool: record.cliTool,
       skillIds: record.skillIds ?? [],
     });
     setModalOpen(true);
@@ -114,6 +116,7 @@ const Agents: React.FC = () => {
         description: values.description ?? '',
         instructions: values.instructions ?? '',
         model: values.model ?? '',
+        cliTool: values.cliTool ?? '',
       });
       if (!saveRes.success || !saveRes.data) {
         message.error(saveRes.message ?? '保存失败');
@@ -233,6 +236,16 @@ const Agents: React.FC = () => {
           </Form.Item>
           <Form.Item name="model" label="模型" tooltip="留空则由 CLI 解析默认模型">
             <Input placeholder="留空 = CLI 默认" allowClear />
+          </Form.Item>
+          <Form.Item name="cliTool" label="CLI 工具" tooltip="留空 = 默认 claude；codex 需操作机已安装 codex CLI">
+            <Select
+              allowClear
+              placeholder="留空 = claude"
+              options={[
+                { value: 'claude', label: 'claude' },
+                { value: 'codex', label: 'codex' },
+              ]}
+            />
           </Form.Item>
           <Form.Item name="skillIds" label="绑定技能">
             <Select
