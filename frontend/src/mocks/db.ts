@@ -940,30 +940,20 @@ export function deleteAgent(id: string): { ok: boolean; message: string } {
 export function attachAgentSkills(agentId: string, skillIds: string[]): AgentDto | null {
   const agent = db.agents.get(agentId);
   if (!agent) return null;
-  // keep only ids that resolve to real skills
-  agent.skillIds = (skillIds ?? []).filter((sid) => db.skills.has(sid));
+  // keep ids that resolve to real skills, plus builtin:<name> synthetic ids (multica dim g —
+  // builtins live on the classpath, not in db.skills)
+  agent.skillIds = (skillIds ?? []).filter((sid) => sid.startsWith('builtin:') || db.skills.has(sid));
   return agent;
 }
 
 /**
- * Seed the LOCAL designated skills (`suid`, `eadp-backend`) and the 3 built-in
- * agents (contract §4). Content is a short pointer stub per §4.
+ * Seed the built-in agents (contract §4). Built-in skills (suid/eadp-backend/
+ * project-planning/feature-design) are NOT seeded as oc_skill rows — they live
+ * on the backend classpath and bind via builtin:<name> synthetic ids (multica
+ * dim g). One custom dev agent is seeded bound to builtin:suid as a live example.
  */
 function seedSkillsAndAgents(): void {
   if (db.skills.size > 0 || db.agents.size > 0) return;
-
-  const suid = importSkill({
-    name: 'suid',
-    description: '@ead/suid 组件库开发技能',
-    config: { origin: 'local:suid' },
-    content: '# SUID Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/suid。',
-  });
-  importSkill({
-    name: 'eadp-backend',
-    description: 'sei-core 分层架构后端开发技能',
-    config: { origin: 'local:eadp-backend' },
-    content: '# EADP Backend Skill\n\n本地指针存根：完整技能位于操作机 ~/.claude/skills/eadp-backend。',
-  });
 
   const seedAgent = (name: string, description: string): void => {
     const agent: AgentDto = {
@@ -982,12 +972,12 @@ function seedSkillsAndAgents(): void {
   seedAgent('dispatch-agent', '内置：任务派发 Agent');
   seedAgent('deploy-agent', '内置：部署 Agent');
 
-  // one custom dev agent bound to suid, so the two-step flow has a live example
+  // one custom dev agent bound to the built-in suid skill, so the two-step flow has a live example
   const devAgent = saveAgent({
     name: 'suid-dev',
     description: '按 EADP 契约实现 SUID 页面',
     instructions: '你负责实现单个页面，遵循 @ead/suid 组件库规范。',
     model: '',
   });
-  attachAgentSkills(devAgent.id, [suid.id]);
+  attachAgentSkills(devAgent.id, ['builtin:suid']);
 }

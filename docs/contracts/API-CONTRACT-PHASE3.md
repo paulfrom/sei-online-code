@@ -16,7 +16,7 @@
 |---|---|
 | `Skill` entity: import source + content + `computedHash` (lock) | Full Build-Loop feedback re-entry / iteration timeline (Phase 4) |
 | `Agent` entity: name/description/instructions/model + bound `skillIds[]` | Workspace GC / disk reclaim (Phase 4) |
-| Skill import (GitHub/inline source) → hash-lock; re-import idempotent by hash | Template GitLab repo + scaffold generator (Phase 5) |
+| Skill import (GitHub/inline/local/`builtin:` source) → name-dedup (409); runtime hash-lock | Template GitLab repo + scaffold generator (Phase 5) |
 | `SkillMaterializer`: bound skills → `.claude/skills/<name>/SKILL.md` in worktree | Multi-CLI, multi-tenancy/auth, dedicated merge agent (deferred) |
 | Dispatch uses `Task.assignedAgent` → resolve custom Agent → materialize its skills | Runtime spawn/live git (compile-only bar carried from Phase 2) |
 | Agent CRUD UI (list/detail/create/edit) + skill multi-select | — |
@@ -32,20 +32,30 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
   "id": "SKIL0001",
   "name": "suid",                         // unique; maps to .claude/skills/<name>/
   "description": "@ead/suid component library skill",
-  "source": "local:suid",                 // "github:<owner>/<repo>[/path]" | "local:<name>" | "inline"
-  "sourceType": "LOCAL",                  // GITHUB | LOCAL | INLINE
+  "config": { "origin": "local:suid" },   // "github:<owner>/<repo>[/path]" | "local:<name>" | "inline"
   "content": "# SUID Skill\n...",         // the SKILL.md body (frontmatter + markdown)
-  "computedHash": "sha256:ab12…",         // lock: sha256 over (v1|source|name|description|content)
+  "files": [ {"path": "references/general.md", "content": "..."} ],  // aux files (Phase 5)
+  "computedHash": "sha256:ab12…",         // runtime lock: sha256 over (v1|config.origin|name|description|content)
   "createdDate": "2026-07-01T10:00:00"
 }
 ```
 
-- `computedHash` is the **lock**: recomputed from the canonical parts on every
-  import; re-importing identical content yields the same hash → idempotent (no
-  new row, `save` returns the existing one). Hash recipe mirrors multica
-  `BuildManifest`: `sha256("v1" ∥ source ∥ name ∥ description ∥ content)` with
-  each part length-prefixed (see §6). Single-file skills only this phase
-  (no per-file `FileRef[]`); multi-file bundles deferred.
+- `config.origin` (Phase 4) replaces the former `source`/`sourceType` pair; the
+  type is implicit in the prefix (`github:` / `local:` / `inline`).
+- `computedHash` is the **lock**: recomputed at runtime from the canonical parts
+  (never persisted). Re-importing the same **name** is rejected with 409 (dedup
+  by `name`, not by hash). Hash recipe mirrors multica `BuildManifest`:
+  `sha256("v1" ∥ config.origin ∥ name ∥ description ∥ content)` with each part
+  length-prefixed (see §6). `files[]` do NOT enter the hash — the `.lock` still
+  covers only the SKILL.md five-tuple; import is name-dedup'd and there is no
+  update endpoint → aux files are immutable post-import → idempotency holds.
+- `files[]` (Phase 5) carries per-file `{path, content}` aux files (sub-directories
+  allowed; `path` validated to forbid absolute/`..` segments). Materialized into
+  `.claude/skills/<name>/<path>` alongside `SKILL.md`.
+- **Built-in skills** (`suid`, `eadp-backend`, `project-planning`, `feature-design`)
+  are NOT `oc_skill` rows: they are vendored to the backend classpath
+  `resources/skills/<name>/` and resolved via `builtin:<name>` synthetic ids (see
+  §4). They never appear in `/skill/findByPage` / `/skill/findOne`.
 - `name` MUST match `^[a-z0-9][a-z0-9-]{0,63}$` (materializes to a dir name).
 
 ### 1.2 `AgentDto` — a user-defined dev agent (instructions + bound skills)
@@ -68,14 +78,15 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
   `builtin=false`. `Task.assignedAgent` (Phase 2, default `dev-agent`) now
   resolves to an Agent `name`; if unresolved → fall back to built-in behavior.
 - `skillIds` binding is the two-step multica flow: create agent → attach skills.
-  On dispatch, DispatchService resolves the assigned agent, and
+  Entries may be either a DB skill id or a `builtin:<name>` synthetic id (built-in
+  skills, §4). On dispatch, DispatchService resolves the assigned agent, and
   `SkillMaterializer` writes each bound skill into the worktree before spawn.
 
 ## 2. New endpoints (Phase 3) — all under `/api`
 
 | # | Method | Path | Request | Response `data` | Purpose |
 |---|--------|------|---------|-----------------|---------|
-| 16 | POST | `/api/skill/import` | `{ name, description, source, sourceType, content }` | `SkillDto` | Import + hash-lock a skill; idempotent by hash |
+| 16 | POST | `/api/skill/import` | `{ name, description, config, content, files[] }` | `SkillDto` | Import a skill; dedup by name (409 on conflict) |
 | 17 | POST | `/api/skill/findByPage` | `Search` | `PageResult<SkillDto>` | List skills |
 | 18 | GET  | `/api/skill/findOne?id=` | — | `SkillDto` | Load one skill |
 | 19 | DELETE | `/api/skill/delete?id=` | — | `void` | Delete a skill (rejected if bound to any agent) |
@@ -94,24 +105,50 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
 Before each per-task `ClaudeRunner` spawn, for the task's resolved Agent:
 
 ```
-for skill in agent.skillIds:
-    dir  = <worktreePath>/.claude/skills/<skill.name>/
-    write dir/SKILL.md  = skill.content
-    write dir/.lock      = skill.computedHash    // reproducibility marker
+for skillId in agent.skillIds:
+    payload = skillId.startsWith("builtin:")
+              ? BuiltInSkillRegistry.resolve(skillId)   // classpath skills/<name>/
+              : SkillService.findOne(skillId)            // DB row (config/content/files)
+    if payload == null: continue
+    dir  = <worktreePath>/.claude/skills/<payload.name>/
+    write dir/SKILL.md  = payload.content
+    write dir/.lock      = payload.computedHash          // reproducibility marker
+    for f in payload.files:
+        write dir/<f.path> = f.content                   // aux files (sub-dirs allowed, §1.1)
 ```
 
-- Idempotent: identical `computedHash` already on disk → skip rewrite.
+- `builtin:<name>` ids are routed to `BuiltInSkillRegistry` (§4); all other ids
+  load from `oc_skill` via `SkillService` (which populates `files[]`).
+- Idempotent: identical `computedHash` already on disk (`.lock`) → skip rewrite
+  of `SKILL.md` and all aux files. Aux files do not enter the hash (§1.1/§6).
 - Compile-only this phase: the materializer is a real, unit-testable method;
   the actual worktree path resolution + spawn stays the Phase 2
   `TODO(oma-deferred)` runtime seam. `.claude/skills/` layout matches the CLI.
 
-## 4. Built-in skill seeding (LOCAL sourceType)
+## 4. Built-in skills — classpath-vendored, `builtin:<name>` synthetic id
 
-`suid` and `eadp-backend` are seeded as `LOCAL` skills on first boot (Flyway
-seed OR service-startup upsert). `source = "local:<name>"`, `content` is a
-short pointer stub (full skill lives on the operator machine at
-`~/.claude/skills/<name>`). This satisfies the CONTEXT rule that the designated
-runtime skill = `suid` without vendoring the whole bundle into the DB.
+The four designated skills — `suid`, `eadp-backend`, `project-planning`,
+`feature-design` — are **not** `oc_skill` rows. They are vendored into the
+backend jar at `src/main/resources/skills/<name>/` (`SKILL.md` + optional
+`references/**` aux files) and loaded at runtime by `BuiltInSkillRegistry`
+(`ClassPathResource` + `PathMatchingResourcePatternResolver`).
+
+Agents bind them through `oc_agent_skill` using the synthetic id
+`builtin:<name>`. The join table's `skill_id` column deliberately has **no FK**
+to `oc_skill` (V7) precisely so these synthetic ids can live there. At
+materialize time (§3), `builtin:`-prefixed ids are routed to the registry
+instead of `SkillService.findOne`.
+
+- `suid` / `eadp-backend` are copied from the operator machine
+  (`~/.claude/skills/<name>/`) — full content + `references/`.
+- `project-planning` / `feature-design` are stub `SKILL.md` with a `TODO`
+  placeholder; real content is to be authored later.
+- V11 removes the former `LOCAL` pointer-stub `oc_skill` seed rows and rewrites
+  the two seeded agent bindings (`planning-agent`, `feature-design-agent`) to
+  `builtin:project-planning` / `builtin:feature-design`.
+- Frontend: built-in skills do not appear in `/skill/findByPage`; the Agents
+  multi-select merges a fixed `BUILTIN_SKILLS` constant into its options so
+  users can bind `builtin:<name>` to any custom agent.
 
 ## 5. Sub-agent obligations (dispatch basis — separate contexts)
 
@@ -136,7 +173,7 @@ runtime skill = `suid` without vendoring the whole bundle into the DB.
 ```
 h = sha256()
 writePart(h, "v1")
-writePart(h, source)
+writePart(h, config.origin)          // "github:..." | "local:..." | "inline" | "builtin:<name>"
 writePart(h, name)
 writePart(h, description)
 writePart(h, content)
@@ -148,5 +185,12 @@ writePart(h, s):   // length-prefixed to avoid boundary ambiguity
     h.update(utf8(s))
 ```
 
-Backend implements this; frontend does NOT recompute (server is authoritative,
-returns `computedHash`). Documented here so both sides read the same recipe.
+- `config.origin` (Phase 4) is the hash input that replaced the former `source`
+  column; the value string is unchanged, so hashes computed before PR3 remain
+  stable (no reproducibility break).
+- For built-in skills (§4), origin = `builtin:<name>`, description = null; the
+  hash is a deterministic `.lock` marker only (classpath content is immutable).
+- `files[]` (Phase 5) do NOT enter the recipe — the lock covers only the
+  SKILL.md five-tuple (see §1.1 for why this preserves idempotency).
+- Backend implements this; frontend does NOT recompute (server is authoritative,
+  returns `computedHash`). Documented here so both sides read the same recipe.

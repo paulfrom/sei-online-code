@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
@@ -42,6 +43,7 @@ class PlanAgentServiceTest {
     private ProjectService projectService;
     private ClaudeRunner claudeRunner;
     private SkillMaterializer skillMaterializer;
+    private BuiltInSkillRegistry builtInSkillRegistry;
     private PlanAgentService service;
 
     @BeforeEach
@@ -53,8 +55,9 @@ class PlanAgentServiceTest {
         projectService = mock(ProjectService.class);
         claudeRunner = mock(ClaudeRunner.class);
         skillMaterializer = mock(SkillMaterializer.class);
+        builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillService, projectService, claudeRunner, skillMaterializer);
+                skillService, projectService, claudeRunner, skillMaterializer, builtInSkillRegistry);
     }
 
     @Test

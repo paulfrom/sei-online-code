@@ -165,6 +165,25 @@ export interface AgentDto {
   createdDate: string;
 }
 
+/**
+ * Built-in skills (multica dim g). Vendored to the backend classpath
+ * (`resources/skills/<name>/`) and resolved via `builtin:<name>` synthetic ids —
+ * they are NOT oc_skill rows and never appear in /skill/findByPage. Agents bind
+ * them through the same skillIds[] field; the backend routes `builtin:` to
+ * BuiltInSkillRegistry at materialize time. Surfaced here so the Agents
+ * multi-select can offer them alongside user-imported skills.
+ */
+export const BUILTIN_SKILLS: ReadonlyArray<{
+  id: string;
+  name: string;
+  description: string;
+}> = [
+  { id: 'builtin:suid', name: 'suid', description: '@ead/suid 组件库开发技能' },
+  { id: 'builtin:eadp-backend', name: 'eadp-backend', description: 'sei-core 分层架构后端开发技能' },
+  { id: 'builtin:project-planning', name: 'project-planning', description: '规划书生成 skill' },
+  { id: 'builtin:feature-design', name: 'feature-design', description: '功能设计生成 skill' },
+];
+
 /** Store URL used directly by ExtTable remotePaging (contract ep #3). */
 export const PROJECT_FIND_BY_PAGE_URL = `${API}/project/findByPage`;
 

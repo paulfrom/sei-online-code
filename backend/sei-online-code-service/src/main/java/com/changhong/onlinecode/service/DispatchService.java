@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.agent.WorkspaceManager;
@@ -60,6 +61,7 @@ public class DispatchService {
     private final AgentService agentService;
     private final SkillService skillService;
     private final SkillMaterializer skillMaterializer;
+    private final BuiltInSkillRegistry builtInSkillRegistry;
     private final WorkspaceManager workspaceManager;
 
     public DispatchService(IterationService iterationService,
@@ -72,6 +74,7 @@ public class DispatchService {
                            AgentService agentService,
                            SkillService skillService,
                            SkillMaterializer skillMaterializer,
+                           BuiltInSkillRegistry builtInSkillRegistry,
                            WorkspaceManager workspaceManager) {
         this.iterationService = iterationService;
         this.specService = specService;
@@ -83,6 +86,7 @@ public class DispatchService {
         this.agentService = agentService;
         this.skillService = skillService;
         this.skillMaterializer = skillMaterializer;
+        this.builtInSkillRegistry = builtInSkillRegistry;
         this.workspaceManager = workspaceManager;
     }
 
@@ -284,6 +288,11 @@ public class DispatchService {
         }
         List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
         for (String skillId : agent.getSkillIds()) {
+            // builtin:<name> synthetic id → classpath registry；其余 → DB（SkillService.findOne populate files）
+            if (skillId.startsWith(BuiltInSkillRegistry.PREFIX)) {
+                builtInSkillRegistry.resolve(skillId).ifPresent(payloads::add);
+                continue;
+            }
             Skill skill = skillService.findOne(skillId);
             if (skill != null) {
                 payloads.add(new SkillMaterializer.SkillPayload(

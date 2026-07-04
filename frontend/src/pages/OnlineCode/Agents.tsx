@@ -24,6 +24,7 @@ import type { ExtTableProps, ExtTableRef } from '@ead/suid';
 import { DeleteOutlined, EditOutlined, LockOutlined, PlusOutlined } from '@ead/suid-icons';
 import {
   AGENT_FIND_BY_PAGE_URL,
+  BUILTIN_SKILLS,
   attachAgentSkills,
   deleteAgent,
   findSkillsByPage,
@@ -57,14 +58,16 @@ const Agents: React.FC = () => {
   const [editing, setEditing] = useState<AgentDto | null>(null);
   const [skillOptions, setSkillOptions] = useState<Array<{ value: string; label: string }>>([]);
 
-  /** load the skill options for the multi-select (ep #17) */
+  /** load the skill options for the multi-select (ep #17) — user skills + builtins */
   const loadSkills = useCallback(async () => {
     const res = await findSkillsByPage({ pageInfo: { page: 1, rows: 200 } });
-    if (res.success && res.data) {
-      setSkillOptions(
-        res.data.rows.map((s: SkillDto) => ({ value: s.id, label: `${s.name} — ${s.description}` })),
-      );
-    }
+    const userOptions =
+      res.success && res.data
+        ? res.data.rows.map((s: SkillDto) => ({ value: s.id, label: `${s.name} — ${s.description}` }))
+        : [];
+    // builtins are not oc_skill rows (multica dim g); merge so agents can bind builtin:<name>
+    const builtinOptions = BUILTIN_SKILLS.map((s) => ({ value: s.id, label: `${s.name} — ${s.description}` }));
+    setSkillOptions([...userOptions, ...builtinOptions]);
   }, []);
 
   useEffect(() => {

@@ -3,15 +3,16 @@
 > 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
 > 分支 `feat/align-skill-multaca`（本地，未推送）。
 
-## 状态（截至 PR4 完成）
+## 状态（截至 PR5 完成）
 
 - **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
 - **PR2 已完成**（commit `2b165b8`）：弃持久化 hash，name 去重 + 409，V8 迁移
 - **PR3 已完成**（Phase 4，commit `fc22c00`）：来源→config JSONB，删 SkillSourceType，V9 迁移；后端 compileTestJava + skill/Converter 测试全过，前端 umi build 通过，V9 已应用本地库
-- **PR4 已完成**（Phase 5，oc_skill_file，未提交）：新建 SkillFile 实体+DAO+SkillFileDto；Skill 加 @Transient files + SkillService populate(findOne/findByPage) + importSkill 持久化 files；SkillMaterializer 多文件+越界 guard；DispatchService/PlanAgentService 带 files（PlanAgentService 由 SkillDao 改注 SkillService 以 populate files，同步改 PlanAgentServiceTest）；迁移 V10。compileTestJava + `*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3)+`*PlanAgentServiceTest`(6) 全过；V10 已应用本地库（schema 确认：pk(id)/uk(skill_id,path)/idx(skill_id)/FK CASCADE）
+- **PR4 已完成**（Phase 5，oc_skill_file，commit `a3c6fb4`）：新建 SkillFile 实体+DAO+SkillFileDto；Skill 加 @Transient files + SkillService populate(findOne/findByPage) + importSkill 持久化 files；SkillMaterializer 多文件+越界 guard；DispatchService/PlanAgentService 带 files（PlanAgentService 由 SkillDao 改注 SkillService 以 populate files，同步改 PlanAgentServiceTest）；迁移 V10。compileTestJava + `*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3)+`*PlanAgentServiceTest`(6) 全过；V10 已应用本地库（schema 确认：pk(id)/uk(skill_id,path)/idx(skill_id)/FK CASCADE）
+- **PR5 已完成**（Phase 6+7，内置技能资源化，未提交）：vendor suid/eadp-backend 到 `src/main/resources/skills/`（SKILL.md+references/）+ project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（@Component，classpath 加载 SKILL.md+references/**，`builtin:<name>`→`Optional<SkillPayload>`，origin=`builtin:<name>` 算 hash）；DispatchService/PlanAgentService 注入 registry 并在 `materializeSkills` 按 `builtin:` 前缀分流（PlanAgentServiceTest ctor 同步加 mock）；迁移 V11（UPDATE 2 join 行→`builtin:`，DELETE 4 oc_skill 种子行）；前端 `BUILTIN_SKILLS` 常量 + Agents.tsx 合并选项 + mock 移除内置 seed/suid-dev 绑 `builtin:suid`/attach 放行 `builtin:`；契约 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6 + PRE-BUILD §10 对齐。compileTestJava + `*BuiltInSkillRegistryTest`(6)+`*PlanAgentServiceTest`(6)+`*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3) 全过；V11 已应用本地库（join 2 行 `builtin:`、oc_skill 内置 4 行已删）；前端 `pnpm build` 通过
 - **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V10。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
-- **已验证**：`compileTestJava` 通过；`*SkillServiceTest`(5)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(6)+`*PlanAgentServiceTest`(6) 全过；V10 schema 已确认（`oc_skill_file`：id/skill_id/path/content+审计列，pk(id)/uk(skill_id,path)/idx(skill_id)/fk_skill_file_skill ON DELETE CASCADE）。PR3 既有验证（V9 schema、前端 `pnpm build`）不受 PR4 影响
-- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟（导入带 files 的技能触发 dispatch 验证 materialize 多文件写出）
+- **已验证**：`compileTestJava` 通过；`*BuiltInSkillRegistryTest`(6)+`*SkillServiceTest`(5)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(6)+`*PlanAgentServiceTest`(6) 全过；V11 已应用本地库（`oc_agent_skill` 2 行 `builtin:project-planning`/`builtin:feature-design`、`oc_skill` 内置 4 行已删）；V10 schema 已确认（`oc_skill_file`：id/skill_id/path/content+审计列，pk(id)/uk(skill_id,path)/idx(skill_id)/fk_skill_file_skill ON DELETE CASCADE）；前端 `pnpm build` 通过。PR3–PR4 既有验证（V9 schema）不受 PR5 影响
+- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟（导入带 files 的技能 + 绑定 `builtin:` 的 agent 触发 dispatch，端到端验证 materialize 多文件 + classpath 内置技能写出）；API-CONTRACT-PHASE3.md §5（sub-agent obligations 段）仍含历史措辞（"idempotent"/"V3__skill_agent.sql pick ONE"），属描述性 prose 未在 PR5 范围，待后续清理
 
 ## 决策汇总（用户已拍板）
 
@@ -163,7 +164,7 @@
 - 前端 `onlineCode.ts`/`mocks` 的 `files[]` 同步留 PR5（PR4 后端 only，契约漂移已接受）。
 - 内置技能 `references/**` vendor 到 classpath + `BuiltInSkillRegistry` 在 PR5 处理；PR4 表与管道就绪，PR5 填内容。
 
-## PR4 改动文件（Phase 5，未提交）
+## PR4 改动文件（Phase 5，commit `a3c6fb4`）
 
 **新建**：
 - `dto/skill/SkillFileDto.java`（api 模块）：path（@NotBlank+@Pattern）+ content
@@ -184,11 +185,71 @@
 - `test/.../SkillMaterializerTest.java`：+3 测（多文件/越界/幂等，共 6 测）
 - `test/.../PlanAgentServiceTest.java`：SkillDao mock→SkillService mock
 
+## 续作：PR5 = Phase 6+7（内置技能资源化 + content vendor + 契约文档 + 全量验证）—— ✅ 已完成
+
+**起点**：`git checkout feat/align-skill-multaca` → 读 `SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`SkillHasher.java`/V3+V6+V7 迁移（内置 seed + join 表）/契约 Phase 3 §1.1/§3/§4/§6 + PRE-BUILD §10 现状 → 按下文实施。
+
+**设计决策（分析后选定）**：
+1. **`BuiltInSkillRegistry` = Spring `@Component`，落 `agent` 包**（与 `SkillMaterializer` 同包）。无 ctor 依赖（内部 `new PathMatchingResourcePatternResolver()`）。`resolve(skillId)` → `Optional<SkillPayload>`：仅处理 `builtin:` 前缀，加载 `classpath:skills/<name>/SKILL.md` + `references/**`。name 正则 `^[a-z0-9][a-z0-9-]{0,63}$` 校验（防 classpath 注入，defense-in-depth）。
+2. **hash 输入**：origin=`builtin:<name>`，name=`<name>`，description=null，content=SKILL.md。`.lock` 仅幂等标记，内容不可变（classpath）→ 确定性即可。
+3. **`references/**` 缺失容错**：`PathMatchingResourcePatternResolver.getResources` 对不存在的目录抛 IOException（stub 技能无 references/）；仅对 `getResources` 调用 try/catch 返回空列表（正常无辅助文件），SKILL.md 读失败仍上抛 → resolve 返回 empty。
+4. **路由最小内联**：两 service 各在 `materializeSkills` 加 `if (skillId.startsWith(PREFIX)) registry.resolve(...).ifPresent(add) else skillService.findOne(...)`。**不**抽共享 builder（遵 PR4 既有重复模式，不顺手重构）。
+5. **V11 FK 安全**：`oc_agent_skill.skill_id` 在 V7 故意未加 FK（为 `builtin:` 预留）→ UPDATE join + DELETE oc_skill 行无 FK 阻塞；`oc_skill_file.skill_id` FK CASCADE，但内置 4 行无 files → 级联空操作。先 UPDATE join（2 行），再 DELETE oc_skill（4 行）。
+6. **不新增端点**：内置技能为固定编译期集合 → 前端 `BUILTIN_SKILLS` 常量；Agents 多选合并选项。
+7. **project-planning/feature-design stub+TODO**：内容客观不存在，建 stub SKILL.md（骨架 + `TODO: replace with real skill content`），不伪造。
+8. **mock 范围**：移除 suid/eadp-backend oc_skill seed；`suid-dev` 绑 `builtin:suid`；`attachAgentSkills` 放行 `builtin:` 前缀。**不**补 V6 planning/feature-design/dev agent seed（既有 mock 漂移，PR5 不扩面）。db.ts 自包含不 import `@/services`（保 PR3 既有模式），无 `BUILTIN_SKILLS` 常量（仅内联 `builtin:suid`）。
+9. **Skills.tsx 不改**：内置技能不再入 oc_skill → `/skill/findByPage` 天然不返回 → 列表自动只显用户技能。
+
+**Phase 6+7 任务**：
+1. vendor `~/.claude/skills/suid/{SKILL.md,references/}` → `src/main/resources/skills/suid/`；eadp-backend 同理 ✅
+2. 新建 `skills/project-planning/SKILL.md` + `skills/feature-design/SKILL.md`（stub + TODO）✅
+3. 新建 `agent/BuiltInSkillRegistry.java`：`@Component`；`PREFIX="builtin:"`；`resolve`→`Optional<SkillPayload>`；name 正则校验；`ClassPathResource` 读 SKILL.md（不存在→empty）；`loadAuxFiles`（`getResources` IOException→空列表，path 取 URL 中 `skills/<name>/` 后相对串，跳过目录条目）；`SkillHasher.compute("builtin:"+name,name,null,content)` ✅
+4. `DispatchService`/`PlanAgentService`：ctor += `BuiltInSkillRegistry`；`materializeSkills` `builtin:` 分流 ✅
+5. `PlanAgentServiceTest`：ctor += `mock(BuiltInSkillRegistry.class)`（agents 无 skillIds，无 stub）✅
+6. 新迁移 `V11__skill_builtin_synthetic_id.sql`：UPDATE join 2 行 → `builtin:`；DELETE oc_skill 4 行 ✅
+7. 前端 `onlineCode.ts`：`BUILTIN_SKILLS` 常量（4 项，id=`builtin:<name>`）✅
+8. 前端 `Agents.tsx`：`loadSkills` 合并 `BUILTIN_SKILLS` 到 `skillOptions` ✅
+9. 前端 `mocks/db.ts`：删 suid/eadp-backend `importSkill` seed；`suid-dev` 绑 `['builtin:suid']`；`attachAgentSkills` 过滤改 `sid.startsWith('builtin:') || db.skills.has(sid)`；`handlers.ts` 零改（attach 委托 db.ts）✅
+10. 契约 `API-CONTRACT-PHASE3.md`：§0 scope 行、§1.1（config+files+runtime hash+builtin 注）、§1.2（skillIds 可含 `builtin:`）、§2 ep#16（config+files+name 去重）、§3（builtin 分流+多文件）、§4（整段重写为 classpath 资源化）、§6（source→config.origin + builtin origin）✅
+11. 契约 `API-CONTRACT-PRE-BUILD.md` §10：§10.1 改述内置技能不再 oc_skill seed（classpath 资源 + V11）；§10.2 agent `skill_ids` 示例改 `builtin:` + 注 V7 join 表 ✅
+12. 应用 V11 到本地库；`compileTestJava` + `*BuiltInSkillRegistryTest`/`*PlanAgentServiceTest`/`*SkillServiceTest`/`*SkillMaterializerTest`/`*SkillConfigConverterTest` 全过；前端 `pnpm build` 通过 ✅
+
+**Phase 6+7 注意**：
+- `BuiltInSkillRegistryTest` 在 test classpath 解析真实 `skills/suid/SKILL.md`（main resources 在 test runtime 可见），非 mock——验证 vendor 资源真实可加载。
+- 路由分流未抽公共 helper：两 service 各自内联 `if (startsWith(PREFIX))`，与 PR4 `toFileRefs`/`materializeSkills` 既有重复一致；未来若加第三处调用再抽。
+- §5（sub-agent obligations）段未改：含历史措辞（"idempotent"/"V3 pick ONE"），属描述性 prose，不在 PR5 列定范围（§1.1/§1.2/§3/§4/§6），记为待清理。
+- 内置技能 `builtin:<name>` 经 `oc_agent_skill` 绑定，**不**经 oc_skill；`SkillService.preDelete`/`findOne`/`findByPage` 天然不触及它们（DB 无行）。
+
+## PR5 改动文件（Phase 6+7，未提交）
+
+**新建**：
+- `src/main/resources/skills/suid/SKILL.md` + `references/*.md`（vendor）
+- `src/main/resources/skills/eadp-backend/SKILL.md` + `references/*.md`（vendor）
+- `src/main/resources/skills/project-planning/SKILL.md`（stub + TODO）
+- `src/main/resources/skills/feature-design/SKILL.md`（stub + TODO）
+- `agent/BuiltInSkillRegistry.java`：@Component，classpath 加载 + builtin: 解析
+- `db/migration/V11__skill_builtin_synthetic_id.sql`：UPDATE join + DELETE oc_skill 种子
+- `test/.../agent/BuiltInSkillRegistryTest.java`：6 测
+
+**修改（后端）**：
+- `service/DispatchService.java`：ctor += BuiltInSkillRegistry；materializeSkills builtin: 分流
+- `service/PlanAgentService.java`：同上
+- `test/.../service/PlanAgentServiceTest.java`：ctor += BuiltInSkillRegistry mock
+
+**修改（前端）**：
+- `services/onlineCode.ts`：BUILTIN_SKILLS 常量
+- `pages/OnlineCode/Agents.tsx`：loadSkills 合并 builtin 选项
+- `mocks/db.ts`：删内置 skill seed + suid-dev 绑 builtin:suid + attach 放行 builtin:
+
+**修改（文档）**：
+- `docs/contracts/API-CONTRACT-PHASE3.md`：§0/§1.1/§1.2/§2/§3/§4/§6
+- `docs/contracts/API-CONTRACT-PRE-BUILD.md`：§10.1/§10.2
+
 ## 后续 Phase 概要（详见各 Phase 实施时再展开）
 
 - **PR3 = Phase 4**（来源→config JSONB）—— ✅ 已完成（commit `fc22c00`）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；删 SkillSourceType 枚举（origin 前缀编码类型）；SkillHasher 参数 source→origin；前端 Skills.tsx/onlineCode.ts/db.ts/handlers.ts 改读 config.origin；迁移 V9。详见下文 PR3 段落。
 - **PR4 = Phase 5**（oc_skill_file）—— ✅ 已完成（未提交）：新建 `SkillFile` 实体+DAO+`SkillFileDto`；Skill 加 `@Transient files` + `SkillService` populate(findOne/findByPage)+importSkill 持久化；`SkillMaterializer` 多文件+越界 guard；`DispatchService`/`PlanAgentService` 带 files（PlanAgentService 改注 SkillService）；迁移 V10。hash recipe 不变（files 不进 lock）。详见上文 PR4 段落。
-- **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §1.1/§1.2/§3/§4/§6、PRE-BUILD §10。
+- **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）—— ✅ 已完成（未提交）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6、PRE-BUILD §10。详见上文 PR5 段落。
 
 ## 验证检查点（每个 PR 必过）
 

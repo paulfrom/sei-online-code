@@ -426,45 +426,17 @@ package com.changhong.sei.core.dto.serach;  // 注意：serach（非 search）
 
 ## 10. 内置 Seed（D3/D9）
 
-### 10.1 oc_skill seed — 两个内置 skill
+### 10.1 内置 skill — classpath 资源化（multica 维度 g）
 
-```sql
--- project-planning skill（LOCAL seed）
-INSERT INTO oc_skill (
-    id, name, description, source, source_type, content, computed_hash, created_date
-) VALUES (
-    'SKILL_SEED_PROJECT_PLANNING_001',
-    'project-planning',
-    '规划书生成 skill',
-    'local:project-planning',
-    'LOCAL',
-    '# project-planning Skill
+内置 skill（`suid` / `eadp-backend` / `project-planning` / `feature-design`）**不再以 `oc_skill` 行 seed**。
+它们 vendor 到后端 classpath `src/main/resources/skills/<name>/`（`SKILL.md` + 可选 `references/**`），
+由 `BuiltInSkillRegistry` 经 `builtin:<name>` synthetic id 加载（见 `API-CONTRACT-PHASE3.md` §4）。
 
-完整技能位于操作机 ~/.claude/skills/project-planning。
-强制输出 Plan JSON 骨架：summary/techAssumptions/features[featureId,title,outline]/nonGoals。
-禁止预估 fileScope。',
-    'sha256:000000000000000000000000000000000000000000000000000000000000pl01',
-    CURRENT_TIMESTAMP
-);
-
--- feature-design skill（LOCAL seed）
-INSERT INTO oc_skill (
-    id, name, description, source, source_type, content, computed_hash, created_date
-) VALUES (
-    'SKILL_SEED_FEATURE_DESIGN_001',
-    'feature-design',
-    '功能设计生成 skill',
-    'local:feature-design',
-    'LOCAL',
-    '# feature-design Skill
-
-完整技能位于操作机 ~/.claude/skills/feature-design。
-从 outline 展开 goal/design/acceptance[]/fileScope，骨架固定，粒度自定。
-fileScope 须遵循模板文件边界约定。',
-    'sha256:000000000000000000000000000000000000000000000000000000000000fd01',
-    CURRENT_TIMESTAMP
-);
-```
+- `suid` / `eadp-backend`：从操作机 `~/.claude/skills/<name>/` 拷入完整内容 + `references/`。
+- `project-planning` / `feature-design`：内容尚未沉淀，暂为 stub `SKILL.md`（含 `TODO` 占位）。
+- 迁移 `V11__skill_builtin_synthetic_id.sql` 删除 V3/V6 种入的 4 行 `oc_skill` LOCAL 指针 stub，
+  并把 `oc_agent_skill` 中 `planning-agent` / `feature-design-agent` 的 `skill_id` 改写为
+  `builtin:project-planning` / `builtin:feature-design`（join 表 `skill_id` 无 FK，V7 预留）。
 
 ### 10.2 oc_agent seed — 三个内置 agent
 
@@ -479,7 +451,7 @@ INSERT INTO oc_agent (
     'You produce a project Plan JSON from the project description. Use the project-planning skill.',
     '',
     TRUE,
-    '["SKILL_SEED_PROJECT_PLANNING_001"]',  -- D9：读 StringListConverter 确认格式
+    '["builtin:project-planning"]',  -- V7 起改 oc_agent_skill join 行；V11 起值为 builtin:<name>
     CURRENT_TIMESTAMP
 );
 
@@ -493,7 +465,7 @@ INSERT INTO oc_agent (
     'You produce one FeatureDesign JSON from the plan and a feature outline. Use the feature-design skill.',
     '',
     TRUE,
-    '["SKILL_SEED_FEATURE_DESIGN_001"]',
+    '["builtin:feature-design"]',
     CURRENT_TIMESTAMP
 );
 
@@ -512,6 +484,9 @@ INSERT INTO oc_agent (
     CURRENT_TIMESTAMP
 );
 ```
+
+> 注：`skill_ids` JSON 列在 V7 已迁移为 `oc_agent_skill` join 表（见 `V7__agent_skill_join_table.sql`）。
+> 上方 `skill_ids` 仅为种子意图说明；V11 起 join 行 `skill_id` 为 `builtin:<name>` synthetic id。
 
 > **D9 提醒**：`skill_ids` 格式（JSON array 字符串 vs 其他）实现时读 `StringListConverter` 确认；审计列默认值对齐 V3。
 

@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.ClaudeRunner;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
@@ -54,6 +55,7 @@ public class PlanAgentService {
     private final ProjectService projectService;
     private final ClaudeRunner claudeRunner;
     private final SkillMaterializer skillMaterializer;
+    private final BuiltInSkillRegistry builtInSkillRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Semaphore fdPermits = new Semaphore(MAX_CONCURRENT_FD);
@@ -61,7 +63,7 @@ public class PlanAgentService {
 
     public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
                             SkillService skillService, ProjectService projectService, ClaudeRunner claudeRunner,
-                            SkillMaterializer skillMaterializer) {
+                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
@@ -69,6 +71,7 @@ public class PlanAgentService {
         this.projectService = projectService;
         this.claudeRunner = claudeRunner;
         this.skillMaterializer = skillMaterializer;
+        this.builtInSkillRegistry = builtInSkillRegistry;
     }
 
     /**
@@ -171,6 +174,11 @@ public class PlanAgentService {
             List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
             if (agent != null && agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
+                    // builtin:<name> synthetic id → classpath registry；其余 → DB（SkillService.findOne populate files）
+                    if (sid.startsWith(BuiltInSkillRegistry.PREFIX)) {
+                        builtInSkillRegistry.resolve(sid).ifPresent(payloads::add);
+                        continue;
+                    }
                     Skill s = skillService.findOne(sid);
                     if (s != null) {
                         payloads.add(new SkillMaterializer.SkillPayload(
