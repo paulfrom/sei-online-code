@@ -279,7 +279,15 @@
 **验证**：
 - 前端 `pnpm build` 通过（Webpack compiled，`p__OnlineCode__Skills` 构建通过，`Form.List` 兼容 @ead/suid）
 - 后端 `./gradlew :sei-online-code-service:compileTestJava :sei-online-code-service:test --tests "*SkillServiceTest" --tests "*SkillMaterializerTest" --tests "*BuiltInSkillRegistryTest"` BUILD SUCCESSFUL
-- A2 local 冒烟：受 nacos 内网不可达 + Phase 2 spawn 接缝阻塞，端到端未跑；import+files 路径单测覆盖
+- A2 local 冒烟（2026-07-04 复测，commit 5090788 之后）：
+  - **nacos 阻塞已解除**（去 nacos 走本地配置，`dev-start.sh` + `local-config/application-local.yaml`，端口 8091）
+  - **auth 阻塞已解除**：JWT payload 无 `exp` 字段（永不过期），实测 token 有效——`Authorization: <raw>` 与 `Bearer <token>` 均 200，无 auth 401
+  - **step1 PASS**：`POST /plan/{projectId}/confirm` → Plan DRAFT→CONFIRMED（造态 seed 1 行 DRAFT Plan 含 f1/f2/f3）
+  - **D15 幂等 PASS**：预置 f1 latest FD 后 re-confirm，confirm 的 `existingFeatureIds` filter 正确跳过 f1（spawnFeatureDesign skip 日志仅 f2/f3）
+  - **step2 已解**：`spawnFeatureDesign` 改「no FD → 建首版 PENDING FD 行」（`PlanAgentService`），避开 confirm `@Transactional` 与 async 跨事务可见性竞争。实测 3 行 FD 全部落库
+  - **step3 已解（real-claude 路径打通）**：`ClaudeRunner` 加 `--output-format json` + 提取 `result` 字段 + 剥 markdown 围栏；claude 不可用走确定性 fallback（backend rule 11）。实测 real claude 跑通：f3 落 DRAFT 带真实内容、f1 落 DRAFT（内容偏空）、f2 FAILED（real-LLM 输出未符 FeatureDesignContent schema → parse 失败）
+  - 残留（非 seam，属 `TODO(oma-deferred)` 鲁棒性）：real-LLM 输出契约符合率不稳（f2），需 stream-json 协议解析 + schema 校验/重试加固
+  - 结论：A2 spawn seam 两阻塞已解，step1-3 端到端打通（real claude）；f2 类失败靠后续 stream-json 加固
 
 ## 验证检查点（每个 PR 必过）
 
