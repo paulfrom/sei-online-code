@@ -1,0 +1,74 @@
+# 对齐 multica skill 存储模型 — 续作指引
+
+> 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
+> 分支 `feat/align-skill-multaca`（本地，未推送）。
+
+## 状态（截至 PR1 完成）
+
+- **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
+- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V7。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
+- **已验证**：`./gradlew :sei-online-code-service:compileTestJava` 通过；`AgentServiceTest`(4) + `SkillServiceTest`(2) 全过；V7 schema 已确认（`oc_agent_skill` 建好、2 条种子绑定迁移、`oc_agent.skill_ids` 列已删）
+- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ 前端 build / `--spring.profiles.active=local` 冒烟
+
+## 决策汇总（用户已拍板）
+
+- **范围**：a(join表) + b(完整内容入库) + c(弃hash改name去重) + d(来源→config JSONB) + e(skill_file辅助文件) + g(内置技能资源化)；**defer** f(UUID主键,受 `BaseAuditableEntity` 约束) / h(workspace多租户,零基础) 另立 epic
+- **a**：AgentDto 仍内联 `skillIds[]`，后端 join 表↔数组转换，前端零改动 ✅(PR1 已实现)
+- **c**：同名导入冲突返回 409（复用 `ConflictException`）
+- **b/g**：技能内容 vendor 进 `src/main/resources/skills/`，suid/eadp-backend 从 `~/.claude/skills/` 拷入，project-planning/feature-design 内容不存在先 stub+TODO
+- **内置技能绑定**：synthetic id `builtin:<name>` 经 `oc_agent_skill` 显式绑定，内容从 classpath 加载；join 表 `skill_id` 不加 FK（仅 `agent_id` 保留 FK）
+
+## 关键约束（已核实）
+
+- `StringListConverter` 还被 `Task.fileScope` 复用 → 保留类，仅 Agent 不再用 ✅(PR1)
+- `ConflictException` 经 `PreBuildExceptionHandler` 映射 409，但 Javadoc 仅提 BUILDING 态 → Phase 3 需确认 skill 端点(Phase 3 controller)也能走到该 handler，必要时拓宽
+- `AbstractJsonConverter<T>` 单对象 JSONB 基类现成（Plan/FeatureDesign content 在用）→ Phase 4 `SkillConfig` 直接套
+- sei 实体全扁平、无 JPA 关系映射 → 不引入 @OneToMany，关系在 service/DAO 层用显式查询 ✅(PR1 遵守)
+- `BaseService.findOne/findByPage/save` 均 public 非 final，可 override ✅(PR1 用到)
+- `BaseEntityDao<T> extends JpaRepository<T,String>` → Spring Data 派生查询可用 ✅(PR1 用到)
+- `PageResult.getRows()` 返回 `ArrayList<T>`（不是 getData）✅(PR1 踩坑修正)
+
+## PR1 改动文件（commit 798d4a2）
+
+- `entity/Agent.java`：`skillIds` 字段 → `@Transient`（移除 `@Convert`/`@Column`）
+- `entity/AgentSkill.java`（新）：扁平实体，agentId + skillId，UNIQUE(agent_id, skill_id)
+- `dao/AgentSkillDao.java`（新）：findByAgentId/findByAgentIdIn/findBySkillId/deleteByAgentId
+- `service/AgentService.java`：注入 AgentSkillDao；override findOne/findByPage/save/findByName populate skillIds；attachSkills 重写为整体替换（删旧+插新+去重）
+- `service/SkillService.java`：构造器 `(SkillDao, AgentDao)` → `(SkillDao, AgentSkillDao)`；preDelete 全表扫描 → `findBySkillId` 单查询
+- `db/migration/V7__agent_skill_join_table.sql`（新）：建 oc_agent_skill、迁移 V6 种子绑定、删 skill_ids 列
+- `test/.../AgentServiceTest.java`（新，4 测试）、`SkillServiceTest.java`（新，2 测试）
+
+## 续作：PR2 = Phase 3（弃持久化 hash，name 去重，409）
+
+**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillHasher.java`/`SkillDao.java`/`SkillService.java`/`SkillMaterializer.java`/`SkillDto.java` 现状 → 按下文 Phase 3 实施。
+
+**Phase 3 任务**：
+1. `Skill.java`：移除 `computedHash` 持久化字段；改 `@Transient getComputedHash()` 运行时由 `SkillHasher.compute(source,name,description,content)` 计算
+2. `SkillDao`：删 `findByComputedHash`
+3. `SkillService.importSkill`：改为 name 去重 —— `findByName(name)` 命中 → `throw new ConflictException("技能名已存在: "+name+" (id="+existing.getId()+")")`；未命中 → insert
+4. `SkillHasher`：保留（materializer `.lock` + DTO 运行时计算仍需）
+5. `SkillDto.computedHash`：保留（运行时计算，前端 Hash 列不变）
+6. 确认 `ConflictException`→409 映射覆盖 skill 端点：检查 `PreBuildExceptionHandler` 是否 `@RestControllerAdvice` 全局，否则新增通用 `@ExceptionHandler(ConflictException.class)` 返回 409
+7. 新迁移 `V8__skill_drop_hash.sql`：`ALTER TABLE oc_skill DROP COLUMN computed_hash`；`DROP INDEX idx_skill_hash`；V3/V6 种子里硬编码的 computed_hash 随列删除失效（无需改 V3/V6）
+8. 更新 `SkillServiceTest`：补 importSkill 的 name 去重 + 409 测试（现有 2 测试保留）
+9. 应用 V8 到本地库；`./gradlew :sei-online-code-service:test --tests "*SkillServiceTest"`
+
+**Phase 3 注意**：materializer `.lock` 幂等（`SkillMaterializer.java:88-93`）依赖 computedHash —— 改运行时计算后，hash 从 DB content 实时算，`.lock` 仍可比较，不破坏幂等。但 `SkillMaterializerTest` 的 `.lock == computedHash` 断言需确认仍成立（hash 改为 @Transient getter，materializer 调 getter 取值）。
+
+## 后续 Phase 概要（详见各 Phase 实施时再展开）
+
+- **PR3 = Phase 4**（来源→config JSONB）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；前端 Skills.tsx/onlineCode.ts/db.ts 改读 config.origin。迁移 V9。
+- **PR4 = Phase 5**（oc_skill_file）：新建 SkillFile 实体+DAO；SkillDto 加 files[]；SkillMaterializer 写多文件；DispatchService/PlanAgentService 带 files。迁移 V10。
+- **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §1.1/§1.2/§3/§4/§6、PRE-BUILD §10。
+
+## 验证检查点（每个 PR 必过）
+
+1. `./gradlew :sei-online-code-service:compileTestJava` 通过
+2. `./gradlew :sei-online-code-service:test --tests "*ServiceTest"` 通过
+3. 新迁移手动应用到本地 `sei-online-code` 库：`docker exec -i pg17 psql -U postgres -d sei-online-code -v ON_ERROR_STOP=1 < <migration>.sql`
+4. schema 变更用 `docker exec pg17 psql -U postgres -d sei-online-code -c "\d <table>"` 确认
+
+## 不在本次（defer epic）
+
+- **f** UUID 主键：受 sei-core `BaseAuditableEntity` 约束，影响全实体
+- **h** workspace 多租户：sei 零基础，平台级改造
