@@ -3,13 +3,14 @@
 > 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
 > 分支 `feat/align-skill-multaca`（本地，未推送）。
 
-## 状态（截至 PR2 完成）
+## 状态（截至 PR3 完成）
 
 - **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
-- **PR2 已完成**（Phase 3，已提交，见 git log）：弃持久化 hash，name 去重 + 409，V8 迁移
-- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V8。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
-- **已验证**：`./gradlew :sei-online-code-service:compileTestJava` 通过；`*ServiceTest` 全过（SkillServiceTest 4 + AgentServiceTest 4 + 其余 6 类 39 测）；SkillMaterializerTest 3 过；V8 schema 已确认（`oc_skill.computed_hash` 列与 `idx_skill_hash` 索引已删，`uk_skill_name` 保留）
-- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ 前端 build / `--spring.profiles.active=local` 冒烟
+- **PR2 已完成**（commit `2b165b8`）：弃持久化 hash，name 去重 + 409，V8 迁移
+- **PR3 已完成**（Phase 4，commit `fc22c00`）：来源→config JSONB，删 SkillSourceType，V9 迁移；后端 compileTestJava + skill/Converter 测试全过，前端 umi build 通过，V9 已应用本地库
+- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V9。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
+- **已验证**：`compileTestJava` 通过；`*SkillServiceTest`(4)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(3)+`*PlanContentConverterTest`+`*FeatureDesignContentConverterTest` 全过；V9 schema 已确认（`source`/`source_type` 列已删，`config TEXT` 已加，4 行回填 `{"origin":"local:..."}`，`uk_skill_name` 保留）；前端 `pnpm build` 通过
+- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟
 
 ## 决策汇总（用户已拍板）
 
@@ -67,11 +68,67 @@
 - `db/migration/V8__skill_drop_hash.sql`（新）：删 `computed_hash` 列 + `idx_skill_hash` 索引
 - `test/.../SkillServiceTest.java`：补 `importSkill_throwsConflictWhenNameExists` + `importSkill_insertsWhenNameFree`（共 4 测）；`setUp` 加 `getEntityClass()` mock 绕过 `BaseService.validateUniqueCode` NPE
 
-## 续作：PR3 = Phase 4（来源→config JSONB）
+## 续作：PR3 = Phase 4（来源→config JSONB）—— ✅ 已完成
+
+**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillHasher.java`/`AbstractJsonConverter.java`+`FeatureDesignContentConverter.java`（converter 范例）/前端 `Skills.tsx`/`onlineCode.ts`/`mocks/db.ts`/`mocks/handlers.ts` 现状 → 按下文 Phase 4 实施。
+
+**设计决策（用户拍板）**：`SkillConfig = { origin: string }` 单字段；删 `SkillSourceType` 枚举（GITHUB/LOCAL/INLINE 由 origin 前缀 `github:`/`local:`/`inline` 隐式编码，最贴 multica frontmatter 模型）；§6 hash recipe 的 source 部分改取 `config.origin`（值与原 source 同串 → hash 不变，无复现破坏）。
+
+**Phase 4 任务**：
+1. 新建 `dto/skill/SkillConfig.java`：`origin` 字段，`Serializable`+`@Schema`+无参构造（Jackson）+`SkillConfig(String origin)` 便捷构造 ✅
+2. 新建 `entity/converter/SkillConfigConverter.java`：`extends AbstractJsonConverter<SkillConfig>`，`@Converter`，对称于 PlanContentConverter ✅
+3. `Skill.java`：删 `source`/`sourceType` 字段+accessors+`EnumType`/`Enumerated` import；加 `config` 字段（`@Convert(SkillConfigConverter)`+`@Column(name="config", columnDefinition=TEXT)`）；`getComputedHash()` 改 `SkillHasher.compute(config==null?null:config.getOrigin(), name, description, content)`；Javadoc recipe tuple `(v1|source|...)`→`(v1|config.origin|...)` ✅
+4. `SkillDto.java`/`ImportSkillRequest.java`：删 source/sourceType + accessors；加 `config`（ImportSkillRequest 上 `@NotNull`，取代原 sourceType 的 @NotNull）✅
+5. `SkillService.importSkill`：签名 `(name,desc,source,sourceType,content)`→`(name,desc,SkillConfig config,content)`；`setConfig(config)`；Javadoc 更新 ✅
+6. `SkillController.importSkill`：传 `request.getConfig()` 取代 getSource/getSourceType ✅
+7. `SkillHasher.compute`：参数 `source`→`origin`（签名+Javadoc+recipe 注释+body `writePart(digest, origin)`）；语义不变，hash 输入值同 ✅
+8. 删 `dto/enums/SkillSourceType.java` ✅
+9. 新迁移 `V9__skill_source_to_config.sql`：`ADD COLUMN config TEXT`；`UPDATE ... SET config = jsonb_build_object('origin', source)::text WHERE source IS NOT NULL`；`DROP COLUMN source`/`source_type`（V3 种子 INSERT 仍引用此两列，按序执行 V9 前列仍在，合法，同 V8 处理 computed_hash）✅
+10. 前端 `onlineCode.ts`：`SkillSourceType` type → `SkillConfig` interface；SkillDto.source/sourceType → config；importSkill params source/sourceType → config；注释 "idempotent by hash" → "dedup by name"（对齐 PR2 后端实际）✅
+11. 前端 `mocks/db.ts`：SkillSourceType → SkillConfig；SkillDto/computeSkillHash（`s.config.origin`）/importSkill/seed 全改 config；mock 的 hash 幂等保留（PR2 未触及 mock，本次仅 source→config.origin，不改 mock 去重策略，避免越界）✅
+12. 前端 `mocks/handlers.ts`：import body `source?/sourceType?` → `config?:{origin?}`；默认 `inline:${name}` ✅
+13. 前端 `Skills.tsx`：删 `SkillSourceType` import + `SOURCE_TYPE_META`/`SOURCE_TYPE_OPTIONS` + `Select` import；改 `originTypeMeta(origin)` 由前缀派生 Tag；ImportForm sourceType/source → origin；表单 sourceType Select+source Input → 单 origin Input；列「来源类型」Tag 由 `config.origin` 派生、「来源」读 `config.origin`；header 注释 "idempotent by hash" → "dedup by name 409" ✅
+14. 新建 `SkillConfigConverterTest`（3 测：null→null、blank→null、round-trip origin），对称 PlanContentConverterTest ✅
+15. `SkillServiceTest`：两处 importSkill 调用 `("...", SkillSourceType.LOCAL, ...)` → `(new SkillConfig("local:..."), ...)` ✅
+16. 应用 V9 到本地库；`compileTestJava` + `*SkillServiceTest`/`*SkillConfigConverterTest`/`*SkillMaterializerTest`/`*PlanContentConverterTest`/`*FeatureDesignContentConverterTest` 全过；前端 `pnpm build`（umi build, ESLINT=none）通过 ✅
+
+**Phase 4 注意**：
+- `config` 列 TEXT（非 JSONB），与 Plan/FeatureDesign content 一致（`columnDefinition=TEXT` + AbstractJsonConverter 序列化 JSON 串）。`jsonb_build_object(...)::text` 回填的 JSON 串带空格（`{"origin": "..."}`），Jackson ObjectMapper 反序列化空白不敏感，兼容。
+- §6 hash recipe doc（API-CONTRACT-PHASE3.md §1.1/§2 端点16/§6）仍写 `source`/`sourceType`，**契约文档更新整体 defer 到 PR5**（resume doc 既有规划）；PR3–PR4 期间契约 doc 与实际 API 漂移，已知。代码层 `SkillHasher` 已用 origin，hash 值不变。
+- mock（db.ts）importSkill 仍按 hash 幂等，与后端 name 去重（PR2）漂移——PR2 既有，本次不修（越界）；仅同步 source→config.origin。
+- 本地库 oc_skill 现有 4 行（suid/eadp-backend/project-planning/feature-design，后两者为前序会话补种），V9 `UPDATE 4` 全部回填 config，source/source_type 列已删，uk_skill_name 保留。
+- 前端 `db.ts` 被 grep 判为 binary（含非文本字节），需 `grep -a` 读取；Read/Edit 不受影响。
+- standalone `tsc --noEmit`/`eslint` 在本环境被既有工具链问题阻断（tsconfig `ignoreDeprecations:"6.0"`、umi eslint `es2022` unknown）——非本次引入；前端验证走 `pnpm build`（umi 自带工具链）。
+
+## PR3 改动文件（Phase 4，commit `fc22c00`）
+
+**新建**：
+- `dto/skill/SkillConfig.java`（api 模块）：origin 字段 + 双构造
+- `entity/converter/SkillConfigConverter.java`（service 模块）：extends AbstractJsonConverter
+- `db/migration/V9__skill_source_to_config.sql`：加 config TEXT + 回填 + 删 source/source_type
+- `test/.../entity/converter/SkillConfigConverterTest.java`：3 测
+
+**修改（后端）**：
+- `entity/Skill.java`：source/sourceType → config；getComputedHash 用 config.origin；Javadoc
+- `dto/SkillDto.java`：source/sourceType → config
+- `dto/request/ImportSkillRequest.java`：source/sourceType → config（@NotNull）
+- `service/SkillService.java`：importSkill 签名 + body + Javadoc
+- `controller/SkillController.java`：传 getConfig
+- `service/support/SkillHasher.java`：参数 source→origin + Javadoc
+- `test/.../service/SkillServiceTest.java`：两处调用改 SkillConfig
+
+**删除**：
+- `dto/enums/SkillSourceType.java`
+
+**修改（前端）**：
+- `services/onlineCode.ts`：SkillConfig interface + SkillDto + importSkill
+- `mocks/db.ts`：SkillConfig + SkillDto + computeSkillHash + importSkill + seed
+- `mocks/handlers.ts`：import handler body
+- `pages/OnlineCode/Skills.tsx`：originTypeMeta + 表单 origin + 列读 config.origin + 删 Select/SkillSourceType
 
 ## 后续 Phase 概要（详见各 Phase 实施时再展开）
 
-- **PR3 = Phase 4**（来源→config JSONB）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；前端 Skills.tsx/onlineCode.ts/db.ts 改读 config.origin。迁移 V9。
+- **PR3 = Phase 4**（来源→config JSONB）—— ✅ 已完成（commit `fc22c00`）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；删 SkillSourceType 枚举（origin 前缀编码类型）；SkillHasher 参数 source→origin；前端 Skills.tsx/onlineCode.ts/db.ts/handlers.ts 改读 config.origin；迁移 V9。详见下文 PR3 段落。
 - **PR4 = Phase 5**（oc_skill_file）：新建 SkillFile 实体+DAO；SkillDto 加 files[]；SkillMaterializer 写多文件；DispatchService/PlanAgentService 带 files。迁移 V10。
 - **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §1.1/§1.2/§3/§4/§6、PRE-BUILD §10。
 
