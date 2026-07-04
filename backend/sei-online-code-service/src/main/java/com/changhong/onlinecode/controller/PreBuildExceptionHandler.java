@@ -10,8 +10,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 /**
  * 编码前流程异常处理（D1）。{@link ConflictException} → HTTP 409 + {@code ResultData.fail(msg)}。
  *
- * <p>仅用于编码执行互斥（P12/P12a）+ BUILDING 态编辑拒绝（P8/P9）。其余业务错误沿用 200+ResultData.fail。
- * 与仓库"全 200"规范的张力标记为待清理项（契约 §6.4）。</p>
+ * <p>全局 {@code @RestControllerAdvice}，覆盖所有控制器。当前两类场景：</p>
+ * <ul>
+ *   <li>编码执行互斥（P12/P12a）+ BUILDING 态编辑拒绝（P8/P9）</li>
+ *   <li>Skill 导入同名冲突（Phase 3 §2 端点 16，name 去重）</li>
+ * </ul>
+ * <p>其余业务错误沿用 200+ResultData.fail。与仓库"全 200"规范的张力标记为待清理项（契约 §6.4）。</p>
  *
  * @author sei-online-code
  */

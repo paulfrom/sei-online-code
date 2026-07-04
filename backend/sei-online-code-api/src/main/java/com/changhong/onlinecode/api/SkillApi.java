@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
  * Skill 管理 API。契约 Phase 3 §2 端点 16/17/18/19。
  *
  * <ul>
- *   <li>#16 POST   /skill/import     —— 导入 + hash 锁定，按 hash 幂等</li>
+ *   <li>#16 POST   /skill/import     —— 导入，以 name 去重，同名已存在返回 409</li>
  *   <li>#17 POST   /skill/findByPage —— FindByPageApi.findByPage</li>
  *   <li>#18 GET    /skill/findOne    —— BaseEntityApi.findOne</li>
  *   <li>#19 DELETE /skill/delete     —— BaseEntityApi.delete（绑定到任一 agent 则拒绝）</li>
@@ -31,6 +31,6 @@ public interface SkillApi extends BaseEntityApi<SkillDto>, FindByPageApi<SkillDt
     String PATH = "skill";
 
     @PostMapping(path = "import", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "导入技能", description = "导入并按 §6 recipe 计算 computedHash 锁定；重复导入按 hash 幂等")
+    @Operation(summary = "导入技能", description = "导入技能，以 name 为去重键；同名已存在抛 ConflictException 返回 409。computedHash 由服务端运行时计算返回")
     ResultData<SkillDto> importSkill(@RequestBody @Valid ImportSkillRequest request);
 }

@@ -3,11 +3,12 @@
 > 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
 > 分支 `feat/align-skill-multaca`（本地，未推送）。
 
-## 状态（截至 PR1 完成）
+## 状态（截至 PR2 完成）
 
 - **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
-- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V7。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
-- **已验证**：`./gradlew :sei-online-code-service:compileTestJava` 通过；`AgentServiceTest`(4) + `SkillServiceTest`(2) 全过；V7 schema 已确认（`oc_agent_skill` 建好、2 条种子绑定迁移、`oc_agent.skill_ids` 列已删）
+- **PR2 已完成**（Phase 3，已提交，见 git log）：弃持久化 hash，name 去重 + 409，V8 迁移
+- **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V8。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
+- **已验证**：`./gradlew :sei-online-code-service:compileTestJava` 通过；`*ServiceTest` 全过（SkillServiceTest 4 + AgentServiceTest 4 + 其余 6 类 39 测）；SkillMaterializerTest 3 过；V8 schema 已确认（`oc_skill.computed_hash` 列与 `idx_skill_hash` 索引已删，`uk_skill_name` 保留）
 - **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ 前端 build / `--spring.profiles.active=local` 冒烟
 
 ## 决策汇总（用户已拍板）
@@ -38,22 +39,35 @@
 - `db/migration/V7__agent_skill_join_table.sql`（新）：建 oc_agent_skill、迁移 V6 种子绑定、删 skill_ids 列
 - `test/.../AgentServiceTest.java`（新，4 测试）、`SkillServiceTest.java`（新，2 测试）
 
-## 续作：PR2 = Phase 3（弃持久化 hash，name 去重，409）
+## 续作：PR2 = Phase 3（弃持久化 hash，name 去重，409）—— ✅ 已完成
 
 **起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillHasher.java`/`SkillDao.java`/`SkillService.java`/`SkillMaterializer.java`/`SkillDto.java` 现状 → 按下文 Phase 3 实施。
 
 **Phase 3 任务**：
-1. `Skill.java`：移除 `computedHash` 持久化字段；改 `@Transient getComputedHash()` 运行时由 `SkillHasher.compute(source,name,description,content)` 计算
-2. `SkillDao`：删 `findByComputedHash`
-3. `SkillService.importSkill`：改为 name 去重 —— `findByName(name)` 命中 → `throw new ConflictException("技能名已存在: "+name+" (id="+existing.getId()+")")`；未命中 → insert
-4. `SkillHasher`：保留（materializer `.lock` + DTO 运行时计算仍需）
-5. `SkillDto.computedHash`：保留（运行时计算，前端 Hash 列不变）
-6. 确认 `ConflictException`→409 映射覆盖 skill 端点：检查 `PreBuildExceptionHandler` 是否 `@RestControllerAdvice` 全局，否则新增通用 `@ExceptionHandler(ConflictException.class)` 返回 409
-7. 新迁移 `V8__skill_drop_hash.sql`：`ALTER TABLE oc_skill DROP COLUMN computed_hash`；`DROP INDEX idx_skill_hash`；V3/V6 种子里硬编码的 computed_hash 随列删除失效（无需改 V3/V6）
-8. 更新 `SkillServiceTest`：补 importSkill 的 name 去重 + 409 测试（现有 2 测试保留）
-9. 应用 V8 到本地库；`./gradlew :sei-online-code-service:test --tests "*SkillServiceTest"`
+1. `Skill.java`：移除 `computedHash` 持久化字段；改 `@Transient getComputedHash()` 运行时由 `SkillHasher.compute(source,name,description,content)` 计算 ✅
+2. `SkillDao`：删 `findByComputedHash` ✅
+3. `SkillService.importSkill`：改为 name 去重 —— `findByName(name)` 命中 → `throw new ConflictException("技能名已存在: "+name+" (id="+existing.getId()+")")`；未命中 → insert ✅
+4. `SkillHasher`：保留（materializer `.lock` + DTO 运行时计算仍需）✅
+5. `SkillDto.computedHash`：保留（运行时计算，前端 Hash 列不变）✅
+6. 确认 `ConflictException`→409 映射覆盖 skill 端点：`PreBuildExceptionHandler` 为 `@RestControllerAdvice` 全局，已覆盖；仅拓宽 Javadoc ✅
+7. 新迁移 `V8__skill_drop_hash.sql`：`ALTER TABLE oc_skill DROP COLUMN computed_hash`；`DROP INDEX idx_skill_hash`；V3/V6 种子里硬编码的 computed_hash 随列删除失效（无需改 V3/V6）✅
+8. 更新 `SkillServiceTest`：补 importSkill 的 name 去重 + 409 测试（现有 2 测试保留）✅
+9. 应用 V8 到本地库；`./gradlew :sei-online-code-service:test --tests "*SkillServiceTest"` ✅
 
 **Phase 3 注意**：materializer `.lock` 幂等（`SkillMaterializer.java:88-93`）依赖 computedHash —— 改运行时计算后，hash 从 DB content 实时算，`.lock` 仍可比较，不破坏幂等。但 `SkillMaterializerTest` 的 `.lock == computedHash` 断言需确认仍成立（hash 改为 @Transient getter，materializer 调 getter 取值）。
+→ **已核实**：`SkillMaterializerTest` 用字面量 hash（`"sha256:aaa"`）直接构造 `SkillPayload` record，从不触碰 `Skill` 实体的 `getComputedHash()`，故不受影响；3 测全过。`DispatchService:289` / `PlanAgentService:176` 调 `skill.getComputedHash()` 取已加载实体的运行时 hash，实体四字段（source/name/description/content）均从 DB 装载，计算正确。
+
+## PR2 改动文件（Phase 3，已提交，见 git log）
+
+- `entity/Skill.java`：删 `computedHash` 字段 + setter；`getComputedHash()` 改 `@Transient` 运行时 `SkillHasher.compute(...)`；`@Table` 移除 `idx_skill_hash`；Javadoc 更新
+- `dao/SkillDao.java`：删 `findByComputedHash`，保留 `findByName`
+- `service/SkillService.java`：`importSkill` 改 name 去重——`findByName` 命中抛 `ConflictException`，未命中 insert；移除 hash 计算与 `setComputedHash`；Javadoc 更新
+- `api/SkillApi.java`：端点 16 注释 + Operation description 改「name 去重 + 409」（原「hash 幂等」）
+- `controller/PreBuildExceptionHandler.java` + `exception/ConflictException.java`：Javadoc 拓宽覆盖 skill 同名冲突（映射逻辑无改动，本就全局）
+- `db/migration/V8__skill_drop_hash.sql`（新）：删 `computed_hash` 列 + `idx_skill_hash` 索引
+- `test/.../SkillServiceTest.java`：补 `importSkill_throwsConflictWhenNameExists` + `importSkill_insertsWhenNameFree`（共 4 测）；`setUp` 加 `getEntityClass()` mock 绕过 `BaseService.validateUniqueCode` NPE
+
+## 续作：PR3 = Phase 4（来源→config JSONB）
 
 ## 后续 Phase 概要（详见各 Phase 实施时再展开）
 

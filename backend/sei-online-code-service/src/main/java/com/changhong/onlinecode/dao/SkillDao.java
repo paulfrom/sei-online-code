@@ -13,15 +13,7 @@ import org.springframework.stereotype.Repository;
 public interface SkillDao extends BaseEntityDao<Skill> {
 
     /**
-     * 按 computedHash 查询技能（导入幂等去重）。
-     *
-     * @param computedHash 内容锁
-     * @return 命中的技能，未命中为 null
-     */
-    Skill findByComputedHash(String computedHash);
-
-    /**
-     * 按名称查询技能（内置技能种子 upsert 用）。
+     * 按名称查询技能（导入 name 去重 + 内置技能种子 upsert 用）。
      *
      * @param name 技能名
      * @return 命中的技能，未命中为 null
