@@ -17,22 +17,8 @@ spring:
     name: ${SPRING_APPLICATION_NAME:${sei.application.code}}
   cloud:
     nacos:
-      # nacos地址，优先使用SPRING_CLOUD_NACOS_SERVER_ADDR，若没有则使用127.0.0.1:30048
-      server-addr: ${SPRING_CLOUD_NACOS_SERVER_ADDR:10.199.11.1:8848}
-      # 认证用户名，优先使用SPRING_CLOUD_NACOS_USERNAME，若没有则使用hello
-      username: ${SPRING_CLOUD_NACOS_USERNAME:sei_nacos}
-      # 认证密码，优先使用SPRING_CLOUD_NACOS_PASSWORD，若没有则使用world
-      password: ${SPRING_CLOUD_NACOS_PASSWORD:jympan-9byxre-Vazkyv}
-      discovery:
-        # 服务发现命名空间。默认为环境代码，优先使用SPRING_CLOUD_NACOS_DISCOVERY_NAMESPACE，若没有则使用${sei.application.env}
-        namespace: ${SPRING_CLOUD_NACOS_DISCOVERY_NAMESPACE:${sei.application.env}}
+      # 本地配置：禁用 nacos 配置中心与服务发现（去 nacos，全部走本地 application.yaml）
       config:
-        # 配置管理命名空间。默认为环境代码，优先使用SPRING_CLOUD_NACOS_CONFIG_NAMESPACE，若没有则使用${sei.application.env}
-        namespace: ${SPRING_CLOUD_NACOS_CONFIG_NAMESPACE:${sei.application.env}}
-        # 配置文件后缀。按sei平台约定默认为yaml格式
-        file-extension: yaml
-        # 共享配置
-        shared-configs:
-          - dataId: shared-configs.yaml
-            # 动态加载
-            refresh: true
+        enabled: false
+      discovery:
+        enabled: false

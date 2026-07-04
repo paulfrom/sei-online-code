@@ -66,8 +66,8 @@ processResources {
                 project_description: project.property('description')
         ]
     }
-    // 默认application文件中的配置从配置中心获取
-    excludes = ["**/application.yaml", "**/application.properties"]
+    // 本地配置：application.yaml 不再从配置中心获取，需打包进资源（去 nacos）
+    excludes = ["**/application.properties"]
 }
 
 bootJar {
