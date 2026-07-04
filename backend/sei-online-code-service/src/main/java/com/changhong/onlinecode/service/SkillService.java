@@ -1,9 +1,9 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dao.AgentDao;
+import com.changhong.onlinecode.dao.AgentSkillDao;
 import com.changhong.onlinecode.dao.SkillDao;
 import com.changhong.onlinecode.dto.enums.SkillSourceType;
-import com.changhong.onlinecode.entity.Agent;
+import com.changhong.onlinecode.entity.AgentSkill;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.service.support.SkillHasher;
 import com.changhong.sei.core.dao.BaseEntityDao;
@@ -20,7 +20,7 @@ import java.util.Objects;
  * Skill 服务（B19）。契约 Phase 3 §2 端点 16/19、§6 hash-lock。
  *
  * <p>职责：导入并按 §6 recipe 计算 {@code computedHash} 锁定，按 hash 幂等（相同内容不建新行，
- * 返回既有行）；删除受保护——被任一 agent 绑定则拒绝。</p>
+ * 返回既有行）；删除受保护——被任一 agent 绑定则拒绝（经 oc_agent_skill join 表单查询校验）。</p>
  *
  * @author sei-online-code
  */
@@ -28,11 +28,11 @@ import java.util.Objects;
 public class SkillService extends BaseEntityService<Skill> {
 
     private final SkillDao dao;
-    private final AgentDao agentDao;
+    private final AgentSkillDao agentSkillDao;
 
-    public SkillService(SkillDao dao, AgentDao agentDao) {
+    public SkillService(SkillDao dao, AgentSkillDao agentSkillDao) {
         this.dao = dao;
-        this.agentDao = agentDao;
+        this.agentSkillDao = agentSkillDao;
     }
 
     @Override
@@ -82,17 +82,16 @@ public class SkillService extends BaseEntityService<Skill> {
     /**
      * 删除前置校验：被任一 agent 绑定则拒绝删除（契约 §2 端点 19）。
      *
+     * <p>对齐 multica 维度 a：经 oc_agent_skill 单查询校验，取代原全表扫描 agent.skillIds。</p>
+     *
      * @param id 技能 id
      * @return 校验结果
      */
     @Override
     protected OperateResult preDelete(String id) {
-        List<Agent> agents = agentDao.findAll();
-        for (Agent agent : agents) {
-            List<String> skillIds = agent.getSkillIds();
-            if (skillIds != null && skillIds.contains(id)) {
-                return OperateResult.operationFailure("技能已绑定到 agent，不能删除: " + agent.getName());
-            }
+        List<AgentSkill> bindings = agentSkillDao.findBySkillId(id);
+        if (!bindings.isEmpty()) {
+            return OperateResult.operationFailure("技能已绑定到 agent，不能删除 (skillId=" + id + ")");
         }
         return OperateResult.operationSuccess();
     }

@@ -1,11 +1,9 @@
 package com.changhong.onlinecode.entity;
 
-import com.changhong.onlinecode.entity.converter.StringListConverter;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
@@ -16,11 +14,11 @@ import java.util.List;
 /**
  * Agent 实体。契约 Phase 3 §1.2 —— 用户自定义开发 agent（指令 + 绑定的技能）。
  *
- * <p><b>Agent↔Skill 关联模型：</b>采用 {@code skill_ids} JSON（TEXT）列，复用
- * {@link StringListConverter}，而非独立 join 表。理由：本阶段绑定关系简单（一个 agent 持有
- * 一组 skillId），无关联属性、无反向大批量查询需求；JSON 列避免多一张表与额外 DAO，
- * 前端也只感知 {@code skillIds[]}（契约 §1.2）。若未来出现关联元数据或跨 agent 反查，再迁移
- * 为 join 表。</p>
+ * <p><b>Agent↔Skill 关联模型：</b>独立 join 表 {@code oc_agent_skill}（对齐 multica 维度 a），
+ * 取代原 {@code skill_ids} JSON 列。{@code skillIds} 字段为 {@code @Transient}，由
+ * {@link com.changhong.onlinecode.service.AgentService} 从 join 表 populate；持久化经
+ * {@code AgentService.attachSkills}。{@code skill_id} 不加 FK（为 Phase 6 内置技能
+ * synthetic id {@code builtin:<name>} 预留）。</p>
  *
  * <p>三个内置 agent（{@code builtin=true}，不可删除）：requirement-agent / dispatch-agent /
  * deploy-agent。自定义 agent 为 {@code builtin=false}。</p>
@@ -51,9 +49,11 @@ public class Agent extends BaseAuditableEntity {
     @Column(name = "builtin", nullable = false)
     private Boolean builtin = Boolean.FALSE;
 
-    /** 绑定的技能 id 列表，以 JSON（TEXT）列持久化（见类注释关联模型说明）。 */
-    @Convert(converter = StringListConverter.class)
-    @Column(name = "skill_ids", columnDefinition = "TEXT")
+    /**
+     * 绑定的技能 id 列表（@Transient 派生，非持久化）。由 AgentService 从 oc_agent_skill
+     * join 表 populate；setSkillIds 仅作 DTO 映射回填，持久化经 AgentService.attachSkills。
+     */
+    @Transient
     private List<String> skillIds;
 
     public String getName() {
