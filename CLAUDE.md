@@ -36,6 +36,12 @@
 - Frontend MUST NOT reference backend internals (backend)
 - Backend MUST NOT reference frontend code (frontend)
 
+## 租户隔离
+
+- 本项目不进行租户隔离（单租户 / 无 `tenant_code` 维度）：不引入 `ITenant`、不带 `tenant_code` 列、不做多租户上下文过滤
+- `eadp-backend` skill 中描述的 `ITenant` / `tenantCode` 仅为 sei-core 框架能力说明，本项目不采用
+- multica 模型中的 workspace 多租户维度（h）明确不做
+
 ## rules
 - 如果要求前后端同时开发，必须使用superpowers进行任务拆分和分派，如果没有插件就安装插件
 - 项目类所有的CLAUDE.md和AGENT.md都是相同约束，你只用了解其中一个

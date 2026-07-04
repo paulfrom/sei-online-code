@@ -1,22 +1,23 @@
 # 对齐 multica skill 存储模型 — 续作指引
 
 > 本文档为跨会话续作专用。上下文重置后从此文件读起，配合 `git log` 与当前代码状态接续 PR2–5。
-> 分支 `feat/align-skill-multaca`（本地，未推送）。
+> 分支 `feat/align-skill-multica`（已推送 origin/feat/align-skill-multica，8 commits ahead of main）。
 
-## 状态（截至 PR5 完成）
+## 状态（截至 PR5 提交 `e7eaaa3`）
 
 - **PR1 已完成**（commit `798d4a2`）：Phase 1 迁移 V7 + Phase 2 join 表 + Phase 0 测试
 - **PR2 已完成**（commit `2b165b8`）：弃持久化 hash，name 去重 + 409，V8 迁移
 - **PR3 已完成**（Phase 4，commit `fc22c00`）：来源→config JSONB，删 SkillSourceType，V9 迁移；后端 compileTestJava + skill/Converter 测试全过，前端 umi build 通过，V9 已应用本地库
 - **PR4 已完成**（Phase 5，oc_skill_file，commit `a3c6fb4`）：新建 SkillFile 实体+DAO+SkillFileDto；Skill 加 @Transient files + SkillService populate(findOne/findByPage) + importSkill 持久化 files；SkillMaterializer 多文件+越界 guard；DispatchService/PlanAgentService 带 files（PlanAgentService 由 SkillDao 改注 SkillService 以 populate files，同步改 PlanAgentServiceTest）；迁移 V10。compileTestJava + `*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3)+`*PlanAgentServiceTest`(6) 全过；V10 已应用本地库（schema 确认：pk(id)/uk(skill_id,path)/idx(skill_id)/FK CASCADE）
-- **PR5 已完成**（Phase 6+7，内置技能资源化，未提交）：vendor suid/eadp-backend 到 `src/main/resources/skills/`（SKILL.md+references/）+ project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（@Component，classpath 加载 SKILL.md+references/**，`builtin:<name>`→`Optional<SkillPayload>`，origin=`builtin:<name>` 算 hash）；DispatchService/PlanAgentService 注入 registry 并在 `materializeSkills` 按 `builtin:` 前缀分流（PlanAgentServiceTest ctor 同步加 mock）；迁移 V11（UPDATE 2 join 行→`builtin:`，DELETE 4 oc_skill 种子行）；前端 `BUILTIN_SKILLS` 常量 + Agents.tsx 合并选项 + mock 移除内置 seed/suid-dev 绑 `builtin:suid`/attach 放行 `builtin:`；契约 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6 + PRE-BUILD §10 对齐。compileTestJava + `*BuiltInSkillRegistryTest`(6)+`*PlanAgentServiceTest`(6)+`*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3) 全过；V11 已应用本地库（join 2 行 `builtin:`、oc_skill 内置 4 行已删）；前端 `pnpm build` 通过
+- **PR5 已完成**（Phase 6+7，内置技能资源化，commit `e7eaaa3`）：vendor suid/eadp-backend 到 `src/main/resources/skills/`（SKILL.md+references/）+ project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（@Component，classpath 加载 SKILL.md+references/**，`builtin:<name>`→`Optional<SkillPayload>`，origin=`builtin:<name>` 算 hash）；DispatchService/PlanAgentService 注入 registry 并在 `materializeSkills` 按 `builtin:` 前缀分流（PlanAgentServiceTest ctor 同步加 mock）；迁移 V11（UPDATE 2 join 行→`builtin:`，DELETE 4 oc_skill 种子行）；前端 `BUILTIN_SKILLS` 常量 + Agents.tsx 合并选项 + mock 移除内置 seed/suid-dev 绑 `builtin:suid`/attach 放行 `builtin:`；契约 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6 + PRE-BUILD §10 对齐。compileTestJava + `*BuiltInSkillRegistryTest`(6)+`*PlanAgentServiceTest`(6)+`*SkillServiceTest`(5)+`*SkillMaterializerTest`(6)+`*SkillConfigConverterTest`(3) 全过；V11 已应用本地库（join 2 行 `builtin:`、oc_skill 内置 4 行已删）；前端 `pnpm build` 通过
 - **本地 DB**：`sei-online-code` 库（pg17 容器，`localhost:5433`，user/pass `postgres`/`lslin@32`）已手动应用 V1–V10。运行时无 Flyway（仅 test profile 用），故无 `flyway_schema_history` 表
 - **已验证**：`compileTestJava` 通过；`*BuiltInSkillRegistryTest`(6)+`*SkillServiceTest`(5)+`*SkillConfigConverterTest`(3)+`*SkillMaterializerTest`(6)+`*PlanAgentServiceTest`(6) 全过；V11 已应用本地库（`oc_agent_skill` 2 行 `builtin:project-planning`/`builtin:feature-design`、`oc_skill` 内置 4 行已删）；V10 schema 已确认（`oc_skill_file`：id/skill_id/path/content+审计列，pk(id)/uk(skill_id,path)/idx(skill_id)/fk_skill_file_skill ON DELETE CASCADE）；前端 `pnpm build` 通过。PR3–PR4 既有验证（V9 schema）不受 PR5 影响
-- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）/ `--spring.profiles.active=local` 冒烟（导入带 files 的技能 + 绑定 `builtin:` 的 agent 触发 dispatch，端到端验证 materialize 多文件 + classpath 内置技能写出）；API-CONTRACT-PHASE3.md §5（sub-agent obligations 段）仍含历史措辞（"idempotent"/"V3__skill_agent.sql pick ONE"），属描述性 prose 未在 PR5 范围，待后续清理
+- **未验证缺口**：完整测试套件（Flyway DB 集成测试，本地 testcontainers env-blocked）；`--spring.profiles.active=local` 端到端冒烟受双重阻塞 —— (1) `bootstrap.yaml` 配置走 nacos（10.199.11.1:8848 内网，本地不可达），(2) dispatch 触发 materialize 依赖 Phase 2 运行期 spawn 接缝（`WorkspaceGcService` TODO(oma-deferred)）；import + files 持久化路径已由 `*SkillServiceTest`/`*SkillMaterializerTest`/`*BuiltInSkillRegistryTest` 单测覆盖（BUILD SUCCESSFUL）
+- **§5 历史措辞**：已清理（对齐 PR2 name 去重 + V7 join 表，PR6）
 
 ## 决策汇总（用户已拍板）
 
-- **范围**：a(join表) + b(完整内容入库) + c(弃hash改name去重) + d(来源→config JSONB) + e(skill_file辅助文件) + g(内置技能资源化)；**defer** f(UUID主键,受 `BaseAuditableEntity` 约束) / h(workspace多租户,零基础) 另立 epic
+- **范围**：a(join表) + b(完整内容入库) + c(弃hash改name去重) + d(来源→config JSONB) + e(skill_file辅助文件) + g(内置技能资源化)；**defer** f(UUID主键,受 `BaseAuditableEntity` 约束) 另立 epic；**不做** h(workspace多租户) —— 本项目不进行租户隔离（见项目 CLAUDE.md）
 - **a**：AgentDto 仍内联 `skillIds[]`，后端 join 表↔数组转换，前端零改动 ✅(PR1 已实现)
 - **c**：同名导入冲突返回 409（复用 `ConflictException`）
 - **b/g**：技能内容 vendor 进 `src/main/resources/skills/`，suid/eadp-backend 从 `~/.claude/skills/` 拷入，project-planning/feature-design 内容不存在先 stub+TODO
@@ -44,7 +45,7 @@
 
 ## 续作：PR2 = Phase 3（弃持久化 hash，name 去重，409）—— ✅ 已完成
 
-**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillHasher.java`/`SkillDao.java`/`SkillService.java`/`SkillMaterializer.java`/`SkillDto.java` 现状 → 按下文 Phase 3 实施。
+**起点**：`git checkout feat/align-skill-multica` → 读 `Skill.java`/`SkillHasher.java`/`SkillDao.java`/`SkillService.java`/`SkillMaterializer.java`/`SkillDto.java` 现状 → 按下文 Phase 3 实施。
 
 **Phase 3 任务**：
 1. `Skill.java`：移除 `computedHash` 持久化字段；改 `@Transient getComputedHash()` 运行时由 `SkillHasher.compute(source,name,description,content)` 计算 ✅
@@ -72,7 +73,7 @@
 
 ## 续作：PR3 = Phase 4（来源→config JSONB）—— ✅ 已完成
 
-**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillHasher.java`/`AbstractJsonConverter.java`+`FeatureDesignContentConverter.java`（converter 范例）/前端 `Skills.tsx`/`onlineCode.ts`/`mocks/db.ts`/`mocks/handlers.ts` 现状 → 按下文 Phase 4 实施。
+**起点**：`git checkout feat/align-skill-multica` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillHasher.java`/`AbstractJsonConverter.java`+`FeatureDesignContentConverter.java`（converter 范例）/前端 `Skills.tsx`/`onlineCode.ts`/`mocks/db.ts`/`mocks/handlers.ts` 现状 → 按下文 Phase 4 实施。
 
 **设计决策（用户拍板）**：`SkillConfig = { origin: string }` 单字段；删 `SkillSourceType` 枚举（GITHUB/LOCAL/INLINE 由 origin 前缀 `github:`/`local:`/`inline` 隐式编码，最贴 multica frontmatter 模型）；§6 hash recipe 的 source 部分改取 `config.origin`（值与原 source 同串 → hash 不变，无复现破坏）。
 
@@ -130,7 +131,7 @@
 
 ## 续作：PR4 = Phase 5（oc_skill_file 辅助文件）—— ✅ 已完成
 
-**起点**：`git checkout feat/align-skill-multaca` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`AgentSkill.java`+`AgentSkillDao.java`（flat 实体+DAO 范例）/ 契约 Phase 3 §1.1（deferred 的 per-file `FileRef[]`）+ §6（hash recipe，normative）现状 → 按下文实施。
+**起点**：`git checkout feat/align-skill-multica` → 读 `Skill.java`/`SkillDto.java`/`ImportSkillRequest.java`/`SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`AgentSkill.java`+`AgentSkillDao.java`（flat 实体+DAO 范例）/ 契约 Phase 3 §1.1（deferred 的 per-file `FileRef[]`）+ §6（hash recipe，normative）现状 → 按下文实施。
 
 **设计决策（分析后选定）**：
 1. **hash recipe 不变**。契约 §6 normative 且 "must update THIS file first"（更新 defer 到 PR5）；更关键——import 以 name 去重 + **无 skill update 端点** → 辅助文件导入后不可变 → hash 是否覆盖 files 对幂等无影响。`SkillHasher`/`getComputedHash()` 零改动，files 不进 lock。若未来加 update 端点，需回头把 files 纳入 hash（TODO）。
@@ -187,7 +188,7 @@
 
 ## 续作：PR5 = Phase 6+7（内置技能资源化 + content vendor + 契约文档 + 全量验证）—— ✅ 已完成
 
-**起点**：`git checkout feat/align-skill-multaca` → 读 `SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`SkillHasher.java`/V3+V6+V7 迁移（内置 seed + join 表）/契约 Phase 3 §1.1/§3/§4/§6 + PRE-BUILD §10 现状 → 按下文实施。
+**起点**：`git checkout feat/align-skill-multica` → 读 `SkillMaterializer.java`/`DispatchService.java`/`PlanAgentService.java`/`SkillHasher.java`/V3+V6+V7 迁移（内置 seed + join 表）/契约 Phase 3 §1.1/§3/§4/§6 + PRE-BUILD §10 现状 → 按下文实施。
 
 **设计决策（分析后选定）**：
 1. **`BuiltInSkillRegistry` = Spring `@Component`，落 `agent` 包**（与 `SkillMaterializer` 同包）。无 ctor 依赖（内部 `new PathMatchingResourcePatternResolver()`）。`resolve(skillId)` → `Optional<SkillPayload>`：仅处理 `builtin:` 前缀，加载 `classpath:skills/<name>/SKILL.md` + `references/**`。name 正则 `^[a-z0-9][a-z0-9-]{0,63}$` 校验（防 classpath 注入，defense-in-depth）。
@@ -220,7 +221,7 @@
 - §5（sub-agent obligations）段未改：含历史措辞（"idempotent"/"V3 pick ONE"），属描述性 prose，不在 PR5 列定范围（§1.1/§1.2/§3/§4/§6），记为待清理。
 - 内置技能 `builtin:<name>` 经 `oc_agent_skill` 绑定，**不**经 oc_skill；`SkillService.preDelete`/`findOne`/`findByPage` 天然不触及它们（DB 无行）。
 
-## PR5 改动文件（Phase 6+7，未提交）
+## PR5 改动文件（Phase 6+7，commit `e7eaaa3`）
 
 **新建**：
 - `src/main/resources/skills/suid/SKILL.md` + `references/*.md`（vendor）
@@ -248,8 +249,37 @@
 ## 后续 Phase 概要（详见各 Phase 实施时再展开）
 
 - **PR3 = Phase 4**（来源→config JSONB）—— ✅ 已完成（commit `fc22c00`）：新建 `SkillConfig`+`SkillConfigConverter extends AbstractJsonConverter`；Skill 移除 source/sourceType、加 config TEXT 列；SkillDto 改 config.origin；删 SkillSourceType 枚举（origin 前缀编码类型）；SkillHasher 参数 source→origin；前端 Skills.tsx/onlineCode.ts/db.ts/handlers.ts 改读 config.origin；迁移 V9。详见下文 PR3 段落。
-- **PR4 = Phase 5**（oc_skill_file）—— ✅ 已完成（未提交）：新建 `SkillFile` 实体+DAO+`SkillFileDto`；Skill 加 `@Transient files` + `SkillService` populate(findOne/findByPage)+importSkill 持久化；`SkillMaterializer` 多文件+越界 guard；`DispatchService`/`PlanAgentService` 带 files（PlanAgentService 改注 SkillService）；迁移 V10。hash recipe 不变（files 不进 lock）。详见上文 PR4 段落。
-- **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）—— ✅ 已完成（未提交）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6、PRE-BUILD §10。详见上文 PR5 段落。
+- **PR4 = Phase 5**（oc_skill_file）—— ✅ 已完成（commit `a3c6fb4`）：新建 `SkillFile` 实体+DAO+`SkillFileDto`；Skill 加 `@Transient files` + `SkillService` populate(findOne/findByPage)+importSkill 持久化；`SkillMaterializer` 多文件+越界 guard；`DispatchService`/`PlanAgentService` 带 files（PlanAgentService 改注 SkillService）；迁移 V10。hash recipe 不变（files 不进 lock）。详见上文 PR4 段落。
+- **PR5 = Phase 6+7**（内置技能资源化 + content vendor + 契约文档 + 全量验证）—— ✅ 已完成（commit `e7eaaa3`）：vendor suid/eadp-backend 到 `src/main/resources/skills/`；project-planning/feature-design stub+TODO；新建 `BuiltInSkillRegistry`（ClassPathResource 加载）；materializeSkills 按 `builtin:` 前缀分流解析；迁移 V11（删 oc_skill 内置种子行 + 更新 oc_agent_skill.skill_id 为 `builtin:<name>`）；前端内置技能移出 /skill 列表、Agents.tsx 多选加 builtin 选项；更新 API-CONTRACT-PHASE3.md §0/§1.1/§1.2/§2/§3/§4/§6、PRE-BUILD §10。详见上文 PR5 段落。
+
+## PR6 = 补充技能导入 + 租户声明 + 文档清理（2026-07-04，未提交）
+
+**前端技能导入补 files（对应后端 PR4 `ImportSkillRequest.files`）**：
+- `services/onlineCode.ts`：新增 `SkillFileDto` interface；`SkillDto` 加 `files`；`importSkill` params 加 `files?`
+- `pages/OnlineCode/Skills.tsx`：`ImportForm` 加 `files`；`Form.List` 动态增删辅助文件（path+content，path 走与后端一致的 `^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$` 校验）；`handleImport` 传 files；subTitle 文案改「同名重复导入返回 409」（原「重复导入幂等」漂移）；查看 modal 展示 files
+- `mocks/db.ts`：新增 `SkillFileDto`；`SkillDto` 加 `files`；`importSkill` 改 name 去重（返回 `null`=冲突）+ 存 files（对齐后端 PR2，消除 hash 幂等漂移）
+- `mocks/handlers.ts`：import handler 透传 files + 同名返回 fail（409 风格）
+
+**租户隔离声明（Part2/3）**：
+- 全项目 grep 确认无租户隔离实现标记（`tenant`/`租户` 命中均为 sei-core 框架能力描述：eadp-backend skill 教学内容、`bootstrap.yaml` 的 `tenant-code: global` 框架上下文字段、`PlanContent` 示例字符串）—— 不删代码（删 `tenant-code` 会破坏 sei-core ContextUtil）
+- 项目 `CLAUDE.md` 新增「## 租户隔离」节：声明本项目不进行租户隔离，multica h 维度明确不做
+- 本文档 h defer 描述改为「不做」
+
+**文档清理**：
+- `API-CONTRACT-PHASE3.md` §5：清理 `V3__skill_agent.sql`/`pick ONE`/`idempotent` 历史措辞，对齐 V7 join 表 + name 去重
+- 本文档：修正分支名拼写 `feat/align-skill-multaca`→`multica`（全文）；PR4/PR5「未提交」→ commit `a3c6fb4`/`e7eaaa3`；「本地未推送」→ 已推送
+
+**去 nacos 走本地配置**：
+- `bootstrap.yaml`：移除 nacos server-addr/credentials/config/discovery，改 `enabled: false`
+- 新建 `application.yaml`：DB(pg17 5433/postgres/lslin@32)+ redis(6379)+ kafka 占位(localhost:9092)+ `spring.autoconfigure.exclude` 12 个 nacos 自动配置类(关键：sei-cloud-nacos-starter 的 `com.changhong.sei.config.autoconfigure.NacosDiscoveryAutoConfiguration`，alibaba 的 `UtilIPv6AutoConfiguration` **不要** exclude——它创建 `InetIPv6Utils`)
+- `build.gradle`：`processResources.excludes` 移除 `application.yaml` 项(原注释"从配置中心获取"已过时)
+- 验证：`bootRun` 启动成功(13.8s)，curl `/skill/findOne?id=probe` 返回 401(后端响应正常，仅认证拦截)
+- 非致命 WARN：`PostgreSQLDialect` 显式指定(HHH90000025，可移除)、FreeMarker 模板位置(可配 `spring.freemarker.check-template-location=false`)
+
+**验证**：
+- 前端 `pnpm build` 通过（Webpack compiled，`p__OnlineCode__Skills` 构建通过，`Form.List` 兼容 @ead/suid）
+- 后端 `./gradlew :sei-online-code-service:compileTestJava :sei-online-code-service:test --tests "*SkillServiceTest" --tests "*SkillMaterializerTest" --tests "*BuiltInSkillRegistryTest"` BUILD SUCCESSFUL
+- A2 local 冒烟：受 nacos 内网不可达 + Phase 2 spawn 接缝阻塞，端到端未跑；import+files 路径单测覆盖
 
 ## 验证检查点（每个 PR 必过）
 
@@ -258,7 +288,7 @@
 3. 新迁移手动应用到本地 `sei-online-code` 库：`docker exec -i pg17 psql -U postgres -d sei-online-code -v ON_ERROR_STOP=1 < <migration>.sql`
 4. schema 变更用 `docker exec pg17 psql -U postgres -d sei-online-code -c "\d <table>"` 确认
 
-## 不在本次（defer epic）
+## 不在本次（defer / 不做）
 
-- **f** UUID 主键：受 sei-core `BaseAuditableEntity` 约束，影响全实体
-- **h** workspace 多租户：sei 零基础，平台级改造
+- **f** UUID 主键：受 sei-core `BaseAuditableEntity` 约束，影响全实体（defer epic）
+- **h** workspace 多租户：本项目明确不进行租户隔离（见项目 CLAUDE.md），不做

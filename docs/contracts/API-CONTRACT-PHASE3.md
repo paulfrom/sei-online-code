@@ -153,12 +153,13 @@ instead of `SkillService.findOne`.
 ## 5. Sub-agent obligations (dispatch basis — separate contexts)
 
 - **Backend (`eadp-backend`)**: `Skill`/`Agent` entities + Flyway
-  `V3__skill_agent.sql` (2 tables + `agent_skill` join or `skill_ids` JSON
-  column — pick ONE, document it); `SkillDto`/`AgentDto` + `SkillApi`/`AgentApi`;
-  `SkillService` (import + hash-lock, idempotent) with the §6 hash;
-  `AgentService` (CRUD + built-in seed + skill attach); `SkillMaterializer`
-  (§3, unit-tested); wire DispatchService to resolve agent + materialize.
-  Compile-only bar applies unless runtime verification is explicitly asked.
+  `V7__agent_skill_join_table.sql` (the `agent_skill` join table;
+  `Agent.skillIds` is `@Transient`, mapped through the join table);
+  `SkillDto`/`AgentDto` + `SkillApi`/`AgentApi`; `SkillService` (import +
+  name dedup with 409, runtime hash-lock per §6); `AgentService` (CRUD +
+  built-in seed + skill attach); `SkillMaterializer` (§3, unit-tested);
+  wire DispatchService to resolve agent + materialize. Compile-only bar
+  applies unless runtime verification is explicitly asked.
 - **Frontend (`suid`)**: MSW handlers eps #16–24 (same envelopes); a **Skills**
   page (`ExtTable` list + import modal) and an **Agents** page (list + create/
   edit dialog with name/description/instructions/model + skill multi-select,
