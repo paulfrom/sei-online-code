@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,14 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link CodexRunner} 离线集成测试（PR1.1）：用 fake 可执行脚本替身验证 {@code -o} 落盘→读取→剥围栏
- * 的 Java 接线端到端正确。
+ * {@link CodexRunner} 离线集成测试：用 fake app-server 可执行脚本替身验证 JSON-RPC stdio 接线端到端正确。
  *
- * <p>验证 WHY：PR1.1 用 {@code -o <tempfile>} 替代未核实的 NDJSON 猜解作为结果来源——这条路径
- * 的 Java 侧（buildArgs 传 {@code -o} → ProcessBuilder spawn → 读文件 → stripFences → 返回）
- * 从未对任何类 codex 程序跑过。{@code CodexRunnerRealCodexTest} 依赖 OpenAI 网络（受区域限制，
- * 多数环境跑不动），无法覆盖此契约。本测试用 fake 脚本模拟 codex 的 {@code -o} 行为（解析 argv
- * 中的 {@code -o <file>}，写最终消息到该文件，stdout 走 NDJSON 事件流），离线钉死整条 Java 接线。</p>
+ * <p>验证 WHY：real-codex e2e 依赖 OpenAI 网络（受区域限制，多数环境跑不动），无法覆盖
+ * {@code codex app-server --listen stdio://} 的 initialize → thread/start → turn/start → notifications
+ * 契约。本测试用 fake 脚本模拟 app-server JSONL 行为，离线钉死 Java 侧进程接线。</p>
  *
  * <p>仅要求 POSIX 文件系统（chmod 可执行位）；非 POSIX（如 Windows）整类跳过，不破坏构建。</p>
  *
@@ -37,125 +33,144 @@ class CodexRunnerFakeExecutableTest {
     @TempDir
     Path tempDir;
 
-    private Path fakeCodex;
     private Path workdir;
 
     @BeforeEach
     void setUp() throws IOException {
-        fakeCodex = writeFakeCodex();
         workdir = Files.createTempDirectory(tempDir, "cwd-");
     }
 
     @Test
-    void execute_readsResultFromOutputFile() throws Exception {
-        // fake 脚本把 "PONG" 写入 -o 文件——证明 CodexRunner 的 -o 接线端到端正确。
-        CodexRunner runner = new CodexRunner(fakeCodex.toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "do something", workdir.toString(), null, null);
+    void execute_returnsAggregatedAgentMessageDeltas() throws Exception {
+        CodexRunner runner = new CodexRunner(fakeAppServerHappy().toString());
 
-        String result = future.get(60, TimeUnit.SECONDS);
-        assertEquals("PONG", result, "-o 文件应由 spawned 进程写入并由 runner 读回");
+        String result = runner.execute("fake-it", "do something", workdir.toString(), "gpt-5-codex", null)
+                .get(60, TimeUnit.SECONDS);
+
+        assertEquals("PONG", result);
     }
 
     @Test
-    void execute_stripsMarkdownFencesFromFile() throws Exception {
-        // fake 脚本写围栏内容——证明 readResultFile 剥围栏在真实 spawn 路径生效。
-        CodexRunner runner = new CodexRunner(fakeCodexFenced().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, null);
+    void execute_autoApprovesCommandRequestAndContinues() throws Exception {
+        CodexRunner runner = new CodexRunner(fakeAppServerApproval().toString());
 
-        assertEquals("{\"a\":1}", future.get(60, TimeUnit.SECONDS));
+        String result = runner.execute("fake-it", "do something", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS);
+
+        assertEquals("APPROVED", result);
     }
 
     @Test
-    void execute_nonZeroExitReturnsNull() throws Exception {
-        // fake 脚本 exit 1 且不写 -o——证明失败路径返回 null（调用方走 fallback）。
-        CodexRunner runner = new CodexRunner(fakeCodexFailing().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, null);
+    void execute_processExitsBeforeTurnCompletedReturnsNull() throws Exception {
+        CodexRunner runner = new CodexRunner(fakeAppServerExitsEarly().toString());
 
-        assertNull(future.get(60, TimeUnit.SECONDS), "进程退出码非 0 → null");
+        assertNull(runner.execute("fake-it", "p", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS));
     }
 
     @Test
-    void execute_modelFlagPassedThroughToExecutable() throws Exception {
-        // 验证 -m 注入：fake 脚本把 argv 回写到 -o 文件，断言 argv 含 -m <model>。
-        CodexRunner runner = new CodexRunner(fakeCodexEchoArgs().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), "gpt-5-codex", null);
-
-        String result = future.get(60, TimeUnit.SECONDS);
-        assertTrue(result.contains("-m"), "argv 应含 -m，实际: " + result);
-        assertTrue(result.contains("gpt-5-codex"), "argv 应含 model 名，实际: " + result);
-    }
-
-    @Test
-    void execute_mcpBlockWrittenToConfigToml() throws Exception {
-        // 验证 PR3 #6：mcpConfig 经 writeMcpBlock 写入 per-run CODEX_HOME/config.toml 的 [mcp_servers.*] 托管块。
-        // fake 脚本把 $CODEX_HOME/config.toml 快照到 -o 文件，runner 读回后断言含 server 表。
-        CodexRunner runner = new CodexRunner(fakeCodexSnapshotConfig().toString());
+    void execute_mcpBlockWrittenBeforeAppServerStarts() throws Exception {
+        CodexRunner runner = new CodexRunner(fakeAppServerSnapshotConfig().toString());
         String mcpConfig = "{\"mcpServers\":{\"fetch\":{\"command\":\"uvx\",\"args\":[\"mcp-server-fetch\"]}}}";
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, mcpConfig);
 
-        String result = future.get(60, TimeUnit.SECONDS);
-        assertTrue(result.contains("[mcp_servers.fetch]"), "config.toml 须含 [mcp_servers.fetch] 托管块，实际: " + result);
-        assertTrue(result.contains("command = \"uvx\""), "config.toml 须含 server command，实际: " + result);
-        assertTrue(result.contains(CodexSandboxConfig.MCP_BEGIN_MARKER), "config.toml 须含托管块 marker，实际: " + result);
+        String result = runner.execute("fake-it", "p", workdir.toString(), null, mcpConfig)
+                .get(60, TimeUnit.SECONDS);
+
+        assertTrue(result.contains("[mcp_servers.fetch]"), result);
+        assertTrue(result.contains("command = \"uvx\""), result);
+        assertTrue(result.contains(CodexSandboxConfig.MCP_BEGIN_MARKER), result);
+        assertTrue(result.contains("args = [\"mcp-server-fetch\"]"), result);
     }
 
-    /**
-     * fake codex 脚本：解析 argv 中 {@code -o <file>}，写 {@code PONG} 到该文件；stdout 走 NDJSON
-     * 事件流（模拟 codex --json，CodexRunner 不再解析仅流式展示）；exit 0。
-     */
-    private Path writeFakeCodex() throws IOException {
-        String script = "#!/usr/bin/env bash\n"
-                + "out=\"\"\n"
-                + "prev=\"\"\n"
-                + "for a in \"$@\"; do\n"
-                + "  if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi\n"
-                + "  prev=\"$a\"\n"
-                + "done\n"
-                + "printf '{\"type\":\"thread.started\"}\\n'\n"
-                + "printf '{\"type\":\"turn.started\"}\\n'\n"
-                + "if [ -n \"$out\" ]; then printf 'PONG' > \"$out\"; fi\n"
-                + "exit 0\n";
-        return installScript(script, "fake-codex");
+    private Path fakeAppServerHappy() throws IOException {
+        return installScript(appServerScript("""
+                emit_delta PO
+                emit_delta NG
+                emit_completed
+                exit 0
+                """), "fake-codex-happy");
     }
 
-    /** fake codex：写围栏 JSON 到 -o 文件。 */
-    private Path fakeCodexFenced() throws IOException {
-        String script = "#!/usr/bin/env bash\n"
-                + "out=\"\"\nprev=\"\"\n"
-                + "for a in \"$@\"; do if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi; prev=\"$a\"; done\n"
-                + "if [ -n \"$out\" ]; then printf '```json\\n{\"a\":1}\\n```' > \"$out\"; fi\n"
-                + "exit 0\n";
-        return installScript(script, "fake-codex-fenced");
+    private Path fakeAppServerApproval() throws IOException {
+        return installScript(appServerScript("""
+                printf '{"jsonrpc":"2.0","id":77,"method":"item/commandExecution/requestApproval","params":{}}\\n'
+                while IFS= read -r -t 5 approval; do
+                  if [[ "$approval" == *'"id":77'* ]] && [[ "$approval" == *'"decision":"accept"'* ]]; then
+                    emit_delta APPROVED
+                    emit_completed
+                    exit 0
+                  fi
+                done
+                echo "timed out waiting for approval response" >&2
+                exit 1
+                """), "fake-codex-approval");
     }
 
-    /** fake codex：exit 1 不写 -o（模拟 turn.failed）。 */
-    private Path fakeCodexFailing() throws IOException {
-        String script = "#!/usr/bin/env bash\n"
-                + "printf '{\"type\":\"turn.failed\"}\\n'\n"
-                + "exit 1\n";
-        return installScript(script, "fake-codex-fail");
+    private Path fakeAppServerExitsEarly() throws IOException {
+        return installScript(appServerScript("""
+                exit 0
+                """), "fake-codex-early-exit");
     }
 
-    /** fake codex：把全部 argv 写入 -o 文件（用于断言 -m 注入）。 */
-    private Path fakeCodexEchoArgs() throws IOException {
-        String script = "#!/usr/bin/env bash\n"
-                + "out=\"\"\nprev=\"\"\n"
-                + "for a in \"$@\"; do if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi; prev=\"$a\"; done\n"
-                + "if [ -n \"$out\" ]; then printf '%s' \"$*\" > \"$out\"; fi\n"
-                + "exit 0\n";
-        return installScript(script, "fake-codex-echoargs");
+    private Path fakeAppServerSnapshotConfig() throws IOException {
+        return installScript(appServerScript("""
+                snapshot_file="$(mktemp)"
+                trap 'rm -f "$snapshot_file"' EXIT
+                if [ -n "$CODEX_HOME" ] && [ -f "$CODEX_HOME/config.toml" ]; then
+                  cp "$CODEX_HOME/config.toml" "$snapshot_file"
+                fi
+                """, """
+                while IFS= read -r config_line; do
+                  emit_delta "${config_line}"$'\\n'
+                done < "$snapshot_file"
+                emit_completed
+                exit 0
+                """), "fake-codex-snapshot");
     }
 
-    /** fake codex：把 {@code $CODEX_HOME/config.toml} 快照到 -o 文件（用于断言 MCP 托管块写入）。 */
-    private Path fakeCodexSnapshotConfig() throws IOException {
-        String script = "#!/usr/bin/env bash\n"
-                + "out=\"\"\nprev=\"\"\n"
-                + "for a in \"$@\"; do if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi; prev=\"$a\"; done\n"
-                + "if [ -n \"$out\" ] && [ -n \"$CODEX_HOME\" ] && [ -f \"$CODEX_HOME/config.toml\" ]; then\n"
-                + "  cp \"$CODEX_HOME/config.toml\" \"$out\"\n"
-                + "fi\n"
-                + "exit 0\n";
-        return installScript(script, "fake-codex-snapshot");
+    private String appServerScript(String turnStartBody) {
+        return appServerScript("", turnStartBody);
+    }
+
+    private String appServerScript(String startupBody, String turnStartBody) {
+        return """
+                #!/usr/bin/env bash
+                emit_delta() {
+                  local delta="$1"
+                  local escaped
+                  escaped="$(printf '%s_' "$delta" | sed ':a;N;$!ba; s/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/\\n/\\\\n/g; s/\\r/\\\\r/g; s/\\t/\\\\t/g')"
+                  escaped="${escaped%_}"
+                  printf '{"method":"item/agentMessage/delta","params":{"threadId":"thr_fake","turnId":"turn_fake","itemId":"i","delta":"%s"}}\\n' "$escaped"
+                }
+                emit_completed() {
+                  printf '{"method":"turn/completed","params":{"threadId":"thr_fake","turn":{"id":"turn_fake","status":"completed"}}}\\n'
+                }
+                request_id() {
+                  printf '%s\\n' "$1" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\\([^,}]*\\).*/\\1/p'
+                }
+                request_method() {
+                  printf '%s\\n' "$1" | sed -n 's/.*"method"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p'
+                }
+                """
+                + startupBody.indent(0)
+                + """
+                while IFS= read -r -t 5 line; do
+                  id="$(request_id "$line")"
+                  method="$(request_method "$line")"
+                  if [[ "$method" == "initialize" ]]; then
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"userAgent":"fake","platformFamily":"linux","platformOs":"linux"}}\\n' "$id"
+                  elif [[ "$method" == "thread/start" ]]; then
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"thr_fake"}}}\\n' "$id"
+                  elif [[ "$method" == "turn/start" ]]; then
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"turn":{"id":"turn_fake"}}}\\n' "$id"
+                """
+                + turnStartBody.indent(4)
+                + """
+                  fi
+                done
+                echo "timed out waiting for JSON-RPC request" >&2
+                exit 1
+                """;
     }
 
     private Path installScript(String content, String name) throws IOException {
