@@ -22,6 +22,7 @@ final class CodexAppServerClient {
     private final CodexAppServerEvents events;
     private final AtomicInteger nextId = new AtomicInteger();
     private final Map<Integer, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
+    private Throwable terminalFailure;
 
     CodexAppServerClient(OutputStream stdin, Consumer<String> logLine) {
         this(stdin, logLine, new CodexAppServerEvents());
@@ -33,7 +34,10 @@ final class CodexAppServerClient {
         this.events = events;
     }
 
-    CompletableFuture<JsonNode> request(String method, Object params) throws IOException {
+    synchronized CompletableFuture<JsonNode> request(String method, Object params) throws IOException {
+        if (terminalFailure != null) {
+            throw asIOException(terminalFailure);
+        }
         int id = nextId.incrementAndGet();
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
         pending.put(id, future);
@@ -90,6 +94,19 @@ final class CodexAppServerClient {
 
     int pendingCount() {
         return pending.size();
+    }
+
+    synchronized void failPendingRequests(Throwable cause) {
+        terminalFailure = cause;
+        pending.forEach((id, future) -> future.completeExceptionally(cause));
+        pending.clear();
+    }
+
+    private IOException asIOException(Throwable cause) {
+        if (cause instanceof IOException io) {
+            return io;
+        }
+        return new IOException(cause.getMessage(), cause);
     }
 
     private void handleResponse(JsonNode raw) {

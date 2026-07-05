@@ -132,6 +132,32 @@ class CodexAppServerClientTest {
         assertEquals(0, client.pendingCount());
     }
 
+    @Test
+    void client_failPendingRequestsCompletesOutstandingRequestsExceptionally() throws Exception {
+        java.io.ByteArrayOutputStream stdin = new java.io.ByteArrayOutputStream();
+        CodexAppServerClient client = new CodexAppServerClient(stdin, line -> {});
+        CompletableFuture<JsonNode> future = client.request("initialize", Map.of());
+
+        client.failPendingRequests(new IOException("stdout closed"));
+
+        ExecutionException error = assertThrows(ExecutionException.class, () -> future.get(5, TimeUnit.SECONDS));
+        assertEquals("stdout closed", error.getCause().getMessage());
+        assertEquals(0, client.pendingCount());
+    }
+
+    @Test
+    void client_requestAfterTerminalFailureThrowsWithoutWriting() {
+        java.io.ByteArrayOutputStream stdin = new java.io.ByteArrayOutputStream();
+        CodexAppServerClient client = new CodexAppServerClient(stdin, line -> {});
+
+        client.failPendingRequests(new IOException("stdout closed"));
+
+        IOException error = assertThrows(IOException.class, () -> client.request("thread/start", Map.of()));
+        assertEquals("stdout closed", error.getMessage());
+        assertEquals(0, client.pendingCount());
+        assertEquals(0, stdin.size());
+    }
+
     private JsonNode readSingleOutboundJson(java.io.ByteArrayOutputStream stdin) throws IOException {
         String outbound = stdin.toString(StandardCharsets.UTF_8).trim();
         return objectMapper.readTree(outbound);
