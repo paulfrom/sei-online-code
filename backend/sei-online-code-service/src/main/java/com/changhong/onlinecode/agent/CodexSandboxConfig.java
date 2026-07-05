@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.stream.Stream;
 
 /**
  * Codex 沙箱配置写入器（PR1）。参考 multica
@@ -21,8 +23,9 @@ import java.nio.file.Path;
  *       DNS 在 syscall 层被拦，agent 无法触达外部 API，故回退全访问。</li>
  * </ul>
  *
- * <p>PR1 仅含 sandbox 块；memory/multi_agent/skill_strip/user_skills/home-link/MCP
- * 属后续 PR（见 docs/plan/MULTI-CLI-RUNNER.md）。</p>
+ * <p>PR1 写 sandbox 块；PR2 增补 memory/multi_agent 禁用键（{@link #buildBlock}）、
+ * skill_strip（{@link #stripSkillsConfig}）、user_skills 播种（{@link #seedUserSkills}）。
+ * home-link/MCP/AGENTS.md brief 属后续 PR（见 docs/plan/MULTI-CLI-RUNNER.md）。</p>
  *
  * @author sei-online-code
  */
@@ -46,6 +49,7 @@ public final class CodexSandboxConfig {
         Path config = codexHome.resolve("config.toml");
         String existing = Files.exists(config) ? Files.readString(config, StandardCharsets.UTF_8) : "";
         String stripped = stripManagedBlock(existing);
+        stripped = stripSkillsConfig(stripped);
         String block = buildBlock(logger);
         String content = block + "\n" + stripped;
         Files.writeString(config, content, StandardCharsets.UTF_8);
@@ -61,6 +65,13 @@ public final class CodexSandboxConfig {
     private static String buildBlock(Logger logger) {
         StringBuilder sb = new StringBuilder();
         sb.append(BEGIN_MARKER).append('\n');
+        // PR2 #1/#2：禁用 memory（防跨任务记忆泄漏，multica#3130）与 multi_agent
+        // （防子 agent 未结束即触发 turn/completed）。用 dotted key 置 [sandbox_workspace_write]
+        // 段头之前，避开 TOML「top-level key 须先于 table header」次序约束。
+        sb.append("features.memories = false\n");
+        sb.append("features.multi_agent = false\n");
+        sb.append("memories.generate_memories = false\n");
+        sb.append("memories.use_memories = false\n");
         if (isDarwin()) {
             sb.append("sandbox_mode = \"danger-full-access\"\n");
             if (logger != null) {
@@ -89,5 +100,95 @@ public final class CodexSandboxConfig {
         int lineEnd = content.indexOf('\n', end);
         String after = lineEnd >= 0 ? content.substring(lineEnd + 1) : "";
         return content.substring(0, begin) + after;
+    }
+
+    /**
+     * 剥离用户 config.toml 中的 {@code [[skills.config]]} 数组表段（PR2 #3）。参考 multica
+     * {@code codex_skill_strip.go}。
+     *
+     * <p>WHY：Codex Desktop 写入 plugin-backed skills 的 {@code [[skills.config]]} 段缺
+     * {@code path} 字段，codex CLI 0.114 的 TOML 解析器拒收，致 per-run 启动失败。段从
+     * {@code [[skills.config]]} 行起到下一表头（{@code [...]} / {@code [[...]]}）或串尾止。</p>
+     *
+     * <p>仅作用于用户内容——调用前 {@link #stripManagedBlock} 已先行剥离托管块。</p>
+     *
+     * @param content 已剥托管块的用户 config.toml 文本
+     * @return 移除全部 {@code [[skills.config]]} 段后的文本
+     */
+    static String stripSkillsConfig(String content) {
+        StringBuilder out = new StringBuilder();
+        boolean skipping = false;
+        for (String line : content.split("\n", -1)) {
+            boolean isHeader = line.trim().startsWith("[");
+            if (isHeader) {
+                // 任一表头终止当前跳过段；[[skills.config]] 自身则（重新）进入跳过。
+                skipping = line.trim().startsWith("[[skills.config]]");
+            }
+            if (skipping) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(line);
+        }
+        return out.toString();
+    }
+
+    /**
+     * 播种用户 skills 到 per-run codex-home（PR2 #4）。参考 multica {@code codex_user_skills.go}。
+     *
+     * <p>WHY：codex CLI 从 {@code CODEX_HOME/skills/} 加载用户 skills；per-run 隔离的 CODEX_HOME
+     * 默认空，agent 失去用户已装 skills。将 {@code ~/.codex/skills/} 递归拷入 per-run，让 codex
+     * 发现既有 skills 而不污染用户家目录。</p>
+     *
+     * <p>best-effort：源目录不存在（用户未装 skills）直接返回；遍历/拷贝失败仅 warn 不抛——
+     * skills 缺失不阻断 codex 运行，仅损失能力。</p>
+     *
+     * @param codexHome per-run CODEX_HOME
+     * @param logger    日志器（可为 null）
+     */
+    public static void seedUserSkills(Path codexHome, Logger logger) {
+        String home = System.getProperty("user.home");
+        if (home == null || home.isBlank()) {
+            return;
+        }
+        seedUserSkills(codexHome, Path.of(home), logger);
+    }
+
+    /**
+     * 包级可见重载，接受 {@code userHome} 便于测试注入临时家目录。
+     *
+     * @param codexHome per-run CODEX_HOME
+     * @param userHome  用户家目录（取 {@code .codex/skills} 子树）
+     * @param logger    日志器（可为 null）
+     */
+    static void seedUserSkills(Path codexHome, Path userHome, Logger logger) {
+        Path source = userHome.resolve(".codex/skills");
+        if (!Files.isDirectory(source)) {
+            return;
+        }
+        Path target = codexHome.resolve("skills");
+        try (Stream<Path> walk = Files.walk(source)) {
+            walk.forEach(src -> {
+                Path dst = target.resolve(source.relativize(src));
+                try {
+                    if (Files.isDirectory(src)) {
+                        Files.createDirectories(dst);
+                    } else {
+                        Files.createDirectories(dst.getParent());
+                        Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (IOException e) {
+                    if (logger != null) {
+                        logger.warn("codex user_skills 拷贝失败 src={}", src, e);
+                    }
+                }
+            });
+        } catch (IOException e) {
+            if (logger != null) {
+                logger.warn("codex user_skills 遍历失败 source={}", source, e);
+            }
+        }
     }
 }

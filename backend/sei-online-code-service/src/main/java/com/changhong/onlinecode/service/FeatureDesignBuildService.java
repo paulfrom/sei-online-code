@@ -127,7 +127,8 @@ public class FeatureDesignBuildService {
                 savedTask.getId(),
                 savedRun.getId(),
                 prompt,
-                workspace.getPath()
+                workspace.getPath(),
+                devAgent.getModel()
         );
         executeFuture.thenAccept(result -> {
             // 解析结果，判断成功或失败

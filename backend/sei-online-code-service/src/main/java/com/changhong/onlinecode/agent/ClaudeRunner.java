@@ -56,11 +56,12 @@ public class ClaudeRunner implements CliRunner {
      * @param iterationId 迭代 id（用于日志帧路由）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null，表示继承当前目录）
+     * @param model       模型名（可为 null/blank，表示用 claude 默认模型；非空时注入 {@code --model}）
      * @return 完成后携带聚合 stdout 的 future
      */
     @Override
-    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd));
+    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model) {
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model));
     }
 
     /**
@@ -71,12 +72,13 @@ public class ClaudeRunner implements CliRunner {
      * @param runId       运行 id（日志帧路由）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
+     * @param model       模型名（可为 null/blank，表示用 claude 默认模型；非空时注入 {@code --model}）
      * @return 完成后携带聚合 stdout 的 future
      */
     @Override
     public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                             String prompt, String cwd) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd));
+                                             String prompt, String cwd, String model) {
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model));
     }
 
     /**
@@ -87,10 +89,12 @@ public class ClaudeRunner implements CliRunner {
      * @param runId       运行 id（可为 null）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
+     * @param model       模型名（可为 null/blank）
      * @return 聚合 stdout
      */
-    private String runBlocking(String iterationId, String taskId, String runId, String prompt, String cwd) {
-        List<String> args = buildArgs(prompt);
+    private String runBlocking(String iterationId, String taskId, String runId, String prompt,
+                                String cwd, String model) {
+        List<String> args = buildArgs(prompt, model);
         ProcessBuilder pb = new ProcessBuilder(args);
         if (cwd != null && !cwd.isBlank()) {
             pb.directory(new java.io.File(cwd));
@@ -164,15 +168,20 @@ public class ClaudeRunner implements CliRunner {
      * 构建 claude 启动参数。本轮为最小非交互调用骨架。
      *
      * @param prompt 提示词
+     * @param model  模型名（null/blank → 不注入，用 claude 默认模型）
      * @return 命令行参数
      */
-    private List<String> buildArgs(String prompt) {
+    private List<String> buildArgs(String prompt, String model) {
         List<String> args = new ArrayList<>();
         args.add(executable);
         args.add("-p");
         args.add(prompt);
         args.add("--output-format");
         args.add("json");
+        if (model != null && !model.isBlank()) {
+            args.add("--model");
+            args.add(model);
+        }
         // TODO(oma-deferred): 接入 stream-json 协议与控制帧放行（当前用 result json 一次性取回）
         return args;
     }

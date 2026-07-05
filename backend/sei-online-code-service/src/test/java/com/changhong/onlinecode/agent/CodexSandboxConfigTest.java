@@ -93,6 +93,101 @@ class CodexSandboxConfigTest {
     }
 
     @Test
+    void write_nonDarwin_containsMemoryAndMultiAgentDisables() throws IOException {
+        System.setProperty("os.name", "Linux");
+
+        CodexSandboxConfig.write(codexHome, LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+        String config = Files.readString(codexHome.resolve("config.toml"));
+        assertTrue(config.contains("features.memories = false"), "须禁用 memories（防跨任务记忆泄漏，multica#3130）");
+        assertTrue(config.contains("features.multi_agent = false"), "须禁用 multi_agent（防 turn/completed 抖动）");
+        assertTrue(config.contains("memories.generate_memories = false"), "须禁用记忆生成");
+        assertTrue(config.contains("memories.use_memories = false"), "须禁用记忆使用");
+    }
+
+    @Test
+    void write_darwin_containsMemoryAndMultiAgentDisables() throws IOException {
+        System.setProperty("os.name", "Mac OS X");
+
+        CodexSandboxConfig.write(codexHome, LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+        String config = Files.readString(codexHome.resolve("config.toml"));
+        assertTrue(config.contains("features.memories = false"), "darwin 亦须禁用 memories");
+        assertTrue(config.contains("features.multi_agent = false"), "darwin 亦须禁用 multi_agent");
+    }
+
+    @Test
+    void stripSkillsConfig_removesSkillsBlocksPreservingOtherTables() {
+        String input = String.join("\n",
+                "model = \"gpt-5\"",
+                "[[skills.config]]",
+                "name = \"foo\"",
+                "",
+                "[[skills.config]]",
+                "name = \"bar\"",
+                "",
+                "[other]",
+                "key = \"val\"");
+
+        String result = CodexSandboxConfig.stripSkillsConfig(input);
+
+        assertFalse(result.contains("[[skills.config]]"), "skills.config 段须全部剥离");
+        assertFalse(result.contains("\"foo\""), "段内键值须随之移除");
+        assertFalse(result.contains("\"bar\""), "段内键值须随之移除");
+        assertTrue(result.contains("[other]"), "无关表头须保留");
+        assertTrue(result.contains("key = \"val\""), "无关表内键值须保留");
+        assertTrue(result.contains("model = \"gpt-5\""), "段外 top-level 键须保留");
+    }
+
+    @Test
+    void write_stripsSkillsConfigFromUserContent() throws IOException {
+        System.setProperty("os.name", "Linux");
+        Files.writeString(codexHome.resolve("config.toml"),
+                "[[skills.config]]\nname = \"desktop-skill\"\n\n[other]\nkey = \"val\"\n");
+
+        CodexSandboxConfig.write(codexHome, LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+        String config = Files.readString(codexHome.resolve("config.toml"));
+        assertFalse(config.contains("[[skills.config]]"), "write 须剥离用户 skills.config 段（CLI 0.114 拒收缺 path）");
+        assertFalse(config.contains("desktop-skill"), "段内键值须移除");
+        assertTrue(config.contains("[other]"), "无关表须保留");
+        assertTrue(config.contains("key = \"val\""), "无关键值须保留");
+    }
+
+    @Test
+    void seedUserSkills_copiesTreeWhenSourceExists() throws IOException {
+        Path userHome = Files.createTempDirectory("codex-userhome-test-");
+        try {
+            Path srcSkills = userHome.resolve(".codex/skills");
+            Files.createDirectories(srcSkills.resolve("nested"));
+            Files.writeString(srcSkills.resolve("top.md"), "# top skill");
+            Files.writeString(srcSkills.resolve("nested/deep.md"), "# deep skill");
+
+            CodexSandboxConfig.seedUserSkills(codexHome, userHome,
+                    LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+            Path target = codexHome.resolve("skills");
+            assertEquals("# top skill", Files.readString(target.resolve("top.md")),
+                    "顶层 skill 文件须拷贝");
+            assertEquals("# deep skill", Files.readString(target.resolve("nested/deep.md")),
+                    "嵌套 skill 文件须拷贝");
+        } finally {
+            deleteTree(userHome);
+        }
+    }
+
+    @Test
+    void seedUserSkills_noopWhenSourceAbsent() {
+        Path userHome = codexHome.resolve("nonexistent-userhome");
+
+        CodexSandboxConfig.seedUserSkills(codexHome, userHome,
+                LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+        assertFalse(Files.exists(codexHome.resolve("skills")),
+                "源 ~/.codex/skills 不存在时不应创建 target");
+    }
+
+    @Test
     void isDarwin_macOsName_returnsTrue() {
         System.setProperty("os.name", "Mac OS X");
         assertTrue(CodexSandboxConfig.isDarwin());

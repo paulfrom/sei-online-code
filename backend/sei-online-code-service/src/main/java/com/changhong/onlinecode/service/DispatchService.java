@@ -243,7 +243,8 @@ public class DispatchService {
             CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
             // 并行 spawn：每任务独立 future，互不阻塞（ADR-0001 并行 worktree 模型）
             CompletableFuture<String> future =
-                    runner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath);
+                    runner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath,
+                            agent == null ? null : agent.getModel());
             futures.add(future);
         }
         // 本轮不阻塞等待（compile-only）；运行期由编排层 join 并回收各 Run 终态。

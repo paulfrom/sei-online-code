@@ -23,9 +23,10 @@ public interface CliRunner {
      * @param iterationId 迭代 id（用于日志帧路由）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null，表示继承当前目录）
+     * @param model       模型名（可为 null/blank，表示用 CLI 默认模型；非空时 runner 注入 {@code --model}/{@code -m}）
      * @return 完成后携带聚合结果文本的 future
      */
-    CompletableFuture<String> execute(String iterationId, String prompt, String cwd);
+    CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model);
 
     /**
      * 异步执行一次 CLI 运行，带 taskId/runId（并行 fan-out 场景）。
@@ -35,8 +36,9 @@ public interface CliRunner {
      * @param runId       运行 id（日志帧路由）
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
+     * @param model       模型名（可为 null/blank，表示用 CLI 默认模型；非空时 runner 注入 {@code --model}/{@code -m}）
      * @return 完成后携带聚合结果文本的 future
      */
     CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                      String prompt, String cwd);
+                                      String prompt, String cwd, String model);
 }

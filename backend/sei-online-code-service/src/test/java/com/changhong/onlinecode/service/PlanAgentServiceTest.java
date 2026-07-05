@@ -75,7 +75,7 @@ class PlanAgentServiceTest {
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
-        when(runner.execute(eq("p1"), anyString(), anyString()))
+        when(runner.execute(eq("p1"), anyString(), anyString(), any()))
                 .thenReturn(CompletableFuture.completedFuture(json));
 
         service.spawnPlanning("p1", "hint");
@@ -94,7 +94,7 @@ class PlanAgentServiceTest {
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
-        when(runner.execute(anyString(), anyString(), anyString()))
+        when(runner.execute(anyString(), anyString(), anyString(), any()))
                 .thenReturn(CompletableFuture.completedFuture("not json"));
 
         service.spawnPlanning("p1", null);
@@ -108,7 +108,7 @@ class PlanAgentServiceTest {
     void spawnPlanning_noPlan_skips() {
         when(planDao.findLatestByProjectId("p1")).thenReturn(null);
         service.spawnPlanning("p1", null);
-        verify(runner, never()).execute(anyString(), anyString(), anyString());
+        verify(runner, never()).execute(anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -123,7 +123,7 @@ class PlanAgentServiceTest {
         when(planDao.findLatestByProjectId("p1")).thenReturn(new Plan());
         when(agentService.findByName("feature-design-agent")).thenReturn(new Agent());
         String json = "{\"featureId\":\"feat1\",\"goal\":\"g\",\"design\":null,\"acceptance\":[],\"fileScope\":[]}";
-        when(runner.execute(eq("p1:feat1"), anyString(), anyString()))
+        when(runner.execute(eq("p1:feat1"), anyString(), anyString(), any()))
                 .thenReturn(CompletableFuture.completedFuture(json));
 
         service.spawnFeatureDesign("p1", "feat1", null);
@@ -139,6 +139,6 @@ class PlanAgentServiceTest {
     @Test
     void spawnFeatureDesigns_empty_skips() {
         service.spawnFeatureDesigns("p1", List.of());
-        verify(runner, never()).execute(anyString(), anyString(), anyString());
+        verify(runner, never()).execute(anyString(), anyString(), anyString(), any());
     }
 }
