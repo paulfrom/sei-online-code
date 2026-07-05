@@ -10,7 +10,7 @@ final class CodexAppServerEvents {
     private String failureReason;
     private String turnId;
 
-    void handleNotification(String method, JsonNode params) {
+    synchronized void handleNotification(String method, JsonNode params) {
         if ("item/agentMessage/delta".equals(method)) {
             output.append(params.path("delta").asText(""));
             return;
@@ -34,24 +34,30 @@ final class CodexAppServerEvents {
         }
     }
 
-    boolean isTurnDone() {
+    synchronized boolean isTurnDone() {
         return turnDone;
     }
 
-    boolean isFailed() {
+    synchronized boolean isFailed() {
         return failed;
     }
 
-    String failureReason() {
+    synchronized String failureReason() {
         return failureReason;
     }
 
-    String output() {
+    synchronized String output() {
         return output.toString();
     }
 
-    String turnId() {
+    synchronized String turnId() {
         return turnId;
+    }
+
+    synchronized void markFailed(String reason) {
+        turnDone = true;
+        failed = true;
+        failureReason = reason;
     }
 
     private static String firstNonBlank(String... values) {
