@@ -26,7 +26,8 @@ import java.util.stream.Stream;
  * <p>以 {@link ProcessBuilder} spawn {@code codex exec <prompt> --json -o <file> [-m <model>]}
  * （一次性），stdout/stderr 逐行流式推送到 {@link RunLogWebSocketHub}。spawn 前在 per-run
  * {@code CODEX_HOME} 经 {@link CodexSandboxConfig} 写托管块（sandbox + memory/multi_agent 禁用 +
- * skill_strip）并播种用户 skills，再注入 {@code CODEX_HOME} 环境变量。</p>
+ * skill_strip）、链接共享家目录（auth.json/sessions/plugins/cache + instructions.md/config.json
+ * 拷贝）、播种用户 skills、写 MCP 托管块，再注入 {@code CODEX_HOME} 环境变量。</p>
  *
  * <p><b>结果提取（PR1.1）</b>：用 {@code -o <tempfile>} 让 codex 自身把最终消息写入文件，
  * runBlocking 末尾读文件——替代 PR1 的 NDJSON {@code item.text} 猜解（PR1 该字段未在线核实，
@@ -37,7 +38,7 @@ import java.util.stream.Stream;
  * codex 子进程。注意：shell 里给 codex 设的 alias 不会进入 JVM——后端启动器
  * （{@code dev-start.sh} / systemd unit）必须显式 export 这些变量，codex 才能经代理访问 OpenAI。</p>
  *
- * <p><b>不在本 PR</b>：app-server JSON-RPC 协议（~2000 行客户端）、home-link/MCP/AGENTS.md brief。
+ * <p><b>不在本 PR</b>：app-server JSON-RPC 协议（~2000 行客户端）。
  * 见 docs/plan/MULTI-CLI-RUNNER.md。</p>
  *
  * @author sei-online-code
@@ -72,14 +73,14 @@ public class CodexRunner implements CliRunner {
     }
 
     @Override
-    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model));
+    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model, String mcpConfig) {
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model, mcpConfig));
     }
 
     @Override
     public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                             String prompt, String cwd, String model) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model));
+                                             String prompt, String cwd, String model, String mcpConfig) {
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model, mcpConfig));
     }
 
     /**
@@ -89,17 +90,22 @@ public class CodexRunner implements CliRunner {
      * 进程结束后 best-effort 清理。沙箱策略由 {@link CodexSandboxConfig} 按平台写入 config.toml。</p>
      */
     private String runBlocking(String iterationId, String taskId, String runId, String prompt,
-                                String cwd, String model) {
+                                String cwd, String model, String mcpConfig) {
         Path codexHome = null;
         Path outputFile = null;
         try {
             codexHome = Files.createTempDirectory("codex-home-");
             CodexSandboxConfig.write(codexHome, LOGGER);
+            CodexSandboxConfig.linkSharedHome(codexHome, LOGGER);
             CodexSandboxConfig.seedUserSkills(codexHome, LOGGER);
+            CodexSandboxConfig.writeMcpBlock(codexHome, mcpConfig, LOGGER);
             // 预占唯一路径供 codex -o 写入；codex 会覆盖空文件。
             outputFile = Files.createTempFile("codex-last-", ".txt");
         } catch (IOException e) {
-            LOGGER.warn("codex sandbox config / 输出文件创建失败，回落无 CODEX_HOME：iterationId={}", iterationId, e);
+            // 覆盖 sandbox 写块 / MCP 块（mcpConfig 畸形时 writeMcpBlock 抛）/ 输出文件创建失败。
+            // codexHome 可能已部分配置（如 MCP 块未写但 sandbox 块已写）——soft-fail：仍注入 CODEX_HOME
+            // 让 codex 跑（损失 MCP/sandbox 能力但不阻断任务），由 e 携带的具体消息定位根因。
+            LOGGER.warn("codex spawn 前置配置失败（sandbox/MCP/输出文件），soft-fail 继续运行：iterationId={}", iterationId, e);
         }
 
         List<String> args = buildArgs(prompt, model, outputFile);

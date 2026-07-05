@@ -53,6 +53,15 @@ public class Agent extends BaseAuditableEntity {
     @Column(name = "cli_tool", length = 50)
     private String cliTool;
 
+    /**
+     * MCP server 配置 JSON（Claude 风格 {@code {"mcpServers":{...}}}）。null/空 → 不托管，沿用
+     * CLI 默认 MCP；{@code "{}"} → 托管空集（strict，禁用户全局 MCP）。codex 经
+     * {@code CODEX_HOME/config.toml} 的 {@code [mcp_servers.*]} 托管块注入（{@code CodexSandboxConfig.writeMcpBlock}），
+     * secrets 走 0o600 文件不入 argv。
+     */
+    @Column(name = "mcp_config", columnDefinition = "TEXT")
+    private String mcpConfig;
+
     @Column(name = "builtin", nullable = false)
     private Boolean builtin = Boolean.FALSE;
 
@@ -101,6 +110,14 @@ public class Agent extends BaseAuditableEntity {
 
     public void setCliTool(String cliTool) {
         this.cliTool = cliTool;
+    }
+
+    public String getMcpConfig() {
+        return mcpConfig;
+    }
+
+    public void setMcpConfig(String mcpConfig) {
+        this.mcpConfig = mcpConfig;
     }
 
     public Boolean getBuiltin() {

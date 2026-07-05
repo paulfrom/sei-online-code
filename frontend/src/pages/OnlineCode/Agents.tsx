@@ -47,6 +47,7 @@ interface AgentForm {
   instructions: string;
   model: string;
   cliTool: string;
+  mcpConfig: string;
   skillIds: string[];
 }
 
@@ -91,6 +92,7 @@ const Agents: React.FC = () => {
       instructions: record.instructions,
       model: record.model,
       cliTool: record.cliTool,
+      mcpConfig: record.mcpConfig ?? '',
       skillIds: record.skillIds ?? [],
     });
     setModalOpen(true);
@@ -117,6 +119,7 @@ const Agents: React.FC = () => {
         instructions: values.instructions ?? '',
         model: values.model ?? '',
         cliTool: values.cliTool ?? '',
+        mcpConfig: values.mcpConfig ?? '',
       });
       if (!saveRes.success || !saveRes.data) {
         message.error(saveRes.message ?? '保存失败');
@@ -245,6 +248,17 @@ const Agents: React.FC = () => {
                 { value: 'claude', label: 'claude' },
                 { value: 'codex', label: 'codex' },
               ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="mcpConfig"
+            label="MCP 配置"
+            tooltip='Claude 风格 {"mcpServers":{...}}；留空 = 不托管（沿用 CLI 默认）；"{}" = 托管空集（strict）。codex 经 config.toml [mcp_servers.*] 注入，secrets 走 0o600 文件'
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder='{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}'
+              allowClear
             />
           </Form.Item>
           <Form.Item name="skillIds" label="绑定技能">

@@ -31,6 +31,9 @@ public class AgentDto extends BaseEntityDto {
     @Schema(description = "CLI 工具：claude/codex，空表示默认 claude", example = "claude")
     private String cliTool;
 
+    @Schema(description = "MCP server 配置 JSON（Claude 风格 {\"mcpServers\":{...}}）；空表示不托管，沿用 CLI 默认；\"{}\" 表示托管空集（strict）", example = "{\"mcpServers\":{}}")
+    private String mcpConfig;
+
     @Schema(description = "是否内置（requirement/dispatch/deploy 为 true，不可删除）", example = "false")
     private Boolean builtin;
 
@@ -78,6 +81,14 @@ public class AgentDto extends BaseEntityDto {
 
     public void setCliTool(String cliTool) {
         this.cliTool = cliTool;
+    }
+
+    public String getMcpConfig() {
+        return mcpConfig;
+    }
+
+    public void setMcpConfig(String mcpConfig) {
+        this.mcpConfig = mcpConfig;
     }
 
     public Boolean getBuiltin() {

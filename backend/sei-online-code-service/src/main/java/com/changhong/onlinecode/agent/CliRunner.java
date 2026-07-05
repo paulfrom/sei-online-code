@@ -24,9 +24,11 @@ public interface CliRunner {
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null，表示继承当前目录）
      * @param model       模型名（可为 null/blank，表示用 CLI 默认模型；非空时 runner 注入 {@code --model}/{@code -m}）
+     * @param mcpConfig   MCP server 配置 JSON（Claude 风格 {@code {"mcpServers":{...}}}；null/blank = 不托管，
+     *                    codex 经 {@code CODEX_HOME/config.toml} [mcp_servers.*] 托管块注入；claude 当前忽略，TODO）
      * @return 完成后携带聚合结果文本的 future
      */
-    CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model);
+    CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model, String mcpConfig);
 
     /**
      * 异步执行一次 CLI 运行，带 taskId/runId（并行 fan-out 场景）。
@@ -37,8 +39,9 @@ public interface CliRunner {
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
      * @param model       模型名（可为 null/blank，表示用 CLI 默认模型；非空时 runner 注入 {@code --model}/{@code -m}）
+     * @param mcpConfig   MCP server 配置 JSON（Claude 风格 {@code {"mcpServers":{...}}}；null/blank = 不托管）
      * @return 完成后携带聚合结果文本的 future
      */
     CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                      String prompt, String cwd, String model);
+                                      String prompt, String cwd, String model, String mcpConfig);
 }

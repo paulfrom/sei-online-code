@@ -59,7 +59,7 @@ class ClaudeRunnerRealClaudeTest {
     void execute_returnsNonEmptyResult_whenClaudeResponds() throws Exception {
         // 确定性 echo prompt——claude 正常响应时必含 PONG，证明端到端 spawn + envelope 解析成功。
         String prompt = "Reply with exactly the word PONG and nothing else.";
-        CompletableFuture<String> future = runner.execute("real-claude-e2e", prompt, workdir.toString(), null);
+        CompletableFuture<String> future = runner.execute("real-claude-e2e", prompt, workdir.toString(), null, null);
 
         String result = future.get(120, TimeUnit.SECONDS);
         assertNotNull(result, "claude 进程退出码非 0 或 result envelope 解析失败 → future 返回 null");

@@ -50,7 +50,7 @@ class CodexRunnerFakeExecutableTest {
     void execute_readsResultFromOutputFile() throws Exception {
         // fake 脚本把 "PONG" 写入 -o 文件——证明 CodexRunner 的 -o 接线端到端正确。
         CodexRunner runner = new CodexRunner(fakeCodex.toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "do something", workdir.toString(), null);
+        CompletableFuture<String> future = runner.execute("fake-it", "do something", workdir.toString(), null, null);
 
         String result = future.get(60, TimeUnit.SECONDS);
         assertEquals("PONG", result, "-o 文件应由 spawned 进程写入并由 runner 读回");
@@ -60,7 +60,7 @@ class CodexRunnerFakeExecutableTest {
     void execute_stripsMarkdownFencesFromFile() throws Exception {
         // fake 脚本写围栏内容——证明 readResultFile 剥围栏在真实 spawn 路径生效。
         CodexRunner runner = new CodexRunner(fakeCodexFenced().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null);
+        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, null);
 
         assertEquals("{\"a\":1}", future.get(60, TimeUnit.SECONDS));
     }
@@ -69,7 +69,7 @@ class CodexRunnerFakeExecutableTest {
     void execute_nonZeroExitReturnsNull() throws Exception {
         // fake 脚本 exit 1 且不写 -o——证明失败路径返回 null（调用方走 fallback）。
         CodexRunner runner = new CodexRunner(fakeCodexFailing().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null);
+        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, null);
 
         assertNull(future.get(60, TimeUnit.SECONDS), "进程退出码非 0 → null");
     }
@@ -78,11 +78,25 @@ class CodexRunnerFakeExecutableTest {
     void execute_modelFlagPassedThroughToExecutable() throws Exception {
         // 验证 -m 注入：fake 脚本把 argv 回写到 -o 文件，断言 argv 含 -m <model>。
         CodexRunner runner = new CodexRunner(fakeCodexEchoArgs().toString());
-        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), "gpt-5-codex");
+        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), "gpt-5-codex", null);
 
         String result = future.get(60, TimeUnit.SECONDS);
         assertTrue(result.contains("-m"), "argv 应含 -m，实际: " + result);
         assertTrue(result.contains("gpt-5-codex"), "argv 应含 model 名，实际: " + result);
+    }
+
+    @Test
+    void execute_mcpBlockWrittenToConfigToml() throws Exception {
+        // 验证 PR3 #6：mcpConfig 经 writeMcpBlock 写入 per-run CODEX_HOME/config.toml 的 [mcp_servers.*] 托管块。
+        // fake 脚本把 $CODEX_HOME/config.toml 快照到 -o 文件，runner 读回后断言含 server 表。
+        CodexRunner runner = new CodexRunner(fakeCodexSnapshotConfig().toString());
+        String mcpConfig = "{\"mcpServers\":{\"fetch\":{\"command\":\"uvx\",\"args\":[\"mcp-server-fetch\"]}}}";
+        CompletableFuture<String> future = runner.execute("fake-it", "p", workdir.toString(), null, mcpConfig);
+
+        String result = future.get(60, TimeUnit.SECONDS);
+        assertTrue(result.contains("[mcp_servers.fetch]"), "config.toml 须含 [mcp_servers.fetch] 托管块，实际: " + result);
+        assertTrue(result.contains("command = \"uvx\""), "config.toml 须含 server command，实际: " + result);
+        assertTrue(result.contains(CodexSandboxConfig.MCP_BEGIN_MARKER), "config.toml 须含托管块 marker，实际: " + result);
     }
 
     /**
@@ -130,6 +144,18 @@ class CodexRunnerFakeExecutableTest {
                 + "if [ -n \"$out\" ]; then printf '%s' \"$*\" > \"$out\"; fi\n"
                 + "exit 0\n";
         return installScript(script, "fake-codex-echoargs");
+    }
+
+    /** fake codex：把 {@code $CODEX_HOME/config.toml} 快照到 -o 文件（用于断言 MCP 托管块写入）。 */
+    private Path fakeCodexSnapshotConfig() throws IOException {
+        String script = "#!/usr/bin/env bash\n"
+                + "out=\"\"\nprev=\"\"\n"
+                + "for a in \"$@\"; do if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi; prev=\"$a\"; done\n"
+                + "if [ -n \"$out\" ] && [ -n \"$CODEX_HOME\" ] && [ -f \"$CODEX_HOME/config.toml\" ]; then\n"
+                + "  cp \"$CODEX_HOME/config.toml\" \"$out\"\n"
+                + "fi\n"
+                + "exit 0\n";
+        return installScript(script, "fake-codex-snapshot");
     }
 
     private Path installScript(String content, String name) throws IOException {

@@ -279,6 +279,7 @@ export const handlers = [
       instructions?: string;
       model?: string;
       cliTool?: string;
+      mcpConfig?: string;
     };
     if (!body?.name) return fail('name is required');
     if (body.id) {
@@ -292,6 +293,7 @@ export const handlers = [
       instructions: body.instructions ?? '',
       model: body.model ?? '',
       cliTool: body.cliTool ?? '',
+      mcpConfig: body.mcpConfig ?? '',
     });
     return ok(agent, '保存成功');
   }),

@@ -66,7 +66,7 @@ class CodexRunnerRealCodexTest {
     void execute_returnsNonEmptyResult_whenCodexResponds() throws Exception {
         // 确定性 echo prompt——codex 正常响应时必含 PONG，证明端到端 spawn + -o 落盘 + 文件读取成功。
         String prompt = "Reply with exactly the word PONG and nothing else.";
-        CompletableFuture<String> future = runner.execute("real-codex-e2e", prompt, workdir.toString(), null);
+        CompletableFuture<String> future = runner.execute("real-codex-e2e", prompt, workdir.toString(), null, null);
 
         String result = future.get(180, TimeUnit.SECONDS);
         assertNotNull(result, "codex 进程退出码非 0 或 -o 输出文件为空 → future 返回 null");

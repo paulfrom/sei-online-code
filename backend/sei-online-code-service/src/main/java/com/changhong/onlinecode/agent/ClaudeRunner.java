@@ -57,10 +57,11 @@ public class ClaudeRunner implements CliRunner {
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null，表示继承当前目录）
      * @param model       模型名（可为 null/blank，表示用 claude 默认模型；非空时注入 {@code --model}）
+     * @param mcpConfig   MCP server 配置 JSON（当前 claude 忽略；TODO(oma-deferred)：claude MCP 走 {@code --mcp-config} 标志，另立设计）
      * @return 完成后携带聚合 stdout 的 future
      */
     @Override
-    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model) {
+    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model, String mcpConfig) {
         return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model));
     }
 
@@ -73,11 +74,12 @@ public class ClaudeRunner implements CliRunner {
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
      * @param model       模型名（可为 null/blank，表示用 claude 默认模型；非空时注入 {@code --model}）
+     * @param mcpConfig   MCP server 配置 JSON（当前 claude 忽略；TODO(oma-deferred)）
      * @return 完成后携带聚合 stdout 的 future
      */
     @Override
     public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                             String prompt, String cwd, String model) {
+                                             String prompt, String cwd, String model, String mcpConfig) {
         return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model));
     }
 

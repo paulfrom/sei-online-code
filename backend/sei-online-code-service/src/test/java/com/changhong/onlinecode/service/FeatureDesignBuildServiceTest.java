@@ -225,7 +225,7 @@ class FeatureDesignBuildServiceTest {
         when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
         CliRunner runner = mock(CliRunner.class);
         when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
-        when(runner.execute(anyString(), anyString(), anyString(), anyString(), anyString(), any()))
+        when(runner.execute(anyString(), anyString(), anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("success"));
 
         // 执行

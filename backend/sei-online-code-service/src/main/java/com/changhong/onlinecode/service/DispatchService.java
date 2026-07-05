@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.AgentBriefWriter;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
@@ -242,9 +243,14 @@ public class DispatchService {
             // 按 agent.cliTool 选 runner（null/未知 → 默认 claude，向后兼容）
             CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
             // 并行 spawn：每任务独立 future，互不阻塞（ADR-0001 并行 worktree 模型）
+            if (agent != null) {
+                AgentBriefWriter.writeBrief(worktreePath, agent.getCliTool(),
+                        agent.getName(), agent.getInstructions(), LOGGER);
+            }
             CompletableFuture<String> future =
                     runner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath,
-                            agent == null ? null : agent.getModel());
+                            agent == null ? null : agent.getModel(),
+                            agent == null ? null : agent.getMcpConfig());
             futures.add(future);
         }
         // 本轮不阻塞等待（compile-only）；运行期由编排层 join 并回收各 Run 终态。

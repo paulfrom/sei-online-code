@@ -169,6 +169,8 @@ export interface AgentDto {
   model: string;
   /** CLI 工具：claude/codex，"" = 默认 claude（multica runtime profile protocol_family 维度） */
   cliTool: string;
+  /** MCP server 配置 JSON（Claude 风格 {"mcpServers":{...}}）；"" = 不托管，沿用 CLI 默认 */
+  mcpConfig: string;
   /** true for the 3 seeded agents (requirement/dispatch/deploy), non-deletable */
   builtin: boolean;
   skillIds: string[];
@@ -315,6 +317,7 @@ export async function saveAgent(params: {
   instructions: string;
   model: string;
   cliTool: string;
+  mcpConfig: string;
 }): Promise<ResultData<AgentDto>> {
   return request({ url: `${API}/agent/save`, method: 'POST', data: params });
 }

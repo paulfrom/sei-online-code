@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.AgentBriefWriter;
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
@@ -122,13 +123,16 @@ public class FeatureDesignBuildService {
         // 7. 异步执行编码（D11：链式回调）——按 dev-agent.cliTool 选 runner
         String prompt = buildPrompt(fd);
         CliRunner runner = cliRunnerRegistry.resolve(devAgent.getCliTool());
+        AgentBriefWriter.writeBrief(workspace.getPath(), devAgent.getCliTool(),
+                devAgent.getName(), devAgent.getInstructions(), null);
         CompletableFuture<String> executeFuture = runner.execute(
                 savedTask.getIterationId(),
                 savedTask.getId(),
                 savedRun.getId(),
                 prompt,
                 workspace.getPath(),
-                devAgent.getModel()
+                devAgent.getModel(),
+                devAgent.getMcpConfig()
         );
         executeFuture.thenAccept(result -> {
             // 解析结果，判断成功或失败

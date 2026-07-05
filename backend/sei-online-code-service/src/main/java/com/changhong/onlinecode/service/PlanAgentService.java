@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.AgentBriefWriter;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
@@ -91,8 +92,13 @@ public class PlanAgentService {
 
         String iterationId = projectId; // 规划阶段无 Run，用 projectId 作日志键
         CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
+        if (agent != null) {
+            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
+                    agent.getName(), agent.getInstructions(), LOGGER);
+        }
         CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
-                agent == null ? null : agent.getModel());
+                agent == null ? null : agent.getModel(),
+                agent == null ? null : agent.getMcpConfig());
         future.thenApply(json -> parseJson(json, PlanContent.class))
                 .thenAccept(content -> {
                     plan.setContent(content);
@@ -155,8 +161,13 @@ public class PlanAgentService {
 
         String iterationId = projectId + ":" + featureId;
         CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
+        if (agent != null) {
+            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
+                    agent.getName(), agent.getInstructions(), LOGGER);
+        }
         CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
-                agent == null ? null : agent.getModel());
+                agent == null ? null : agent.getModel(),
+                agent == null ? null : agent.getMcpConfig());
         final FeatureDesign target = fd;
         future.thenApply(json -> {
                     // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
