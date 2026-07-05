@@ -64,6 +64,26 @@
 - **未在线实证**：memory/multi_agent/skill_strip 的实际 codex 行为依赖可访问 OpenAI 的环境跑 `CodexRunnerRealCodexTest`（本机代理出口 403）。Java 侧接线与 config.toml 形态已由离线单测钉死。
 - **#5–#7 + app-server + gemini**：见下方「后续 PR」未划除项。
 
+## PR3（本轮）已完成 — codex execenv 对齐 #5 / #6 / #7
+
+### 范围
+- **#5 home 符号链接树**：`CodexSandboxConfig.linkSharedHome(codexHome, [sharedHome], logger)`——符号链接共享 `~/.codex/`（或 `$CODEX_HOME`）的 `auth.json`（文件）、`sessions/`、`plugins/cache`（目录）到 per-run CODEX_HOME；隔离拷贝 `instructions.md`、`config.json`（syncCopiedFile 刷新语义，multica MUL-2646）。config.toml 不动（已由 `write` 托管）。符号链接失败文件回退拷贝、目录 warn no-op；`removeLinkOrDir` 不递归进符号链接目标（防误删共享 sessions/）。`CodexRunner.runBlocking` 在 `write` 后调用。对应 multica `codex_home.go` + `codex_home_link.go`。
+- **#6 MCP 托管块（全链路）**：`Agent.mcpConfig`（TEXT 列）+ `AgentDto` `@Schema` + V13 迁移 + 前端表单（TextArea JSON）/mock/type；`CodexSandboxConfig.writeMcpBlock(codexHome, mcpConfig, logger)` 移植 multica `ensureCodexMcpConfig`/`renderCodexMcpServersBlock`/`stripCodexUserMcpServerTables`/`jsonValueToCodexTOMLInline`——`[mcp_servers.*]` 托管块（BEGIN/END marker）、stdio server 直渲、http server 归一化（`headers`→`http_headers` + `experimental_use_rmcp_client`）、bare-key 校验、**0o600 chmod**（secrets 走 `mcp_servers.<id>.env` 不入 argv）、托管时剥用户全局 mcp 表（strict，防 TOML 重定义）；`CliRunner.execute` 两重载加 `mcpConfig` 尾参；`CodexRunner` 写块、`ClaudeRunner` 收但忽略（TODO claude `--mcp-config`）；4 调用方传 `agent.getMcpConfig()`。
+- **#7 AGENTS.md / CLAUDE.md brief（Codex + Claude parity）**：新 `AgentBriefWriter.writeBrief(workDir, cliTool, name, instructions, logger)`——marker 块（`<!-- BEGIN/END SEI-RUNTIME -->`）幂等注入，保留用户既有内容；codex→`AGENTS.md`、claude（含 null/blank 默认）→`CLAUDE.md`、未知→skip；brief 内容 = agent identity（`## Agent Identity` + name + instructions，对齐 multica）。**service 层 spawn 前调用**（对齐 multica daemon 职责，非 runner）：`PlanAgentService`×2、`DispatchService`、`FeatureDesignBuildService`。**不做 cleanup**（SEI workdir 为临时区/worktree，非用户本地仓库）。
+
+### 验证状态（PR3）— 已通过
+- V13 迁移：已应用本地 pg17（`oc_agent.mcp_config TEXT` nullable 存在；本库不用 Flyway 跟踪表，同 V12 手动 apply）。
+- `compileTestJava`：绿。
+- 单测全过（0 skip / 0 fail）：`CodexSandboxConfigTest`（28 用例：PR2 12 + #5 linkSharedHome 6 + #6 MCP 10）/`CodexRunnerFakeExecutableTest`(5，+1 MCP 配置文件快照)/`CliRunnerRegistryTest`(6)/`PlanAgentServiceTest`(5)/`AgentBriefWriterTest`(新建 10)/`AgentServiceTest`。mock arity 同步：`PlanAgentServiceTest`(5-arg→6-arg)、`FeatureDesignBuildServiceTest`(7-arg→8-arg，`@Disabled` 但编译过)、`ClaudeRunnerRealClaudeTest`/`CodexRunnerRealCodexTest`(4-arg→5-arg null mcpConfig)。
+- 前端 `pnpm build`：通过。
+- **未跑**：`CodexRunnerRealCodexTest`（本机网络封锁 403；env-gated）、`ClaudeRunnerRealClaudeTest`（on-demand）。
+
+### 残留 / 未做
+- **未在线实证**：#5 符号链接树 / #6 MCP 块 / #7 brief 的实际 codex 行为依赖可访问 OpenAI 的环境跑 `CodexRunnerRealCodexTest`（本机代理出口 403）。Java 侧接线与 config.toml/AGENTS.md 形态已由离线单测 + fake-executable 测试钉死。
+- **claude MCP**：`ClaudeRunner` 收 `mcpConfig` 但忽略（TODO(oma-deferred)：claude 走 `--mcp-config` 标志，另立设计；#6 当前仅 codex）。
+- **brief cleanup**：未实现（SEI workdir 生命周期不需要；若未来引入 local_directory 流再加，对齐 multica `CleanupRuntimeConfig`）。
+- **brief 富 SEI runtime header**：当前仅 agent identity；SEI 专属运行时说明延后。
+
 ## 后续 PR（未做）
 
 按 multica execenv 对齐优先级排序：
@@ -72,9 +92,9 @@
 2. ~~**codex multi_agent 禁用**：`features.multi_agent=false`（防子 agent 未结束即触发 turn/completed）。对应 `codex_multi_agent.go`。~~ **PR2 已完成**。
 3. ~~**codex skill_strip**：剥 `[[skills.config]]`（Codex Desktop 写的 plugin-backed skills 缺 path，CLI 0.114 TOML 解析拒）。对应 `codex_skill_strip.go`。~~ **PR2 已完成**。
 4. ~~**codex user_skills 播种**：`~/.codex/skills/` → per-run `codex-home/skills/`。对应 `codex_user_skills.go`。~~ **PR2 已完成**。
-5. **codex home 符号链接树**：`auth.json`/`sessions/`/`plugins/cache` 共享 + `instructions.md`/`config.json` 隔离拷贝。对应 `codex_home.go` + `codex_home_link.go`。
-6. **codex MCP `[mcp_servers.*]` 托管块**：per-run 写 MCP server 配置（secrets 走 0o600 文件，不入 argv）。对应 `pkg/agent/codex.go:ensureCodexMcpConfig`。
-7. **AGENTS.md runtime brief**：per-run workdir 写托管 brief（codex 映射 AGENTS.md，非 CLAUDE.md）。对应 `runtime_config.go`。
+5. ~~**codex home 符号链接树**：`auth.json`/`sessions/`/`plugins/cache` 共享 + `instructions.md`/`config.json` 隔离拷贝。对应 `codex_home.go` + `codex_home_link.go`。~~ **PR3 已完成**。
+6. ~~**codex MCP `[mcp_servers.*]` 托管块**：per-run 写 MCP server 配置（secrets 走 0o600 文件，不入 argv）。对应 `pkg/agent/codex.go:ensureCodexMcpConfig`。~~ **PR3 已完成**（全链路：Agent.mcpConfig + DTO + V13 + 前端 + writeMcpBlock）。
+7. ~~**AGENTS.md runtime brief**：per-run workdir 写托管 brief（codex 映射 AGENTS.md，非 CLAUDE.md）。对应 `runtime_config.go`。~~ **PR3 已完成**（AgentBriefWriter，codex+claude parity）。
 8. **codex app-server JSON-RPC 协议**：`codex app-server --listen stdio://` 长连接客户端（~2000 行，支持流式/resumable/MCP）。对应 `pkg/agent/codex.go` 全量。替代一次性 `exec`，需评估收益。
 9. ~~**`--model` 注入**：runner 感知 `agent.model`，传 `--model` 或写 config.toml。~~ **PR1.1 已完成**（`execute` 签名加 model 尾参；claude `--model` / codex `-m`）。
 10. ~~**real-codex e2e 测试**：env-gated，钉死 spawn + NDJSON 解析端到端。~~ **PR1.1 已完成**（`CodexRunnerRealCodexTest` + 离线 `CodexRunnerFakeExecutableTest`；解析改 `-o` 文件，非 NDJSON）。
@@ -106,30 +126,30 @@
 - `-s, --sandbox` ✓（与 `CodexSandboxConfig` 一致）；`-c key=value`、`--ignore-user-config`、`--ephemeral`、`--skip-git-repo-check`（PR1.1 未用，生产 cwd 为 git workspace）。
 - 真实 NDJSON schema 已观测：`thread.started`/`turn.started`/`item.completed`/`turn.failed`（与 PR1 猜测不符，但已不解析）。
 
-### 推荐下一步：PR2 后续（#5+）
+### 推荐下一步：PR3 后续（#8+）
 见上方「后续 PR（未做）」未划除项，按优先级：
-1. codex home 符号链接树（`auth.json`/`sessions`/`plugins/cache` 共享 + `instructions.md`/`config.json` 隔离拷贝）。
-2. codex MCP `[mcp_servers.*]` 托管块（secrets 走 0o600 文件，不入 argv）。
-3. AGENTS.md runtime brief（per-run workdir，codex 映射 AGENTS.md）。
-4. app-server JSON-RPC 协议（替代一次性 exec，需评估收益）。
-5. 第二个非 claude vendor（gemini 等，按需）。
+1. codex app-server JSON-RPC 协议（替代一次性 exec，需评估收益；#8）。
+2. claude MCP 接线（`ClaudeRunner` 收 mcpConfig 但忽略；走 `--mcp-config` 标志，另立设计）。
+3. brief 富 SEI runtime header（当前仅 agent identity）+ brief cleanup（若引入 local_directory 流）。
+4. 第二个非 claude vendor（gemini 等，按需；#11）。
 
 ### 恢复命令（下一会话）
 ```bash
 cd /home/paul/project/sei-online-code
 git checkout feat/align-skill-multica
-# 验证 PR1.1 基线（离线，不依赖 OpenAI）
+# 验证 PR3 基线（离线，不依赖 OpenAI）
 cd backend && ./gradlew :sei-online-code-service:test --console=plain \
   --tests "*CodexRunnerTest" --tests "*CodexRunnerFakeExecutableTest" \
   --tests "*CodexSandboxConfigTest" --tests "*CliRunnerRegistryTest" \
-  --tests "*PlanAgentServiceTest"
+  --tests "*PlanAgentServiceTest" --tests "*AgentBriefWriterTest"
 # 可访问 OpenAI 时实证 -o 成功路径（本机代理出口被封会 403）
 codex exec "Reply with exactly the word PONG and nothing else." --json \
   -o /tmp/codex-out.txt --skip-git-repo-check && cat /tmp/codex-out.txt
 ```
 
 ### 开放 TODO
-- `-o` 成功路径在线实证（待可访问 OpenAI 的环境；`CodexRunnerRealCodexTest` 届时自动启用）。
-- PR2 codex execenv 对齐剩余项（home-link/MCP/AGENTS.md brief）。
-- codex app-server JSON-RPC 协议评估。
-- 第二个非 claude vendor。
+- `-o` 成功路径在线实证（待可访问 OpenAI 的环境；`CodexRunnerRealCodexTest` 届时自动启用，会顺带实证 #5 home-link / #6 MCP 块 / #7 brief 的真实 codex 行为）。
+- claude MCP 接线（`ClaudeRunner` 收 mcpConfig 但忽略；TODO(oma-deferred)）。
+- brief 富 SEI runtime header + cleanup（local_directory 流引入时）。
+- codex app-server JSON-RPC 协议评估（#8）。
+- 第二个非 claude vendor（#11）。
