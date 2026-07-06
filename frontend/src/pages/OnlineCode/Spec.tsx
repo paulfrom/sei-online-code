@@ -14,6 +14,7 @@ import {
   Form,
   Input,
   Popconfirm,
+  Spin,
   Table,
   Tag,
   message,
@@ -25,9 +26,11 @@ import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import { ExtModal } from '@ead/suid';
 
 const SPEC_STATE_COLOR: Record<SpecDto['state'], string> = {
+  GENERATING: 'processing',
   DRAFT: 'default',
   SPEC_REVIEW: 'gold',
   CONFIRMED: 'green',
+  FAILED: 'error',
 };
 
 const SpecReview: React.FC = () => {
@@ -58,6 +61,20 @@ const SpecReview: React.FC = () => {
     };
   }, [specId]);
 
+  // GENERATING 期间轮询，让「解析需求 / 重新生成」后能自动看到 SPEC_REVIEW/FAILED 结果；
+  // 状态离开 GENERATING 即停止（对齐 PlanTab 轮询模式）。
+  const specState = spec?.state;
+  useEffect(() => {
+    if (specState !== 'GENERATING') return;
+    const timer = setInterval(async () => {
+      const res = await findOneSpec(specId);
+      if (res.success && res.data) {
+        setSpec(res.data);
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [specState, specId]);
+
   const handleConfirm = async () => {
     if (!spec) return;
     setConfirming(true);
@@ -67,8 +84,8 @@ const SpecReview: React.FC = () => {
         message.error(res.message ?? '确认失败');
         return;
       }
-      message.success('Spec 已确认，迭代已启动');
-      history.push(`/online-code/dispatch?id=${spec.projectId}`);
+      message.success('Spec 已确认，任务生成已启动');
+      history.push(`/online-code/project?id=${spec.projectId}`);
     } finally {
       setConfirming(false);
     }
@@ -110,6 +127,8 @@ const SpecReview: React.FC = () => {
   }
 
   const confirmed = spec.state === 'CONFIRMED';
+  const isGenerating = spec.state === 'GENERATING';
+  const failed = spec.state === 'FAILED';
 
   return (
     <PageContainer scroll>
@@ -122,20 +141,20 @@ const SpecReview: React.FC = () => {
             <Button
               icon={<ReloadOutlined />}
               onClick={() => setRegenerateModalOpen(true)}
-              disabled={confirmed}
+              disabled={confirmed || isGenerating}
             >
               重新生成
             </Button>
             <Popconfirm
               title="确认该 Spec 并启动迭代？"
               onConfirm={handleConfirm}
-              disabled={confirmed}
+              disabled={confirmed || isGenerating || failed}
             >
               <Button
                 type="primary"
                 icon={<CheckOutlined />}
                 loading={confirming}
-                disabled={confirmed}
+                disabled={confirmed || isGenerating || failed}
               >
                 {confirmed ? '已确认' : '确认 Spec'}
               </Button>
@@ -143,6 +162,12 @@ const SpecReview: React.FC = () => {
           </>
         }
       />
+
+      {isGenerating && (
+        <Card>
+          <Spin spinning tip="正在生成 Spec..." />
+        </Card>
+      )}
 
       <Card title="页面 Pages">
         <Table

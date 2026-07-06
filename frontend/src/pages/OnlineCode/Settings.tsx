@@ -7,21 +7,13 @@
  */
 import React, { useEffect, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
-import { BannerTitle, Button, Card, Form, Input, Spin, Tag, message } from '@ead/suid';
+import { Button, Card, Form, Input, Tag, message } from '@ead/suid';
 import { ReloadOutlined, SaveOutlined } from '@ead/suid-icons';
 import { getConfig, saveConfig } from '@/services/onlineCode';
 import type { PlatformConfigDto } from '@/services/onlineCode';
+import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 
 const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    padding: ${token.paddingMD}px;
-    overflow: auto;
-  `,
-  header: css`
-    margin-bottom: ${token.marginMD}px;
-  `,
   card: css`
     max-width: 720px;
   `,
@@ -99,17 +91,15 @@ const Settings: React.FC = () => {
 
   if (loading) {
     return (
-      <div className={styles.page}>
-        <Spin spinning />
-      </div>
+      <PageContainer scroll>
+        <PageState loading />
+      </PageContainer>
     );
   }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <BannerTitle title="平台配置" subTitle="工作区根目录 + 模板仓库地址" />
-      </div>
+    <PageContainer scroll>
+      <PageHeader title="平台配置" subTitle="工作区根目录 + 模板仓库地址" />
       <Card className={styles.card}>
         <Form form={form} onFinish={handleSave} layout="vertical">
           <Form.Item
@@ -167,7 +157,7 @@ const Settings: React.FC = () => {
           </div>
         ) : null}
       </Card>
-    </div>
+    </PageContainer>
   );
 };
 

@@ -28,14 +28,9 @@ import {
   importSkill,
 } from '@/services/onlineCode';
 import type { SkillConfig, SkillDto } from '@/services/onlineCode';
+import { PageContainer } from './components/PageLayout';
 
 const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  `,
   content: css`
     margin: 0;
     padding: ${token.paddingSM}px;
@@ -153,7 +148,7 @@ const Skills: React.FC = () => {
   ];
 
   return (
-    <div className={styles.page}>
+    <PageContainer>
       <ExtTable
         ref={tableRef}
         rowKey="id"
@@ -293,7 +288,7 @@ const Skills: React.FC = () => {
           </div>
         ) : null}
       </ExtModal>
-    </div>
+    </PageContainer>
   );
 };
 

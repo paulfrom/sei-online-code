@@ -1,11 +1,10 @@
 package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.SpecApi;
-import com.changhong.onlinecode.dto.IterationDto;
+import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.SpecDto;
 import com.changhong.onlinecode.dto.request.ConfirmSpecRequest;
 import com.changhong.onlinecode.dto.request.RegenerateSpecRequest;
-import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.service.IterationService;
 import com.changhong.onlinecode.service.SpecService;
@@ -46,12 +45,12 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
     }
 
     @Override
-    public ResultData<IterationDto> confirm(ConfirmSpecRequest request) {
-        OperateResultWithData<Iteration> result = iterationService.confirmSpec(request.getSpecId());
+    public ResultData<PlanDto> confirm(ConfirmSpecRequest request) {
+        OperateResultWithData<PlanDto> result = iterationService.confirmSpec(request.getSpecId());
         if (result.notSuccessful()) {
             return ResultData.fail(result.getMessage());
         }
-        return ResultData.success(convertIterationToDto(result.getData()));
+        return ResultData.success(result.getData());
     }
 
     @Override
@@ -60,28 +59,6 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
         return ResultData.success(dtos);
-    }
-
-    /**
-     * Iteration 实体 → DTO。Iteration 属另一聚合，独立映射（含 Phase 4 回合溯源字段）。
-     *
-     * @param iteration 迭代实体
-     * @return IterationDto
-     */
-    private IterationDto convertIterationToDto(Iteration iteration) {
-        IterationDto dto = new IterationDto();
-        dto.setId(iteration.getId());
-        dto.setProjectId(iteration.getProjectId());
-        dto.setSpecId(iteration.getSpecId());
-        dto.setSpecVersion(iteration.getSpecVersion());
-        dto.setRound(iteration.getRound());
-        dto.setParentIterationId(iteration.getParentIterationId());
-        dto.setFeedback(iteration.getFeedback());
-        dto.setState(iteration.getState());
-        dto.setPreviewUrl(iteration.getPreviewUrl());
-        dto.setCreatedDate(iteration.getCreatedDate());
-        dto.setFinishedDate(iteration.getFinishedDate());
-        return dto;
     }
 
     @Override

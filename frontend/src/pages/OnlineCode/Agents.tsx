@@ -7,7 +7,6 @@
  *      agent) then ep #24 skills (attach/replace its bound skills).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { createStyles } from '@ead/antd-style';
 import {
   ActionButton,
   Button,
@@ -31,15 +30,7 @@ import {
   saveAgent,
 } from '@/services/onlineCode';
 import type { AgentDto, SkillDto } from '@/services/onlineCode';
-
-const useStyles = createStyles(({ css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  `,
-}));
+import { PageContainer } from './components/PageLayout';
 
 interface AgentForm {
   name: string;
@@ -52,7 +43,6 @@ interface AgentForm {
 }
 
 const Agents: React.FC = () => {
-  const { styles } = useStyles();
   const tableRef = useRef<ExtTableRef>(null);
   const [form] = Form.useForm<AgentForm>();
   const [modalOpen, setModalOpen] = useState(false);
@@ -193,7 +183,7 @@ const Agents: React.FC = () => {
   ];
 
   return (
-    <div className={styles.page}>
+    <PageContainer>
       <ExtTable
         ref={tableRef}
         rowKey="id"
@@ -272,7 +262,7 @@ const Agents: React.FC = () => {
           </Form.Item>
         </Form>
       </ExtModal>
-    </div>
+    </PageContainer>
   );
 };
 

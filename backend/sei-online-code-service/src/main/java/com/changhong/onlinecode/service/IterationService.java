@@ -1,10 +1,10 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.IterationDao;
+import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.entity.Iteration;
-import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
@@ -28,13 +28,16 @@ public class IterationService extends BaseEntityService<Iteration> {
     private final IterationDao dao;
     private final ProjectService projectService;
     private final SpecService specService;
+    private final PlanService planService;
 
     public IterationService(IterationDao dao,
                             ProjectService projectService,
-                            SpecService specService) {
+                            SpecService specService,
+                            PlanService planService) {
         this.dao = dao;
         this.projectService = projectService;
         this.specService = specService;
+        this.planService = planService;
     }
 
     @Override
@@ -43,45 +46,32 @@ public class IterationService extends BaseEntityService<Iteration> {
     }
 
     /**
-     * 确认 Spec 并启动迭代：Spec → CONFIRMED，项目 SPEC_REVIEW → DISPATCHING，
-     * 新建一个 DISPATCHING 态迭代。
+     * 确认 Spec 并启动规划：Spec → CONFIRMED，然后创建 GENERATING 态 Plan 并
+     * spawn planning-agent。迭代/构建项目不在 Spec 确认时创建，等任务审批后由后续
+     * build/dispatch 流程触发。
      *
      * @param specId Spec id
-     * @return 写操作结果（携带新建迭代）
+     * @return 写操作结果（携带新建 GENERATING Plan）
      */
     @Transactional(rollbackFor = Exception.class)
-    public OperateResultWithData<Iteration> confirmSpec(String specId) {
+    public OperateResultWithData<PlanDto> confirmSpec(String specId) {
         Spec spec = specService.findOne(specId);
         if (Objects.isNull(spec)) {
             return OperateResultWithData.operationFailure("Spec 不存在: " + specId);
         }
+        // 状态守卫：仅 SPEC_REVIEW 可确认（GENERATING/FAILED 拒绝，避免确认空 Spec）
+        if (spec.getState() != SpecState.SPEC_REVIEW) {
+            return OperateResultWithData.operationFailure(
+                    "仅 SPEC_REVIEW 状态可确认 Spec，当前为 " + spec.getState());
+        }
 
         spec.setState(SpecState.CONFIRMED);
-        specService.save(spec);
-
-        OperateResultWithData<Project> transition =
-                projectService.transitionState(spec.getProjectId(), LifecycleState.DISPATCHING);
-        if (transition.notSuccessful()) {
-            return OperateResultWithData.operationFailure(transition.getMessage());
-        }
-
-        Iteration iteration = new Iteration();
-        iteration.setProjectId(spec.getProjectId());
-        iteration.setSpecId(specId);
-        iteration.setSpecVersion(spec.getVersion());
-        // 首个回合：round=1，无父回合（Phase 4 §1.1 时间线链根）
-        iteration.setRound(1);
-        iteration.setState(LifecycleState.DISPATCHING);
-        OperateResultWithData<Iteration> saved = super.save(iteration);
+        OperateResultWithData<Spec> saved = specService.save(spec);
         if (saved.notSuccessful()) {
-            return saved;
+            return OperateResultWithData.operationFailure(saved.getMessage());
         }
 
-        Project project = projectService.findOne(spec.getProjectId());
-        project.setCurrentIterationId(saved.getData().getId());
-        projectService.save(project);
-
-        return saved;
+        return planService.regenerate(spec.getProjectId(), null);
     }
 
     /**

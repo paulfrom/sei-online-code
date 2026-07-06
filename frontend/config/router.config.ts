@@ -32,6 +32,12 @@ const routes: any[] = [
             component: './OnlineCode/Spec',
           },
           {
+            path: '/online-code/project',
+            name: 'onlineCodeProject',
+            title: 'menu.onlineCodeProject',
+            component: './OnlineCode/ProjectDetail',
+          },
+          {
             path: '/online-code/dispatch',
             name: 'onlineCodeDispatch',
             title: 'menu.onlineCodeDispatch',

@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { history, useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { BannerTitle, Button, Empty, Result, Spin } from '@ead/suid';
+import { Button, Result } from '@ead/suid';
 import { HistoryOutlined, RocketOutlined } from '@ead/suid-icons';
 import {
   deployIteration,
@@ -18,21 +18,9 @@ import {
 } from '@/services/onlineCode';
 import type { IterationDto, LifecycleState, ProjectDto } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
+import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 
 const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    padding: ${token.paddingMD}px;
-    gap: ${token.marginSM}px;
-  `,
-  header: css`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `,
   body: css`
     flex: 1;
     display: flex;
@@ -192,17 +180,17 @@ const Preview: React.FC = () => {
 
   if (loading) {
     return (
-      <div className={styles.page}>
-        <Spin spinning />
-      </div>
+      <PageContainer>
+        <PageState loading />
+      </PageContainer>
     );
   }
 
   if (!project) {
     return (
-      <div className={styles.page}>
-        <Empty description="项目不存在" />
-      </div>
+      <PageContainer>
+        <PageState error="项目不存在" />
+      </PageContainer>
     );
   }
 
@@ -211,30 +199,31 @@ const Preview: React.FC = () => {
   const previewUrl = iteration?.previewUrl;
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <BannerTitle title={project.name} subTitle="迭代预览" />
-        <div>
-          <LifecycleBadge state={project.state} />
-          <Button
-            icon={<HistoryOutlined />}
-            onClick={() => history.push(`/online-code/timeline?id=${project.id}`)}
-            style={{ marginInlineStart: 8 }}
-          >
-            迭代时间线
-          </Button>
-          <Button
-            type="primary"
-            icon={<RocketOutlined />}
-            loading={deploying}
-            disabled={!canDeploy}
-            onClick={handleDeploy}
-            style={{ marginInlineStart: 8 }}
-          >
-            部署
-          </Button>
-        </div>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title={project.name}
+        subTitle="迭代预览"
+        extra={<LifecycleBadge state={project.state} />}
+        actions={
+          <>
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => history.push(`/online-code/timeline?id=${project.id}`)}
+            >
+              迭代时间线
+            </Button>
+            <Button
+              type="primary"
+              icon={<RocketOutlined />}
+              loading={deploying}
+              disabled={!canDeploy}
+              onClick={handleDeploy}
+            >
+              部署
+            </Button>
+          </>
+        }
+      />
 
       <div className={styles.body}>
         <div className={styles.previewPane}>
@@ -258,7 +247,7 @@ const Preview: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 };
 

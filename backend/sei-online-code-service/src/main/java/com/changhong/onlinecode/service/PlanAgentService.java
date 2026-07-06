@@ -211,11 +211,40 @@ public class PlanAgentService {
     }
 
     private <T> T parseJson(String json, Class<T> type) {
+        String extracted = extractJsonObject(json);
         try {
-            return objectMapper.readValue(json, type);
+            return objectMapper.readValue(extracted, type);
         } catch (Exception e) {
-            throw new RuntimeException("parse " + type.getSimpleName() + " failed", e);
+            throw new RuntimeException("parse " + type.getSimpleName() + " failed, rawHead="
+                    + (json == null ? "null" : json.substring(0, Math.min(json.length(), 200))), e);
         }
+    }
+
+    /**
+     * 从 LLM 输出中抽取首个 JSON 对象：剥离前言散文、markdown 围栏、尾随文字。
+     * 模型即使被要求"只输出 JSON"仍可能带 "前提假设：…" 之类前言，此处兜底。
+     * 无 {@code {}} 时原样返回，交由 {@code readValue} 抛出可读错误。
+     */
+    private static String extractJsonObject(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String t = raw.trim();
+        if (t.startsWith("```")) {
+            int firstNl = t.indexOf('\n');
+            if (firstNl > 0) {
+                t = t.substring(firstNl + 1);
+            }
+            if (t.endsWith("```")) {
+                t = t.substring(0, t.length() - 3);
+            }
+        }
+        int start = t.indexOf('{');
+        int end = t.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return t.substring(start, end + 1);
+        }
+        return t;
     }
 
     private Path materializeSkills(Agent agent) {
@@ -259,7 +288,9 @@ public class PlanAgentService {
         String desc = project == null ? "" : project.getDesign();
         String hint = modifyHint == null ? "" : modifyHint;
         return "项目描述：" + desc + "\n修改提示：" + hint
-                + "\n输出 Plan JSON 骨架：summary/techAssumptions/features[]{featureId,title,outline}/nonGoals";
+                + "\n输出 Plan JSON 骨架：summary/techAssumptions/features[]{featureId,title,outline}/nonGoals"
+                + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
+                + "summary/techAssumptions/nonGoals 为字符串，features 为数组，featureId 为字符串";
     }
 
     private String buildFeatureDesignPrompt(Plan plan, String featureId, String modifyHint) {

@@ -21,6 +21,7 @@ import java.util.Locale;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -41,13 +42,15 @@ class SpecServiceTest {
 
     private SpecDao specDao;
     private ProjectService projectService;
+    private SpecAgentService specAgentService;
     private SpecService specService;
 
     @BeforeEach
     void setUp() {
         specDao = mock(SpecDao.class);
         projectService = mock(ProjectService.class);
-        specService = new SpecService(specDao, projectService);
+        specAgentService = mock(SpecAgentService.class);
+        specService = new SpecService(specDao, projectService, specAgentService);
     }
 
     @Test
@@ -82,6 +85,31 @@ class SpecServiceTest {
         verify(specDao, never()).save(any(Spec.class));
     }
 
+    @Test
+    void regenerate_rejectsWhenGenerating() {
+        // 准备：latest Spec 处于 GENERATING —— 并发守卫应拒绝，避免连建多个空版本
+        String projectId = "proj1";
+        Project project = new Project();
+        project.setId(projectId);
+        project.setState(LifecycleState.SPEC_REVIEW);
+
+        Spec generating = new Spec();
+        generating.setProjectId(projectId);
+        generating.setVersion(1);
+        generating.setState(SpecState.GENERATING);
+        when(specDao.findByProjectIdOrderByVersionDesc(projectId)).thenReturn(List.of(generating));
+        when(projectService.findOne(projectId)).thenReturn(project);
+
+        // 执行
+        OperateResultWithData<Spec> result = specService.regenerate(projectId, "modify");
+
+        // 验证
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("正在生成中"));
+        verify(specDao, never()).save(any(Spec.class));
+        verify(specAgentService, never()).spawnRequirement(anyString(), anyString(), anyString());
+    }
+
     @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
     @Test
     void regenerate_success() {
@@ -94,6 +122,7 @@ class SpecServiceTest {
         Spec existingSpec = new Spec();
         existingSpec.setProjectId(projectId);
         existingSpec.setVersion(1);
+        existingSpec.setState(SpecState.SPEC_REVIEW);
         when(specDao.findByProjectIdOrderByVersionDesc(projectId)).thenReturn(List.of(existingSpec));
 
         when(projectService.findOne(projectId)).thenReturn(project);
@@ -106,21 +135,24 @@ class SpecServiceTest {
         // 执行
         OperateResultWithData<Spec> result = specService.regenerate(projectId, "modify hint");
 
-        // 验证
+        // 验证：建 GENERATING 行 + spawn Requirement Agent（异步回调收口到 SPEC_REVIEW 由 SpecAgentService 负责）
         assertTrue(result.successful());
         assertNotNull(result.getData());
         assertEquals(2, result.getData().getVersion());
-        assertEquals(SpecState.SPEC_REVIEW, result.getData().getState());
+        assertEquals(SpecState.GENERATING, result.getData().getState());
+        assertEquals("modify hint", result.getData().getModifyHint());
 
         ArgumentCaptor<Spec> specCaptor = ArgumentCaptor.forClass(Spec.class);
         verify(specDao).save(specCaptor.capture());
         assertEquals(projectId, specCaptor.getValue().getProjectId());
         assertEquals(2, specCaptor.getValue().getVersion());
-        assertEquals(SpecState.SPEC_REVIEW, specCaptor.getValue().getState());
+        assertEquals(SpecState.GENERATING, specCaptor.getValue().getState());
 
         ArgumentCaptor<Project> projectCaptor = ArgumentCaptor.forClass(Project.class);
         verify(projectService).save(projectCaptor.capture());
         assertEquals("spec2", projectCaptor.getValue().getCurrentSpecId());
+
+        verify(specAgentService).spawnRequirement(eq(projectId), eq("modify hint"), eq("spec2"));
     }
 
     @Test
@@ -185,16 +217,19 @@ class SpecServiceTest {
         // 执行
         OperateResultWithData<Spec> result = specService.refineSpec(projectId);
 
-        // 验证
+        // 验证：建 GENERATING 行；项目同步推进 DRAFTING→SPEC_REFINING 后停下，
+        // SPEC_REVIEW 收口交给 SpecAgentService 异步回调（此处不验证）
         assertTrue(result.successful());
         assertNotNull(result.getData());
         assertEquals(2, result.getData().getVersion());
-        assertEquals(SpecState.SPEC_REVIEW, result.getData().getState());
+        assertEquals(SpecState.GENERATING, result.getData().getState());
 
         InOrder inOrder = inOrder(projectService);
         inOrder.verify(projectService).transitionState(projectId, LifecycleState.DRAFTING);
         inOrder.verify(projectService).transitionState(projectId, LifecycleState.SPEC_REFINING);
-        inOrder.verify(projectService).transitionState(projectId, LifecycleState.SPEC_REVIEW);
         inOrder.verify(projectService).save(any(Project.class));
+        verify(projectService, never()).transitionState(projectId, LifecycleState.SPEC_REVIEW);
+
+        verify(specAgentService).spawnRequirement(eq(projectId), eq(null), eq("spec2"));
     }
 }

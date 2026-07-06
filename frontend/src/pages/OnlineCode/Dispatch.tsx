@@ -13,12 +13,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
 import {
-  BannerTitle,
   Button,
   Empty,
   ExtTable,
   Popconfirm,
-  Spin,
   Tabs,
   Tag,
   message,
@@ -44,26 +42,9 @@ import type {
 } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
 import WorkspaceSourceIndicator from './components/WorkspaceSourceIndicator';
+import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 
 const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    padding: ${token.paddingMD}px;
-    gap: ${token.marginSM}px;
-  `,
-  header: css`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `,
-  headerActions: css`
-    display: flex;
-    align-items: center;
-    gap: ${token.marginSM}px;
-  `,
   body: css`
     flex: 1;
     display: flex;
@@ -317,49 +298,50 @@ const Dispatch: React.FC = () => {
 
   if (loading) {
     return (
-      <div className={styles.page}>
-        <Spin spinning />
-      </div>
+      <PageContainer>
+        <PageState loading />
+      </PageContainer>
     );
   }
 
   if (!project) {
     return (
-      <div className={styles.page}>
-        <Empty description="项目不存在" />
-      </div>
+      <PageContainer>
+        <PageState error="项目不存在" />
+      </PageContainer>
     );
   }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <BannerTitle title={project.name} subTitle="任务派发与并发执行" />
-        <div className={styles.headerActions}>
-          <WorkspaceSourceIndicator projectId={projectId} />
-          <LifecycleBadge state={project.state} />
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            loading={dispatching}
-            disabled={!canDispatch}
-            onClick={handleDispatch}
-            style={{ marginInlineStart: 8 }}
-          >
-            派发任务
-          </Button>
-          <Popconfirm title="将所有任务工作树合并回主干？" onConfirm={handleMerge} disabled={!canMerge}>
+    <PageContainer>
+      <PageHeader
+        title={project.name}
+        subTitle="任务派发与并发执行"
+        extra={
+          <>
+            <WorkspaceSourceIndicator projectId={projectId} />
+            <LifecycleBadge state={project.state} />
+          </>
+        }
+        actions={
+          <>
             <Button
-              icon={<MergeCellsOutlined />}
-              loading={merging}
-              disabled={!canMerge}
-              style={{ marginInlineStart: 8 }}
+              type="primary"
+              icon={<SendOutlined />}
+              loading={dispatching}
+              disabled={!canDispatch}
+              onClick={handleDispatch}
             >
-              合并
+              派发任务
             </Button>
-          </Popconfirm>
-        </div>
-      </div>
+            <Popconfirm title="将所有任务工作树合并回主干？" onConfirm={handleMerge} disabled={!canMerge}>
+              <Button icon={<MergeCellsOutlined />} loading={merging} disabled={!canMerge}>
+                合并
+              </Button>
+            </Popconfirm>
+          </>
+        }
+      />
 
       <div className={styles.body}>
         <div className={styles.tablePane}>
@@ -388,7 +370,7 @@ const Dispatch: React.FC = () => {
           )}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 };
 

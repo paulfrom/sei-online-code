@@ -24,6 +24,7 @@ import {
   HistoryOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
+  MinusCircleOutlined,
 } from '@ead/suid-icons';
 import {
   getLatest,
@@ -107,8 +108,8 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
   const [submitting, setSubmitting] = useState(false);
   const historyTableRef = useRef<ExtTableRef>(null);
 
-  const fetchPlan = useCallback(async () => {
-    setLoading(true);
+  const fetchPlan = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await getLatest(projectId);
       if (res.success && res.data) {
@@ -116,17 +117,28 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
         if (editing) {
           form.setFieldsValue(res.data.content);
         }
-      } else {
+      } else if (!silent) {
         message.error(res.message ?? '获取计划失败');
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [projectId, editing, form]);
 
   useEffect(() => {
     fetchPlan();
   }, [fetchPlan]);
+
+  // GENERATING 期间轮询，让"重新生成"后能自动看到 DRAFT/FAILED 结果；
+  // editing 时不轮询（避免覆盖用户编辑）；状态离开 GENERATING 即停止。
+  const planStatus = plan?.status;
+  useEffect(() => {
+    if (planStatus !== 'GENERATING' || editing) return;
+    const timer = setInterval(() => {
+      fetchPlan(true);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [planStatus, editing, fetchPlan]);
 
   const handleEdit = () => {
     if (!plan) return;
@@ -356,7 +368,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
                         <ActionButton
                           type="text"
                           danger
-                          icon={<EditOutlined />}
+                          icon={<MinusCircleOutlined />}
                           onClick={() => remove(field.name)}
                           style={{ marginTop: 24 }}
                         />
@@ -396,7 +408,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
             </Button>
           </div>
         </Form>
-      ) : (
+      ) : plan.content ? (
         <>
           <div className={styles.section}>
             <div className={styles.sectionTitle}>项目概述</div>
@@ -448,6 +460,10 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
             </div>
           )}
         </>
+      ) : (
+        <div className={styles.section}>
+          计划生成失败，内容为空。请点击右上方“重新生成”重试。
+        </div>
       )}
 
       <Drawer

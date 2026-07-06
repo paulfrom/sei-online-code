@@ -11,7 +11,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { history, useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
 import {
-  BannerTitle,
   Button,
   Empty,
   ExtModal,
@@ -48,27 +47,9 @@ import type {
   SpecDto,
 } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
+import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 
 const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    padding: ${token.paddingMD}px;
-    display: flex;
-    flex-direction: column;
-    gap: ${token.marginMD}px;
-  `,
-  header: css`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `,
-  actions: css`
-    display: flex;
-    gap: ${token.marginXS}px;
-    align-items: center;
-  `,
   itemHead: css`
     display: flex;
     align-items: center;
@@ -274,17 +255,17 @@ const IterationTimeline: React.FC = () => {
 
   if (loading) {
     return (
-      <div className={styles.page}>
-        <Spin spinning />
-      </div>
+      <PageContainer scroll>
+        <PageState loading />
+      </PageContainer>
     );
   }
 
   if (!project) {
     return (
-      <div className={styles.page}>
-        <Empty description="项目不存在" />
-      </div>
+      <PageContainer scroll>
+        <PageState error="项目不存在" />
+      </PageContainer>
     );
   }
 
@@ -294,36 +275,39 @@ const IterationTimeline: React.FC = () => {
   const canRetry = active?.state === 'FAILED';
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <BannerTitle title={project.name} subTitle="迭代时间线" />
-        <div className={styles.actions}>
-          <LifecycleBadge state={project.state} />
-          <Popconfirm title="确认验收当前迭代？验收后不可再优化" onConfirm={handleAccept} disabled={!canAccept}>
-            <Button type="primary" icon={<CheckOutlined />} loading={acting} disabled={!canAccept}>
-              验收
+    <PageContainer scroll>
+      <PageHeader
+        title={project.name}
+        subTitle="迭代时间线"
+        extra={<LifecycleBadge state={project.state} />}
+        actions={
+          <>
+            <Popconfirm title="确认验收当前迭代？验收后不可再优化" onConfirm={handleAccept} disabled={!canAccept}>
+              <Button type="primary" icon={<CheckOutlined />} loading={acting} disabled={!canAccept}>
+                验收
+              </Button>
+            </Popconfirm>
+            <Button
+              icon={<ThunderboltOutlined />}
+              disabled={!canOptimize}
+              onClick={() => setOptimizeOpen(true)}
+            >
+              优化
             </Button>
-          </Popconfirm>
-          <Button
-            icon={<ThunderboltOutlined />}
-            disabled={!canOptimize}
-            onClick={() => setOptimizeOpen(true)}
-          >
-            优化
-          </Button>
-          <Popconfirm title="确认取消当前迭代？运行中的任务将级联取消" onConfirm={handleCancel} disabled={!canCancel}>
-            <Button danger icon={<CloseOutlined />} loading={acting} disabled={!canCancel}>
-              取消
+            <Popconfirm title="确认取消当前迭代？运行中的任务将级联取消" onConfirm={handleCancel} disabled={!canCancel}>
+              <Button danger icon={<CloseOutlined />} loading={acting} disabled={!canCancel}>
+                取消
+              </Button>
+            </Popconfirm>
+            <Button icon={<RedoOutlined />} loading={acting} disabled={!canRetry} onClick={handleRetry}>
+              重试
             </Button>
-          </Popconfirm>
-          <Button icon={<RedoOutlined />} loading={acting} disabled={!canRetry} onClick={handleRetry}>
-            重试
-          </Button>
-          <Button icon={<HistoryOutlined />} onClick={openHistory}>
-            Spec 版本
-          </Button>
-        </div>
-      </div>
+            <Button icon={<HistoryOutlined />} onClick={openHistory}>
+              Spec 版本
+            </Button>
+          </>
+        }
+      />
 
       <div className={styles.timelineWrap}>
         {timelineItems.length ? (
@@ -389,7 +373,7 @@ const IterationTimeline: React.FC = () => {
           />
         </Spin>
       </ExtModal>
-    </div>
+    </PageContainer>
   );
 };
 

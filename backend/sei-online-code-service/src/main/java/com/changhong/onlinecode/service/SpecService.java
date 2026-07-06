@@ -17,8 +17,8 @@ import java.util.Objects;
 /**
  * Spec 服务。承载「需求 → Spec」精炼与状态流转（契约 §4 端点 4/6）。
  *
- * <p>Phase 1 compile-only：refineSpec 生成的是最小占位 Spec（DRAFT），
- * 真正的 Requirement Agent 精炼逻辑属后续接入项。</p>
+ * <p>接入 Requirement Agent：{@link #refineSpec} / {@link #regenerate} 建 GENERATING 行后
+ * 由 {@link SpecAgentService#spawnRequirement} 异步填充 content 并收口到 SPEC_REVIEW / FAILED。</p>
  *
  * @author sei-online-code
  */
@@ -27,10 +27,12 @@ public class SpecService extends BaseEntityService<Spec> {
 
     private final SpecDao dao;
     private final ProjectService projectService;
+    private final SpecAgentService specAgentService;
 
-    public SpecService(SpecDao dao, ProjectService projectService) {
+    public SpecService(SpecDao dao, ProjectService projectService, SpecAgentService specAgentService) {
         this.dao = dao;
         this.projectService = projectService;
+        this.specAgentService = specAgentService;
     }
 
     @Override
@@ -39,14 +41,15 @@ public class SpecService extends BaseEntityService<Spec> {
     }
 
     /**
-     * 精炼 Spec：项目 DRAFTING/FAILED → SPEC_REFINING → SPEC_REVIEW，产出一个 SPEC_REVIEW 态 Spec。
+     * 精炼 Spec：项目 DRAFTING/FAILED → SPEC_REFINING，产出 GENERATING 态 Spec 并 spawn Requirement Agent。
      *
-     * <p>版本号按项目已有最大版本 + 1 递增。
+     * <p>版本号按项目已有最大版本 + 1 递增。项目在生成期间停在 SPEC_REFINING，
+     * 由 {@link SpecAgentService} 回调推进到 SPEC_REVIEW（成功）/ FAILED（失败）。</p>
      *
-     * <p>FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING→SPEC_REVIEW。
+     * <p>FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING→（异步）SPEC_REVIEW。</p>
      *
      * @param projectId 项目 id
-     * @return 写操作结果（携带新建 Spec）
+     * @return 写操作结果（携带新建 GENERATING Spec）
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Spec> refineSpec(String projectId) {
@@ -59,19 +62,19 @@ public class SpecService extends BaseEntityService<Spec> {
             return OperateResultWithData.operationFailure(
                     "仅 DRAFTING/FAILED 状态可精炼 Spec，当前为 " + entry);
         }
-        // FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING→SPEC_REVIEW
+        // FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING
         if (entry == LifecycleState.FAILED) {
             OperateResultWithData<Project> back = projectService.transitionState(projectId, LifecycleState.DRAFTING);
             if (back.notSuccessful()) return OperateResultWithData.operationFailure(back.getMessage());
         }
-        // 生命周期推进：DRAFTING → SPEC_REFINING → SPEC_REVIEW
+        // 生命周期推进：DRAFTING → SPEC_REFINING（生成期间停在此态，回调推进到 SPEC_REVIEW）
         projectService.transitionState(projectId, LifecycleState.SPEC_REFINING);
 
         Spec spec = new Spec();
         spec.setProjectId(projectId);
         spec.setVersion(nextVersion(projectId));
-        spec.setState(SpecState.SPEC_REVIEW);
-        // TODO(oma-deferred): 接入 Requirement Agent 后由其填充 pages/components/entities/apiContract
+        spec.setState(SpecState.GENERATING);
+        spec.setModifyHint(null);
         OperateResultWithData<Spec> saved = super.save(spec);
         if (saved.notSuccessful()) {
             // 业务失败：显式置 FAILED（SPEC_REFINING→FAILED，UNIVERSAL 允许），避免卡死 SPEC_REFINING
@@ -79,13 +82,11 @@ public class SpecService extends BaseEntityService<Spec> {
             return saved;
         }
 
-        // 项目挂载当前 Spec 并进入 SPEC_REVIEW
-        projectService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
+        // 项目挂载当前 Spec（仍处 SPEC_REFINING），spawn Requirement Agent 异步填充 + 收口
         project = projectService.findOne(projectId);
         project.setCurrentSpecId(saved.getData().getId());
         projectService.save(project);
-        // TODO(oma-deferred): 异常路径下 @Transactional 整笔回滚到入口态（DRAFTING/FAILED），
-        //   不显式置 FAILED；接入 Agent 后若需异常显式 FAILED，用 REQUIRES_NEW 自注入 markFailed。
+        specAgentService.spawnRequirement(projectId, null, saved.getData().getId());
         return saved;
     }
 
@@ -135,13 +136,14 @@ public class SpecService extends BaseEntityService<Spec> {
     }
 
     /**
-     * 重新生成 Spec：从 SPEC_REVIEW 产出新版本 Spec（version+1，不可变历史）。
+     * 重新生成 Spec：从 SPEC_REVIEW 产出 GENERATING 新版本 Spec（version+1，不可变历史），
+     * spawn Requirement Agent 基于上版本 + modifyHint 异步填充。
      *
-     * <p>项目保持 SPEC_REVIEW 状态，不经过 SPEC_REFINING。</p>
+     * <p>项目保持 SPEC_REVIEW 状态，不经过 SPEC_REFINING（自环合法）。</p>
      *
      * @param projectId  项目 id
-     * @param modifyHint 修改提示（当前不持久化，仅签名接收）
-     * @return 写操作结果（携带新建 Spec）
+     * @param modifyHint 修改提示（持久化到 Spec.modifyHint，备历史追溯）
+     * @return 写操作结果（携带新建 GENERATING Spec）
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Spec> regenerate(String projectId, String modifyHint) {
@@ -152,13 +154,20 @@ public class SpecService extends BaseEntityService<Spec> {
         if (project.getState() != LifecycleState.SPEC_REVIEW) {
             return OperateResultWithData.operationFailure("仅 SPEC_REVIEW 状态可重新生成 Spec，当前为 " + project.getState());
         }
+        // 并发守卫：latest Spec 为 GENERATING 时拒绝（对齐 PlanService.regenerate）
+        List<Spec> existing = dao.findByProjectIdOrderByVersionDesc(projectId);
+        if (existing != null && !existing.isEmpty()) {
+            Spec latest = existing.get(0);
+            if (latest.getState() == SpecState.GENERATING) {
+                return OperateResultWithData.operationFailure("Spec 正在生成中，不可重复发起");
+            }
+        }
 
         Spec spec = new Spec();
         spec.setProjectId(projectId);
         spec.setVersion(nextVersion(projectId));
-        spec.setState(SpecState.SPEC_REVIEW);
-        // TODO(oma-deferred): 接入 Requirement Agent 后基于 prior 版本 + modifyHint 增量填充
-        //   pages/components/entities/apiContract；本轮仅做版本递增 + 状态编织（与 refineNextVersion 一致）
+        spec.setState(SpecState.GENERATING);
+        spec.setModifyHint(modifyHint);
         OperateResultWithData<Spec> saved = super.save(spec);
         if (saved.notSuccessful()) {
             return saved;
@@ -166,7 +175,8 @@ public class SpecService extends BaseEntityService<Spec> {
 
         project.setCurrentSpecId(saved.getData().getId());
         projectService.save(project);
-        // 项目保持 SPEC_REVIEW（自环合法），不经过 SPEC_REFINING
+        // 项目保持 SPEC_REVIEW（自环合法）；agent 回调收口 Spec GENERATING → SPEC_REVIEW / FAILED
+        specAgentService.spawnRequirement(projectId, modifyHint, saved.getData().getId());
         return saved;
     }
 }

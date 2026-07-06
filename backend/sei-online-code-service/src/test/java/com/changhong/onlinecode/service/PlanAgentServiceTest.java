@@ -105,6 +105,29 @@ class PlanAgentServiceTest {
     }
 
     @Test
+    void spawnPlanning_recoversJson_whenLlmEmitsPreamble() {
+        // 回归线上报错：模型被要求"只输出 JSON"仍可能带 "前提假设：…" 前言，
+        // 旧实现直接 readValue 抛 JsonParseException 落 FAILED；extractJsonObject 兜底后须落 DRAFT。
+        Plan plan = new Plan();
+        plan.setStatus(PlanStatus.GENERATING);
+
+        when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
+        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
+        when(projectService.findOne("p1")).thenReturn(new Project());
+        String raw = "前提假设：单租户\n技术假设：Spring Boot\n"
+                + "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
+        when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(raw));
+
+        service.spawnPlanning("p1", null);
+
+        ArgumentCaptor<Plan> captor = ArgumentCaptor.forClass(Plan.class);
+        verify(planDao).save(captor.capture());
+        assertEquals(PlanStatus.DRAFT, captor.getValue().getStatus());
+        assertEquals("s", captor.getValue().getContent().getSummary());
+    }
+
+    @Test
     void spawnPlanning_noPlan_skips() {
         when(planDao.findLatestByProjectId("p1")).thenReturn(null);
         service.spawnPlanning("p1", null);

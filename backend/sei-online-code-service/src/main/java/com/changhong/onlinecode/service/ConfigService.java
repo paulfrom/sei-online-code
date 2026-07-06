@@ -97,15 +97,19 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
      * 解析生效的工作区根目录（env-with-fallback，backend 规则 #11）：
      * 配置行 workspaceRoot 非空优先 → 环境变量 {@code oc.workspace.root} → {@code ${java.io.tmpdir}/sei-online-code}。
      *
+     * <p>DB 与 env 两个来源返回前均 {@code trim()}：incidental 前后空白（多行 env 导出、YAML 缩进等引入）
+     * 会让 {@code WorkspaceManager.isSafeRoot} 的 {@code new File(root).isAbsolute()} 误判为相对路径而拒绝。
+     * 默认值（{@code java.io.tmpdir} 拼接）为系统生成，不 trim。</p>
+     *
      * @param config 已加载的单例配置行（可空）
      * @return 生效的工作区根目录绝对路径
      */
     public String resolveWorkspaceRoot(PlatformConfig config) {
         if (config != null && isNotBlank(config.getWorkspaceRoot())) {
-            return config.getWorkspaceRoot();
+            return config.getWorkspaceRoot().trim();
         }
         if (isNotBlank(envWorkspaceRoot)) {
-            return envWorkspaceRoot;
+            return envWorkspaceRoot.trim();
         }
         return System.getProperty("java.io.tmpdir") + File.separator + DEFAULT_WORKSPACE_DIR;
     }

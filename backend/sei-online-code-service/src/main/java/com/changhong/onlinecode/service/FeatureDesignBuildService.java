@@ -9,6 +9,7 @@ import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
+import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskState;
 import com.changhong.onlinecode.entity.Agent;
@@ -94,6 +95,8 @@ public class FeatureDesignBuildService {
         task.setIterationId(featureDesignId); // 临时用 featureDesignId 作为 iterationId
         task.setFeatureDesignId(featureDesignId);
         task.setTitle("编码实现：" + fd.getFeatureId());
+        task.setDescription(buildTaskDescription(fd));
+        task.setFileScope(fd.getContent() == null ? null : fd.getContent().getFileScope());
         task.setAssignedAgent(devAgent.getName());
         task.setState(TaskState.PENDING);
         task.setSeq(1);
@@ -219,8 +222,44 @@ public class FeatureDesignBuildService {
      * 构建编码提示词（内部辅助）。
      */
     private String buildPrompt(FeatureDesign fd) {
-        // TODO: 实际应从 FeatureDesignContent 构建完整提示词
-        return "请实现功能：" + fd.getFeatureId();
+        return buildTaskDescription(fd);
+    }
+
+    /**
+     * 将已审批的功能设计转换为开发 agent 可执行的任务说明。
+     */
+    private String buildTaskDescription(FeatureDesign fd) {
+        FeatureDesignContent content = fd.getContent();
+        if (content == null) {
+            return "请实现功能：" + fd.getFeatureId();
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("请根据以下功能设计执行编码。\n");
+        sb.append("featureId: ").append(nullToEmpty(content.getFeatureId(), fd.getFeatureId())).append('\n');
+        sb.append("目标: ").append(nullToEmpty(content.getGoal(), "")).append('\n');
+        if (content.getDesign() != null) {
+            sb.append("设计: ").append(content.getDesign()).append('\n');
+        }
+        if (content.getAcceptance() != null && !content.getAcceptance().isEmpty()) {
+            sb.append("验收点:\n");
+            for (String item : content.getAcceptance()) {
+                sb.append("- ").append(item).append('\n');
+            }
+        }
+        if (content.getFileScope() != null && !content.getFileScope().isEmpty()) {
+            sb.append("文件边界:\n");
+            for (String file : content.getFileScope()) {
+                sb.append("- ").append(file).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String nullToEmpty(String value, String fallback) {
+        if (value != null && !value.isBlank()) {
+            return value;
+        }
+        return fallback == null ? "" : fallback;
     }
 
     /**

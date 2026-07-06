@@ -36,7 +36,7 @@ export interface SpecDto {
   id: string;
   projectId: string;
   version: number;
-  state: 'DRAFT' | 'SPEC_REVIEW' | 'CONFIRMED';
+  state: 'GENERATING' | 'DRAFT' | 'SPEC_REVIEW' | 'CONFIRMED' | 'FAILED';
   pages: Array<{ key: string; title: string; route: string; description: string }>;
   components: Array<{ key: string; type: string; page: string; description: string }>;
   entities: Array<{
@@ -50,6 +50,7 @@ export interface SpecDto {
     responseShape: string;
     description: string;
   }>;
+  modifyHint?: string | null;
   createdDate: string;
 }
 
@@ -396,47 +397,39 @@ export function refineSpec(
   return { ok: true, spec };
 }
 
-/** confirm Spec → start iteration, project → DISPATCHING (contract ep #6) */
-export function confirmSpec(specId: string): IterationDto | null {
+/** confirm Spec → generate Plan for task approval (contract ep #6) */
+export function confirmSpec(specId: string): PlanDto | null {
   const spec = db.specs.get(specId);
   if (!spec) return null;
   const project = db.projects.get(spec.projectId);
   if (!project) return null;
   spec.state = 'CONFIRMED';
 
-  // Dedupe: `optimize` (#26) may have already opened the SPEC_REVIEW iteration
-  // for this exact spec version; re-confirming (#6) reuses it rather than
-  // forking a duplicate round. Otherwise this is the round-1 confirm.
-  const existing = Array.from(db.iterations.values()).find((it) => it.specId === spec.id);
-  if (existing) {
-    existing.state = 'DISPATCHING';
-    project.currentIterationId = existing.id;
-    project.currentSpecId = spec.id;
-    project.state = 'DISPATCHING';
-    project.lastEditedDate = now();
-    return existing;
-  }
-
-  const round =
-    Array.from(db.iterations.values()).filter((it) => it.projectId === project.id).length + 1;
-  const iteration: IterationDto = {
-    id: nextId('ITER'),
+  const plans = Array.from(db.plans?.values() ?? []).filter((p) => p.projectId === project.id);
+  plans.forEach((p) => {
+    p.isLatest = false;
+  });
+  const latestVersion = plans.reduce((max, p) => Math.max(max, p.version), 0);
+  const plan: PlanDto = {
+    id: nextId('PLAN'),
     projectId: project.id,
-    specId: spec.id,
-    specVersion: spec.version,
-    round,
-    state: 'DISPATCHING',
-    previewUrl: null,
-    parentIterationId: null,
-    feedback: null,
+    version: latestVersion + 1,
+    status: 'GENERATING',
+    content: {
+      summary: '',
+      techAssumptions: [],
+      features: [],
+      nonGoals: [],
+    },
+    modifyHint: undefined,
+    isLatest: true,
     createdDate: now(),
-    finishedDate: null,
+    lastEditedDate: now(),
   };
-  db.iterations.set(iteration.id, iteration);
-  project.currentIterationId = iteration.id;
-  project.state = 'DISPATCHING';
+  db.plans?.set(plan.id, plan);
+  project.currentSpecId = spec.id;
   project.lastEditedDate = now();
-  return iteration;
+  return plan;
 }
 
 /** deploy iteration → DEPLOYING (flips to PREVIEW after DEPLOY_DURATION_MS) */
@@ -771,24 +764,50 @@ export function specsOf(projectId: string): SpecDto[] {
     .sort((a, b) => a.version - b.version);
 }
 
-/** regenerate Spec from SPEC_REVIEW state */
+/**
+ * regenerate Spec — version+1, latest → GENERATING（契约 #R，镜像 Plan regenerate）。
+ * mock 异步：2s 后填充内容并翻 SPEC_REVIEW，让前端轮询能拿到结果（plan mock 无此翻转，spec 此处增强）。
+ */
 export function regenerateSpec(
   projectId: string,
-  _modifyHint?: string,
+  modifyHint?: string,
 ): { ok: true; spec: SpecDto } | { ok: false; message: string } {
   const project = db.projects.get(projectId);
   if (!project) return { ok: false, message: `project ${projectId} not found` };
   if (project.state !== 'SPEC_REVIEW') {
     return { ok: false, message: `仅 SPEC_REVIEW 状态可重新生成 Spec，当前为 ${project.state}` };
   }
-  const priorVersion = Array.from(db.specs.values())
+  const latest = Array.from(db.specs.values())
     .filter((s) => s.projectId === projectId)
-    .reduce((m, s) => Math.max(m, s.version), 0);
-  const spec = buildSpec(project, priorVersion + 1);
+    .sort((a, b) => b.version - a.version)[0];
+  if (latest && latest.state === 'GENERATING') {
+    return { ok: false, message: 'Spec 正在生成中，不可重复发起' };
+  }
+  const version = (latest?.version ?? 0) + 1;
+  const spec: SpecDto = {
+    id: nextId('SPEC'),
+    projectId,
+    version,
+    state: 'GENERATING',
+    pages: [],
+    components: [],
+    entities: [],
+    apiContract: [],
+    modifyHint: modifyHint ?? null,
+    createdDate: now(),
+  };
   db.specs.set(spec.id, spec);
   project.currentSpecId = spec.id;
   project.lastEditedDate = now();
-  // project 保持 SPEC_REVIEW（不经过 SPEC_REFINING）
+  // project 保持 SPEC_REVIEW（不经过 SPEC_REFINING）；2s 后填充内容并翻 SPEC_REVIEW
+  setTimeout(() => {
+    const built = buildSpec(project, version);
+    spec.pages = built.pages;
+    spec.components = built.components;
+    spec.entities = built.entities;
+    spec.apiContract = built.apiContract;
+    spec.state = 'SPEC_REVIEW';
+  }, 2000);
   return { ok: true, spec };
 }
 

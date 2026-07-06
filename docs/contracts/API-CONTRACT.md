@@ -105,7 +105,8 @@ Structure per CONTEXT.md "Spec format": `pages[]`, `components[]`, `entities[]`,
   "id": "SPEC0001",
   "projectId": "PRJ0001",
   "version": 1,           // int — incremented on each incremental refine
-  "state": "SPEC_REVIEW", // DRAFT | SPEC_REVIEW | CONFIRMED
+  "state": "SPEC_REVIEW", // GENERATING | DRAFT | SPEC_REVIEW | CONFIRMED | FAILED
+  "modifyHint": null,     // string | null — 重生/精炼修改提示（对齐 Plan.modifyHint）
   "pages": [
     { "key": "list", "title": "库存列表", "route": "/stock/list",
       "description": "分页表格 + 关键字搜索" }

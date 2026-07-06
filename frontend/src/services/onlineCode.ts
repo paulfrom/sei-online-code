@@ -6,6 +6,7 @@
  */
 import { request } from '@ead/suid-utils-react';
 import { PROJECT_SERVER_PATH } from '@/utils/constants';
+import type { PlanDto } from './plan';
 
 /**
  * API base. In Phase 1 MSW intercepts by path suffix (`*​/...`), so any
@@ -67,7 +68,7 @@ export interface SpecDto {
   id: string;
   projectId: string;
   version: number;
-  state: 'DRAFT' | 'SPEC_REVIEW' | 'CONFIRMED';
+  state: 'GENERATING' | 'DRAFT' | 'SPEC_REVIEW' | 'CONFIRMED' | 'FAILED';
   pages: Array<{ key: string; title: string; route: string; description: string }>;
   components: Array<{ key: string; type: string; page: string; description: string }>;
   entities: Array<{
@@ -81,6 +82,7 @@ export interface SpecDto {
     responseShape: string;
     description: string;
   }>;
+  modifyHint?: string | null;
   createdDate: string;
 }
 
@@ -234,8 +236,8 @@ export async function findOneSpec(id: string): Promise<ResultData<SpecDto>> {
   return request({ url: `${API}/spec/findOne`, method: 'GET', params: { id } });
 }
 
-/** #6 confirm Spec → start iteration */
-export async function confirmSpec(specId: string): Promise<ResultData<IterationDto>> {
+/** #6 confirm Spec → generate Plan for task approval */
+export async function confirmSpec(specId: string): Promise<ResultData<PlanDto>> {
   return request({ url: `${API}/spec/confirm`, method: 'POST', data: { specId } });
 }
 

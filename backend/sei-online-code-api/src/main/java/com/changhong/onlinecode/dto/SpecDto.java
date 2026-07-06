@@ -42,6 +42,9 @@ public class SpecDto extends BaseEntityDto {
     @Schema(description = "API 契约列表")
     private List<SpecApiContract> apiContract;
 
+    @Schema(description = "重生/精炼修改提示")
+    private String modifyHint;
+
     @Schema(description = "创建时间")
     private Date createdDate;
 
@@ -99,6 +102,14 @@ public class SpecDto extends BaseEntityDto {
 
     public void setApiContract(List<SpecApiContract> apiContract) {
         this.apiContract = apiContract;
+    }
+
+    public String getModifyHint() {
+        return modifyHint;
+    }
+
+    public void setModifyHint(String modifyHint) {
+        this.modifyHint = modifyHint;
     }
 
     public Date getCreatedDate() {

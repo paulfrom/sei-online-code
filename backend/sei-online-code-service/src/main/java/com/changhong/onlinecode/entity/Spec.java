@@ -66,6 +66,10 @@ public class Spec extends BaseAuditableEntity {
     @Column(name = "api_contract", columnDefinition = "TEXT")
     private List<SpecApiContract> apiContract;
 
+    /** 重生/精炼修改提示（对齐 Plan.modifyHint，仅持久化以备历史追溯） */
+    @Column(name = "modify_hint", columnDefinition = "TEXT")
+    private String modifyHint;
+
     public String getProjectId() {
         return projectId;
     }
@@ -120,6 +124,14 @@ public class Spec extends BaseAuditableEntity {
 
     public void setApiContract(List<SpecApiContract> apiContract) {
         this.apiContract = apiContract;
+    }
+
+    public String getModifyHint() {
+        return modifyHint;
+    }
+
+    public void setModifyHint(String modifyHint) {
+        this.modifyHint = modifyHint;
     }
 
     @Override
