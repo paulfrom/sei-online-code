@@ -16,22 +16,26 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link CodexRunner} 端到端 real-codex 测试（PR1.1）。
+ * {@link CodexRunner} 端到端 real-codex 测试（PR4）。
  *
- * <p>验证 WHY：PR1 的 codex 路径从未对真实 codex 跑过——{@code -o <tempfile>} 结果提取（替代
- * 未核实的 NDJSON 猜解）、{@code --json} 事件流、per-run {@code CODEX_HOME} + sandbox 配置、
- * ProcessBuilder 透传代理 env，整条链路只有真实 spawn 一次才能证明端到端正确。本测试钉死：
- * 确定性 echo prompt 触发 codex 真实响应 → {@code -o} 文件非空 → {@link CodexRunner#readResultFile}
- * 返回非空且含期望回声。</p>
+ * <p>验证 WHY：codex 路径改为 {@code codex app-server --listen stdio://} JSON-RPC 长连接后，
+ * 整条链路——initialize 握手、thread/start、turn/start、item/agentMessage/delta 聚合、
+ * turn/completed、per-run {@code CODEX_HOME} + sandbox 配置、ProcessBuilder 透传代理 env——
+ * 只有真实 spawn 一次才能证明端到端正确。本测试钉死：确定性 echo prompt 触发 codex 真实响应 →
+ * app-server 聚合 agentMessage delta 返回非空且含期望回声。</p>
  *
  * <p>环境 gating：真实 codex 调用属外部依赖（需 codex 已装 + 网络可达 OpenAI；若经代理，JVM 启动
  * 环境须 export {@code HTTPS_PROXY}——见 {@link CodexRunner} 类 javadoc）。{@link #assumeCodexAvailable()}
  * 在 {@code @BeforeAll} 探测可执行文件（尊重 {@code CODEX_EXECUTABLE_PATH}，否则查 PATH），
  * 不可用时整类优雅跳过，不破坏构建。</p>
  *
- * <p>cwd 处理：codex 默认检查 cwd 是否 git 仓库（对应 {@code --skip-git-repo-check} flag）。
- * 生产路径 cwd 为 workspace git 仓库，故本测试 {@code git init} 临时目录以镜像生产，而非在
- * {@code buildArgs} 注入 {@code --skip-git-repo-check}（后者超 PR1.1 范围）。</p>
+ * <p>本地验证不要求跑本测试：本机代理出口到 OpenAI 封锁区域（{@code 403 unsupported_country_region_territory}），
+ * codex token 刷新失败 → turn/completed status=failed。Java 侧 app-server 接线已由
+ * {@code CodexAppServerClientTest} + {@code CodexRunnerFakeExecutableTest} 离线钉死；本测试待
+ * 可访问 OpenAI 的环境自动启用并实证成功路径。</p>
+ *
+ * <p>cwd 处理：codex 默认检查 cwd 是否 git 仓库。生产路径 cwd 为 workspace git 仓库，故本测试
+ * {@code git init} 临时目录以镜像生产。</p>
  *
  * @author sei-online-code
  */
@@ -64,12 +68,13 @@ class CodexRunnerRealCodexTest {
 
     @Test
     void execute_returnsNonEmptyResult_whenCodexResponds() throws Exception {
-        // 确定性 echo prompt——codex 正常响应时必含 PONG，证明端到端 spawn + -o 落盘 + 文件读取成功。
+        // 确定性 echo prompt——codex 正常响应时 agentMessage delta 聚合必含 PONG，证明端到端
+        // app-server 握手 + thread/start + turn/start + delta 聚合 + turn/completed 成功。
         String prompt = "Reply with exactly the word PONG and nothing else.";
         CompletableFuture<String> future = runner.execute("real-codex-e2e", prompt, workdir.toString(), null, null);
 
         String result = future.get(180, TimeUnit.SECONDS);
-        assertNotNull(result, "codex 进程退出码非 0 或 -o 输出文件为空 → future 返回 null");
+        assertNotNull(result, "codex app-server turn 未完成或 status=failed → future 返回 null");
         assertFalse(result.isBlank(), "result 文本不得为空");
         assertTrue(result.toLowerCase().contains("pong"),
                 "codex 应回声 PONG，实际: " + result);
