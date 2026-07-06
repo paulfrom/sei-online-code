@@ -119,4 +119,40 @@ public class SpecService extends BaseEntityService<Spec> {
     public List<Spec> findByProject(String projectId) {
         return dao.findByProjectIdOrderByVersionAsc(projectId);
     }
+
+    /**
+     * 重新生成 Spec：从 SPEC_REVIEW 产出新版本 Spec（version+1，不可变历史）。
+     *
+     * <p>项目保持 SPEC_REVIEW 状态，不经过 SPEC_REFINING。</p>
+     *
+     * @param projectId  项目 id
+     * @param modifyHint 修改提示（当前不持久化，仅签名接收）
+     * @return 写操作结果（携带新建 Spec）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<Spec> regenerate(String projectId, String modifyHint) {
+        Project project = projectService.findOne(projectId);
+        if (Objects.isNull(project)) {
+            return OperateResultWithData.operationFailure("项目不存在: " + projectId);
+        }
+        if (project.getState() != LifecycleState.SPEC_REVIEW) {
+            return OperateResultWithData.operationFailure("仅 SPEC_REVIEW 状态可重新生成 Spec，当前为 " + project.getState());
+        }
+
+        Spec spec = new Spec();
+        spec.setProjectId(projectId);
+        spec.setVersion(nextVersion(projectId));
+        spec.setState(SpecState.SPEC_REVIEW);
+        // TODO(oma-deferred): 接入 Requirement Agent 后基于 prior 版本 + modifyHint 增量填充
+        //   pages/components/entities/apiContract；本轮仅做版本递增 + 状态编织（与 refineNextVersion 一致）
+        OperateResultWithData<Spec> saved = super.save(spec);
+        if (saved.notSuccessful()) {
+            return saved;
+        }
+
+        project.setCurrentSpecId(saved.getData().getId());
+        projectService.save(project);
+        // 项目保持 SPEC_REVIEW（自环合法），不经过 SPEC_REFINING
+        return saved;
+    }
 }

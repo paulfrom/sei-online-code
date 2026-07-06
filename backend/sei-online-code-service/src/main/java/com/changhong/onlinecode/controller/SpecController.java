@@ -4,6 +4,7 @@ import com.changhong.onlinecode.api.SpecApi;
 import com.changhong.onlinecode.dto.IterationDto;
 import com.changhong.onlinecode.dto.SpecDto;
 import com.changhong.onlinecode.dto.request.ConfirmSpecRequest;
+import com.changhong.onlinecode.dto.request.RegenerateSpecRequest;
 import com.changhong.onlinecode.entity.Iteration;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.service.IterationService;
@@ -81,5 +82,14 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
         dto.setCreatedDate(iteration.getCreatedDate());
         dto.setFinishedDate(iteration.getFinishedDate());
         return dto;
+    }
+
+    @Override
+    public ResultData<SpecDto> regenerate(String projectId, RegenerateSpecRequest request) {
+        OperateResultWithData<Spec> result = service.regenerate(projectId, request.getModifyHint());
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(convertToDto(result.getData()));
     }
 }
