@@ -24,6 +24,7 @@ import {
   readIteration,
   readRun,
   refineSpec,
+  regenerateSpec,
   resolveWorkspace,
   retryIteration,
   runsOf,
@@ -99,6 +100,15 @@ function paginate<T extends Record<string, any>>(rows: T[], search: Search) {
 export const handlers = [
   ...planHandlers,
   ...featureDesignHandlers,
+
+  // TODO(cleanup): sibling spec handlers below use stale */api/ prefix, broken in mock mode; migrate separately
+
+  // #R regenerate Spec — new version from SPEC_REVIEW
+  http.post('*/sei-online-code/spec/:projectId/regenerate', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { modifyHint?: string };
+    const res = regenerateSpec(String(params.projectId), body?.modifyHint);
+    return res.ok ? ok(res.spec, '已重新生成 Spec') : fail(res.message);
+  }),
 
   // #1 create project
   http.post('*/api/project/save', async ({ request }) => {

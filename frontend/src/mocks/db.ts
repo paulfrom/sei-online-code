@@ -766,6 +766,27 @@ export function specsOf(projectId: string): SpecDto[] {
     .sort((a, b) => a.version - b.version);
 }
 
+/** regenerate Spec from SPEC_REVIEW state */
+export function regenerateSpec(
+  projectId: string,
+  _modifyHint?: string,
+): { ok: true; spec: SpecDto } | { ok: false; message: string } {
+  const project = db.projects.get(projectId);
+  if (!project) return { ok: false, message: `project ${projectId} not found` };
+  if (project.state !== 'SPEC_REVIEW') {
+    return { ok: false, message: `仅 SPEC_REVIEW 状态可重新生成 Spec，当前为 ${project.state}` };
+  }
+  const priorVersion = Array.from(db.specs.values())
+    .filter((s) => s.projectId === projectId)
+    .reduce((m, s) => Math.max(m, s.version), 0);
+  const spec = buildSpec(project, priorVersion + 1);
+  db.specs.set(spec.id, spec);
+  project.currentSpecId = spec.id;
+  project.lastEditedDate = now();
+  // project 保持 SPEC_REVIEW（不经过 SPEC_REFINING）
+  return { ok: true, spec };
+}
+
 // --- Phase 5: Config Surface + Workspace resolve (contract §1–§3) ---
 
 /**

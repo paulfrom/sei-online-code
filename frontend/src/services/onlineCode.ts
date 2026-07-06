@@ -239,6 +239,18 @@ export async function confirmSpec(specId: string): Promise<ResultData<IterationD
   return request({ url: `${API}/spec/confirm`, method: 'POST', data: { specId } });
 }
 
+/** #R regenerate Spec — version+1, immutable history (mirrors Plan/FeatureDesign regenerate) */
+export async function regenerateSpec(
+  projectId: string,
+  modifyHint?: string,
+): Promise<ResultData<SpecDto>> {
+  return request({
+    url: `${API}/spec/${projectId}/regenerate`,
+    method: 'POST',
+    data: { modifyHint },
+  });
+}
+
 /** #7 deploy iteration */
 export async function deployIteration(iterationId: string): Promise<ResultData<IterationDto>> {
   return request({ url: `${API}/iteration/deploy`, method: 'POST', data: { iterationId } });

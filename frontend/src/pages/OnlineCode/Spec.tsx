@@ -7,39 +7,22 @@
  */
 import React, { useEffect, useState } from 'react';
 import { history, useSearchParams } from 'umi';
-import { createStyles } from '@ead/antd-style';
 import {
-  BannerTitle,
   Button,
   Card,
   Descriptions,
-  Empty,
+  Form,
+  Input,
   Popconfirm,
-  Spin,
   Table,
   Tag,
   message,
 } from '@ead/suid';
-import { CheckOutlined } from '@ead/suid-icons';
-import { confirmSpec, findOneSpec } from '@/services/onlineCode';
+import { CheckOutlined, ReloadOutlined } from '@ead/suid-icons';
+import { confirmSpec, findOneSpec, regenerateSpec } from '@/services/onlineCode';
 import type { SpecDto } from '@/services/onlineCode';
-
-const useStyles = createStyles(({ token, css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    padding: ${token.paddingMD}px;
-    display: flex;
-    flex-direction: column;
-    gap: ${token.marginMD}px;
-  `,
-  header: css`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  `,
-}));
+import { PageContainer, PageHeader, PageState } from './components/PageLayout';
+import { ExtModal } from '@ead/suid';
 
 const SPEC_STATE_COLOR: Record<SpecDto['state'], string> = {
   DRAFT: 'default',
@@ -48,12 +31,14 @@ const SPEC_STATE_COLOR: Record<SpecDto['state'], string> = {
 };
 
 const SpecReview: React.FC = () => {
-  const { styles } = useStyles();
   const [searchParams] = useSearchParams();
   const specId = searchParams.get('id') ?? '';
   const [spec, setSpec] = useState<SpecDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
+  const [regenerateModalOpen, setRegenerateModalOpen] = useState(false);
+  const [regenerateForm] = Form.useForm<{ modifyHint: string }>();
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -89,46 +74,75 @@ const SpecReview: React.FC = () => {
     }
   };
 
+  const handleRegenerate = async (values: { modifyHint: string }) => {
+    if (!spec) return;
+    setRegenerating(true);
+    try {
+      const res = await regenerateSpec(spec.projectId, values.modifyHint);
+      if (!res.success || !res.data) {
+        message.error(res.message ?? '重新生成失败');
+        return;
+      }
+      message.success('已重新生成 Spec');
+      setSpec(res.data);
+      history.replace(`/online-code/spec?id=${res.data.id}`);
+      setRegenerateModalOpen(false);
+      regenerateForm.resetFields();
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className={styles.page}>
-        <Spin spinning />
-      </div>
+      <PageContainer scroll>
+        <PageState loading />
+      </PageContainer>
     );
   }
 
   if (!spec) {
     return (
-      <div className={styles.page}>
-        <Empty description="Spec 不存在" />
-      </div>
+      <PageContainer scroll>
+        <PageState error="Spec 不存在" />
+      </PageContainer>
     );
   }
 
   const confirmed = spec.state === 'CONFIRMED';
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <BannerTitle title="Spec 评审" subTitle={`版本 v${spec.version}`} />
-        <div>
-          <Tag color={SPEC_STATE_COLOR[spec.state]}>{spec.state}</Tag>
-          <Popconfirm
-            title="确认该 Spec 并启动迭代？"
-            onConfirm={handleConfirm}
-            disabled={confirmed}
-          >
+    <PageContainer scroll>
+      <PageHeader
+        title="Spec 评审"
+        subTitle={`版本 v${spec.version}`}
+        extra={<Tag color={SPEC_STATE_COLOR[spec.state]}>{spec.state}</Tag>}
+        actions={
+          <>
             <Button
-              type="primary"
-              icon={<CheckOutlined />}
-              loading={confirming}
+              icon={<ReloadOutlined />}
+              onClick={() => setRegenerateModalOpen(true)}
               disabled={confirmed}
             >
-              {confirmed ? '已确认' : '确认 Spec'}
+              重新生成
             </Button>
-          </Popconfirm>
-        </div>
-      </div>
+            <Popconfirm
+              title="确认该 Spec 并启动迭代？"
+              onConfirm={handleConfirm}
+              disabled={confirmed}
+            >
+              <Button
+                type="primary"
+                icon={<CheckOutlined />}
+                loading={confirming}
+                disabled={confirmed}
+              >
+                {confirmed ? '已确认' : '确认 Spec'}
+              </Button>
+            </Popconfirm>
+          </>
+        }
+      />
 
       <Card title="页面 Pages">
         <Table
@@ -161,7 +175,9 @@ const SpecReview: React.FC = () => {
       </Card>
 
       <Card title="实体 Entities">
-        {spec.entities.map((entity) => (
+        {/* guard: backend serializes empty entities/fields as null (contract
+            mismatch with SpecDto); Tables tolerate null dataSource, .map does not */}
+        {(spec.entities ?? []).map((entity) => (
           <Descriptions
             key={entity.key}
             title={entity.key}
@@ -170,7 +186,7 @@ const SpecReview: React.FC = () => {
             column={1}
             style={{ marginBottom: 12 }}
           >
-            {entity.fields.map((field) => (
+            {(entity.fields ?? []).map((field) => (
               <Descriptions.Item key={field.name} label={`${field.name} (${field.type})`}>
                 {field.description}
               </Descriptions.Item>
@@ -194,7 +210,28 @@ const SpecReview: React.FC = () => {
           ]}
         />
       </Card>
-    </div>
+
+      <ExtModal
+        open={regenerateModalOpen}
+        title="重新生成 Spec"
+        confirmLoading={regenerating}
+        onCancel={() => {
+          setRegenerateModalOpen(false);
+          regenerateForm.resetFields();
+        }}
+        onOk={() => regenerateForm.submit()}
+        destroyOnHidden
+      >
+        <Form form={regenerateForm} onFinish={handleRegenerate} layout="vertical">
+          <Form.Item name="modifyHint" label="修改提示（可选）">
+            <Input.TextArea
+              rows={4}
+              placeholder="描述你希望如何修改 Spec"
+            />
+          </Form.Item>
+        </Form>
+      </ExtModal>
+    </PageContainer>
   );
 };
 
