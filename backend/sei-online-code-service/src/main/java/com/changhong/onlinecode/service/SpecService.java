@@ -39,9 +39,11 @@ public class SpecService extends BaseEntityService<Spec> {
     }
 
     /**
-     * 精炼 Spec：项目 DRAFTING → SPEC_REFINING → SPEC_REVIEW，产出一个 SPEC_REVIEW 态 Spec。
+     * 精炼 Spec：项目 DRAFTING/FAILED → SPEC_REFINING → SPEC_REVIEW，产出一个 SPEC_REVIEW 态 Spec。
      *
-     * <p>版本号按项目已有最大版本 + 1 递增。</p>
+     * <p>版本号按项目已有最大版本 + 1 递增。
+     *
+     * <p>FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING→SPEC_REVIEW。
      *
      * @param projectId 项目 id
      * @return 写操作结果（携带新建 Spec）
@@ -52,7 +54,16 @@ public class SpecService extends BaseEntityService<Spec> {
         if (Objects.isNull(project)) {
             return OperateResultWithData.operationFailure("项目不存在: " + projectId);
         }
-
+        LifecycleState entry = project.getState();
+        if (entry != LifecycleState.DRAFTING && entry != LifecycleState.FAILED) {
+            return OperateResultWithData.operationFailure(
+                    "仅 DRAFTING/FAILED 状态可精炼 Spec，当前为 " + entry);
+        }
+        // FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING→SPEC_REVIEW
+        if (entry == LifecycleState.FAILED) {
+            OperateResultWithData<Project> back = projectService.transitionState(projectId, LifecycleState.DRAFTING);
+            if (back.notSuccessful()) return OperateResultWithData.operationFailure(back.getMessage());
+        }
         // 生命周期推进：DRAFTING → SPEC_REFINING → SPEC_REVIEW
         projectService.transitionState(projectId, LifecycleState.SPEC_REFINING);
 
@@ -63,6 +74,8 @@ public class SpecService extends BaseEntityService<Spec> {
         // TODO(oma-deferred): 接入 Requirement Agent 后由其填充 pages/components/entities/apiContract
         OperateResultWithData<Spec> saved = super.save(spec);
         if (saved.notSuccessful()) {
+            // 业务失败：显式置 FAILED（SPEC_REFINING→FAILED，UNIVERSAL 允许），避免卡死 SPEC_REFINING
+            projectService.transitionState(projectId, LifecycleState.FAILED);
             return saved;
         }
 
@@ -71,7 +84,8 @@ public class SpecService extends BaseEntityService<Spec> {
         project = projectService.findOne(projectId);
         project.setCurrentSpecId(saved.getData().getId());
         projectService.save(project);
-
+        // TODO(oma-deferred): 异常路径下 @Transactional 整笔回滚到入口态（DRAFTING/FAILED），
+        //   不显式置 FAILED；接入 Agent 后若需异常显式 FAILED，用 REQUIRES_NEW 自注入 markFailed。
         return saved;
     }
 

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationContext;
 
 import java.util.List;
@@ -120,5 +121,80 @@ class SpecServiceTest {
         ArgumentCaptor<Project> projectCaptor = ArgumentCaptor.forClass(Project.class);
         verify(projectService).save(projectCaptor.capture());
         assertEquals("spec2", projectCaptor.getValue().getCurrentSpecId());
+    }
+
+    @Test
+    void refineSpec_rejectsWhenProjectNotExists() {
+        // 准备
+        String projectId = "proj1";
+        when(projectService.findOne(projectId)).thenReturn(null);
+
+        // 执行
+        OperateResultWithData<Spec> result = specService.refineSpec(projectId);
+
+        // 验证
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("项目不存在"));
+        verify(specDao, never()).save(any(Spec.class));
+    }
+
+    @Test
+    void refineSpec_rejectsFromNonDraftableState() {
+        // 准备
+        String projectId = "proj1";
+        Project project = new Project();
+        project.setState(LifecycleState.DISPATCHING);
+        when(projectService.findOne(projectId)).thenReturn(project);
+
+        // 执行
+        OperateResultWithData<Spec> result = specService.refineSpec(projectId);
+
+        // 验证
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("仅 DRAFTING/FAILED 状态可精炼 Spec"));
+        verify(specDao, never()).save(any(Spec.class));
+    }
+
+    @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，FAILED 入口转换序列待集成测试")
+    @Test
+    void refineSpec_retriesFromFailed() {
+        // 准备
+        String projectId = "proj1";
+        Project project = new Project();
+        project.setId(projectId);
+        project.setState(LifecycleState.FAILED);
+
+        Spec existingSpec = new Spec();
+        existingSpec.setProjectId(projectId);
+        existingSpec.setVersion(1);
+        when(specDao.findByProjectIdOrderByVersionDesc(projectId)).thenReturn(List.of(existingSpec));
+
+        when(projectService.findOne(projectId)).thenReturn(project);
+        when(projectService.transitionState(eq(projectId), any(LifecycleState.class)))
+                .thenAnswer(inv -> {
+                    LifecycleState target = inv.getArgument(1);
+                    project.setState(target);
+                    return OperateResultWithData.operationSuccessWithData(project);
+                });
+        when(specDao.save(any(Spec.class))).thenAnswer(inv -> {
+            Spec s = inv.getArgument(0);
+            s.setId("spec2");
+            return s;
+        });
+
+        // 执行
+        OperateResultWithData<Spec> result = specService.refineSpec(projectId);
+
+        // 验证
+        assertTrue(result.successful());
+        assertNotNull(result.getData());
+        assertEquals(2, result.getData().getVersion());
+        assertEquals(SpecState.SPEC_REVIEW, result.getData().getState());
+
+        InOrder inOrder = inOrder(projectService);
+        inOrder.verify(projectService).transitionState(projectId, LifecycleState.DRAFTING);
+        inOrder.verify(projectService).transitionState(projectId, LifecycleState.SPEC_REFINING);
+        inOrder.verify(projectService).transitionState(projectId, LifecycleState.SPEC_REVIEW);
+        inOrder.verify(projectService).save(any(Project.class));
     }
 }

@@ -16,7 +16,13 @@ import java.util.Set;
  * </pre>
  *
  * <p>任一非终态可进入 FAILED / CANCELLED；PREVIEW 可回退到 SPEC_REFINING（用户优化）
- * 或前进到 ACCEPTED（验收）。</p>
+ * 或前进到 ACCEPTED（验收）。
+ *
+ * <p>FAILED 状态两条出边：
+ * <ul>
+ *   <li>FAILED → DISPATCHING：迭代重试（#29）</li>
+ *   <li>FAILED → DRAFTING：refine 重试（首次生成失败回流）</li>
+ * </ul>
  *
  * @author sei-online-code
  */
@@ -40,9 +46,9 @@ public final class LifecycleTransitions {
         // PREVIEW 可回退优化或前进验收
         ALLOWED.put(LifecycleState.PREVIEW,
                 EnumSet.of(LifecycleState.SPEC_REFINING, LifecycleState.ACCEPTED));
-        // 终态：ACCEPTED/CANCELLED 无出边；FAILED 可 retry 回到 DISPATCHING（契约 §3）
+        // 终态：ACCEPTED/CANCELLED 无出边；FAILED 可 retry 回到 DISPATCHING（迭代重试 #29）或 DRAFTING（refine 重试）
         ALLOWED.put(LifecycleState.ACCEPTED, EnumSet.noneOf(LifecycleState.class));
-        ALLOWED.put(LifecycleState.FAILED, EnumSet.of(LifecycleState.DISPATCHING));
+        ALLOWED.put(LifecycleState.FAILED, EnumSet.of(LifecycleState.DISPATCHING, LifecycleState.DRAFTING));
         ALLOWED.put(LifecycleState.CANCELLED, EnumSet.noneOf(LifecycleState.class));
     }
 
