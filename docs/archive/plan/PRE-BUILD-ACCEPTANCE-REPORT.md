@@ -1,7 +1,7 @@
 # Pre-Build 功能 PM 产品验收报告
 
 > 验收日期：2026-07-03 ｜ 验收人：主循环（PM 验收）｜ 分支：`feat/pre-build-plan-feature-design`
-> 验收依据：契约 `docs/contracts/API-CONTRACT-PRE-BUILD.md` + 设计稿 `docs/plan/PRE-BUILD-INTERACTION-DESIGN.md` §9 + 实施计划 Re-baseline + D1–D15 决策
+> 验收依据：契约 `docs/contracts/API-CONTRACT-PRE-BUILD.md` + 设计稿 `docs/archive/plan/PRE-BUILD-INTERACTION-DESIGN.md` §9 + 实施计划 Re-baseline + D1–D15 决策
 > 验收方式：实证 grep + build 复核 + MSW 覆盖核验（非 sub-agent，因 qa-reviewer sub-agent 启动停滞，主循环亲自核验）
 
 ## 1. 验收结论

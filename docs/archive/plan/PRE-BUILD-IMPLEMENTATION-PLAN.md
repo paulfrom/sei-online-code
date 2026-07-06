@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **Dispatch basis（项目 CLAUDE.md 强制）**：前后端 MUST 由**独立 sub-agent 在独立上下文**中开发，永不混在一个上下文里。先冻结契约（Task 1），再 Track B（后端，`eadp-backend` skill）与 Track F（前端，`suid` skill）分别开发。
-> 设计稿：`docs/plan/PRE-BUILD-INTERACTION-DESIGN.md`。
+> 设计稿：`docs/archive/plan/PRE-BUILD-INTERACTION-DESIGN.md`。
 
 ---
 

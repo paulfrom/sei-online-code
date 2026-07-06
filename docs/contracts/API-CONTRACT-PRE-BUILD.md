@@ -2,7 +2,7 @@
 
 > **状态**：已冻结。Track B（后端）与 Track F（前端）唯一依据。
 >
-> **设计决策溯源**：本契约严格遵循 `PRE-BUILD-IMPLEMENTATION-PLAN.md` 中 **D1–D15** 评审决策；与设计稿 `PRE-BUILD-INTERACTION-DESIGN.md` 冲突时，以 D1–D15 为准。
+> **设计决策溯源**：本契约严格遵循 `docs/archive/plan/PRE-BUILD-IMPLEMENTATION-PLAN.md` 中 **D1–D15** 评审决策；与设计稿 `docs/archive/plan/PRE-BUILD-INTERACTION-DESIGN.md` 冲突时，以 D1–D15 为准。
 
 ---
 
