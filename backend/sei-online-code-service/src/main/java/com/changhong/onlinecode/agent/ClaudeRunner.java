@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -46,8 +48,16 @@ public class ClaudeRunner implements CliRunner {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ClaudeRunner() {
+        this(defaultExecutable());
+    }
+
+    ClaudeRunner(String executable) {
+        this.executable = executable;
+    }
+
+    private static String defaultExecutable() {
         String env = System.getenv("CLAUDE_EXECUTABLE_PATH");
-        this.executable = (env == null || env.isBlank()) ? "claude" : env;
+        return (env == null || env.isBlank()) ? "claude" : env;
     }
 
     /**
@@ -62,7 +72,7 @@ public class ClaudeRunner implements CliRunner {
      */
     @Override
     public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model, String mcpConfig) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model));
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model, mcpConfig));
     }
 
     /**
@@ -80,7 +90,7 @@ public class ClaudeRunner implements CliRunner {
     @Override
     public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
                                              String prompt, String cwd, String model, String mcpConfig) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model));
+        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model, mcpConfig));
     }
 
     /**
@@ -92,17 +102,20 @@ public class ClaudeRunner implements CliRunner {
      * @param prompt      提示词
      * @param cwd         工作目录（可为 null）
      * @param model       模型名（可为 null/blank）
+     * @param mcpConfig   MCP server 配置 JSON（可为 null/blank）
      * @return 聚合 stdout
      */
     private String runBlocking(String iterationId, String taskId, String runId, String prompt,
-                                String cwd, String model) {
-        List<String> args = buildArgs(prompt, model);
-        ProcessBuilder pb = new ProcessBuilder(args);
-        if (cwd != null && !cwd.isBlank()) {
-            pb.directory(new java.io.File(cwd));
-        }
+                                String cwd, String model, String mcpConfig) {
+        Path mcpConfigFile = null;
         StringBuilder output = new StringBuilder();
         try {
+            mcpConfigFile = writeMcpConfigFile(mcpConfig);
+            List<String> args = buildArgs(prompt, model, mcpConfigFile);
+            ProcessBuilder pb = new ProcessBuilder(args);
+            if (cwd != null && !cwd.isBlank()) {
+                pb.directory(new java.io.File(cwd));
+            }
             emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
 
@@ -130,6 +143,15 @@ public class ClaudeRunner implements CliRunner {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+        } finally {
+            if (mcpConfigFile != null) {
+                try {
+                    Files.deleteIfExists(mcpConfigFile);
+                } catch (IOException e) {
+                    LOGGER.debug("claude mcp config temp file cleanup failed: iterationId={}, path={}",
+                            iterationId, mcpConfigFile, e);
+                }
+            }
         }
         return null;
     }
@@ -171,9 +193,10 @@ public class ClaudeRunner implements CliRunner {
      *
      * @param prompt 提示词
      * @param model  模型名（null/blank → 不注入，用 claude 默认模型）
+     * @param mcpConfigFile MCP 配置临时文件（null → 不注入）
      * @return 命令行参数
      */
-    private List<String> buildArgs(String prompt, String model) {
+    private List<String> buildArgs(String prompt, String model, Path mcpConfigFile) {
         List<String> args = new ArrayList<>();
         args.add(executable);
         args.add("-p");
@@ -184,8 +207,28 @@ public class ClaudeRunner implements CliRunner {
             args.add("--model");
             args.add(model);
         }
+        if (mcpConfigFile != null) {
+            args.add("--mcp-config");
+            args.add(mcpConfigFile.toString());
+            args.add("--strict-mcp-config");
+        }
         // TODO(oma-deferred): 接入 stream-json 协议与控制帧放行（当前用 result json 一次性取回）
         return args;
+    }
+
+    private Path writeMcpConfigFile(String mcpConfig) throws IOException {
+        if (mcpConfig == null || mcpConfig.isBlank()) {
+            return null;
+        }
+        try {
+            objectMapper.readTree(mcpConfig);
+        } catch (IOException e) {
+            LOGGER.warn("claude mcp config ignored because it is not valid JSON", e);
+            return null;
+        }
+        Path file = Files.createTempFile("claude-mcp-", ".json");
+        Files.writeString(file, mcpConfig, StandardCharsets.UTF_8);
+        return file;
     }
 
     private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr) {
