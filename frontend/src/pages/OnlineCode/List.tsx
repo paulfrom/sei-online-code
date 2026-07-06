@@ -7,7 +7,6 @@
  */
 import React, { useRef, useState } from 'react';
 import { history } from 'umi';
-import { createStyles } from '@ead/antd-style';
 import {
   ActionButton,
   Button,
@@ -26,15 +25,7 @@ import {
 } from '@/services/onlineCode';
 import type { LifecycleState, ProjectDto } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
-
-const useStyles = createStyles(({ css }) => ({
-  page: css`
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  `,
-}));
+import { PageContainer } from './components/PageLayout';
 
 /** states routed to the dispatch (concurrency) view */
 const DISPATCH_STATES: LifecycleState[] = ['DISPATCHING', 'DEVELOPING', 'MERGING'];
@@ -43,7 +34,6 @@ const DISPATCH_STATES: LifecycleState[] = ['DISPATCHING', 'DEVELOPING', 'MERGING
 const PREVIEW_STATES: LifecycleState[] = ['DEPLOYING', 'PREVIEW', 'ACCEPTED'];
 
 const ProjectList: React.FC = () => {
-  const { styles } = useStyles();
   const tableRef = useRef<ExtTableRef>(null);
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
@@ -51,7 +41,7 @@ const ProjectList: React.FC = () => {
 
   const goSpec = async (record: ProjectDto) => {
     // DRAFTING: run the Requirement Agent first, then open the Spec review.
-    if (record.state === 'DRAFTING') {
+    if (record.state === 'DRAFTING' || (record.state === 'FAILED' && !record.currentIterationId)) {
       const res = await refineSpec(record.id);
       if (!res.success || !res.data) {
         message.error(res.message ?? '需求解析失败');
@@ -79,6 +69,7 @@ const ProjectList: React.FC = () => {
 
   const rowActionLabel = (record: ProjectDto): string => {
     if (record.state === 'DRAFTING') return '解析需求';
+    if (record.state === 'FAILED' && !record.currentIterationId) return '重新解析需求';
     if (record.state === 'SPEC_REVIEW') return '评审 Spec';
     if (DISPATCH_STATES.includes(record.state)) return '查看派发';
     if (PREVIEW_STATES.includes(record.state)) return '查看预览';
@@ -91,7 +82,14 @@ const ProjectList: React.FC = () => {
       dataIndex: 'id',
       width: 110,
       render: (_id: string, record: ProjectDto) => (
-        <ActionButton title={rowActionLabel(record)} onClick={() => handleRowAction(record)} />
+        // actionType="title" so the dynamic label renders as visible button text;
+        // ActionButton defaults to actionType="icon" which suppresses `title` to a
+        // tooltip — without an icon the button would render empty (invisible).
+        <ActionButton
+          actionType="title"
+          title={rowActionLabel(record)}
+          onClick={() => handleRowAction(record)}
+        />
       ),
     },
     { title: '项目名称', dataIndex: 'name', width: 200 },
@@ -123,7 +121,7 @@ const ProjectList: React.FC = () => {
   };
 
   return (
-    <div className={styles.page}>
+    <PageContainer>
       <ExtTable
         ref={tableRef}
         rowKey="id"
@@ -175,7 +173,7 @@ const ProjectList: React.FC = () => {
           </Form.Item>
         </Form>
       </ExtModal>
-    </div>
+    </PageContainer>
   );
 };
 

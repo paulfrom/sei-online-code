@@ -378,9 +378,14 @@ export function createProject(name: string, design: string): ProjectDto {
 }
 
 /** refine design → Spec, project → SPEC_REVIEW (contract ep #4) */
-export function refineSpec(projectId: string): SpecDto | null {
+export function refineSpec(
+  projectId: string,
+): { ok: true; spec: SpecDto } | { ok: false; message: string } {
   const project = db.projects.get(projectId);
-  if (!project) return null;
+  if (!project) return { ok: false, message: `project ${projectId} not found` };
+  if (project.state !== 'DRAFTING' && project.state !== 'FAILED') {
+    return { ok: false, message: `仅 DRAFTING/FAILED 状态可精炼 Spec，当前为 ${project.state}` };
+  }
   const version =
     Array.from(db.specs.values()).filter((s) => s.projectId === projectId).length + 1;
   const spec = buildSpec(project, version);
@@ -388,7 +393,7 @@ export function refineSpec(projectId: string): SpecDto | null {
   project.currentSpecId = spec.id;
   project.state = 'SPEC_REVIEW';
   project.lastEditedDate = now();
-  return spec;
+  return { ok: true, spec };
 }
 
 /** confirm Spec → start iteration, project → DISPATCHING (contract ep #6) */

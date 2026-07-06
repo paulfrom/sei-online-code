@@ -137,8 +137,8 @@ export const handlers = [
   // #4 refine design → Spec
   http.post('*/api/project/refineSpec', async ({ request }) => {
     const body = (await request.json()) as { projectId?: string };
-    const spec = refineSpec(body?.projectId ?? '');
-    return spec ? ok(spec, '需求已解析为 Spec') : fail('project not found');
+    const res = refineSpec(body?.projectId ?? '');
+    return res.ok ? ok(res.spec, '需求已解析为 Spec') : fail(res.message);
   }),
 
   // #5 load a Spec
