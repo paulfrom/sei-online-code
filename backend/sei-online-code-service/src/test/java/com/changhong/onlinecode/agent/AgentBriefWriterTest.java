@@ -112,6 +112,29 @@ class AgentBriefWriterTest {
     }
 
     @Test
+    void writeBrief_richOverloadIncludesRuntimeContext() throws IOException {
+        AgentBriefWriter.writeBrief(workDir.toString(), "codex", "builder",
+                "Build safely.", "gpt-5-codex", true, null);
+
+        String content = Files.readString(workDir.resolve("AGENTS.md"), StandardCharsets.UTF_8);
+        assertTrue(content.contains("## Runtime Context"));
+        assertTrue(content.contains("- CLI tool: codex"));
+        assertTrue(content.contains("- Model: gpt-5-codex"));
+        assertTrue(content.contains("- MCP config: configured"));
+    }
+
+    @Test
+    void writeBrief_richOverloadOmitsModelWhenBlank() throws IOException {
+        AgentBriefWriter.writeBrief(workDir.toString(), "claude", "planner",
+                "Plan.", "  ", false, null);
+
+        String content = Files.readString(workDir.resolve("CLAUDE.md"), StandardCharsets.UTF_8);
+        assertTrue(content.contains("- CLI tool: claude"));
+        assertFalse(content.contains("- Model:"), "blank model 不应写 Model 行");
+        assertTrue(content.contains("- MCP config: not configured"));
+    }
+
+    @Test
     void runtimeConfigPath_codexClaudeDefault() {
         assertEquals(workDir.resolve("AGENTS.md"), AgentBriefWriter.runtimeConfigPath(workDir, "codex"));
         assertEquals(workDir.resolve("CLAUDE.md"), AgentBriefWriter.runtimeConfigPath(workDir, "claude"));

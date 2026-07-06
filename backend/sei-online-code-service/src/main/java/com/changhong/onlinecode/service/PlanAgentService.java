@@ -94,7 +94,10 @@ public class PlanAgentService {
         CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(), LOGGER);
+                    agent.getName(), agent.getInstructions(),
+                    agent.getModel(),
+                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
+                    LOGGER);
         }
         CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
                 agent == null ? null : agent.getModel(),
@@ -163,7 +166,10 @@ public class PlanAgentService {
         CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(), LOGGER);
+                    agent.getName(), agent.getInstructions(),
+                    agent.getModel(),
+                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
+                    LOGGER);
         }
         CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
                 agent == null ? null : agent.getModel(),

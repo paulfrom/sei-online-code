@@ -124,7 +124,10 @@ public class FeatureDesignBuildService {
         String prompt = buildPrompt(fd);
         CliRunner runner = cliRunnerRegistry.resolve(devAgent.getCliTool());
         AgentBriefWriter.writeBrief(workspace.getPath(), devAgent.getCliTool(),
-                devAgent.getName(), devAgent.getInstructions(), null);
+                devAgent.getName(), devAgent.getInstructions(),
+                devAgent.getModel(),
+                devAgent.getMcpConfig() != null && !devAgent.getMcpConfig().isBlank(),
+                null);
         CompletableFuture<String> executeFuture = runner.execute(
                 savedTask.getIterationId(),
                 savedTask.getId(),

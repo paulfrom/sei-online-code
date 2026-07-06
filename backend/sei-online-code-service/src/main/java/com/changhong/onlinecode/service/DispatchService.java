@@ -245,7 +245,10 @@ public class DispatchService {
             // 并行 spawn：每任务独立 future，互不阻塞（ADR-0001 并行 worktree 模型）
             if (agent != null) {
                 AgentBriefWriter.writeBrief(worktreePath, agent.getCliTool(),
-                        agent.getName(), agent.getInstructions(), LOGGER);
+                        agent.getName(), agent.getInstructions(),
+                        agent.getModel(),
+                        agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
+                        LOGGER);
             }
             CompletableFuture<String> future =
                     runner.execute(iteration.getId(), task.getId(), runId, prompt, worktreePath,

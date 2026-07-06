@@ -43,7 +43,17 @@ public final class AgentBriefWriter {
      * @param logger       日志器（可为 null）
      */
     public static void writeBrief(String workDir, String cliTool, String agentName,
+                                  String instructions, String model, boolean hasMcpConfig, Logger logger) {
+        writeBriefInternal(workDir, cliTool, agentName, instructions, model, hasMcpConfig, logger);
+    }
+
+    public static void writeBrief(String workDir, String cliTool, String agentName,
                                   String instructions, Logger logger) {
+        writeBriefInternal(workDir, cliTool, agentName, instructions, null, false, logger);
+    }
+
+    private static void writeBriefInternal(String workDir, String cliTool, String agentName,
+                                           String instructions, String model, boolean hasMcpConfig, Logger logger) {
         if (workDir == null || workDir.isBlank()) {
             return;
         }
@@ -51,7 +61,7 @@ public final class AgentBriefWriter {
         if (target == null) {
             return; // 未知 cliTool → prompt-only 模式
         }
-        String brief = buildBrief(agentName, instructions);
+        String brief = buildBrief(agentName, instructions, cliTool, model, hasMcpConfig);
         if (brief == null) {
             return; // name + instructions 皆空 → 不写
         }
@@ -84,11 +94,21 @@ public final class AgentBriefWriter {
      * 构建 agent identity brief。name + instructions 皆空 → 返回 null（不写文件）。
      */
     static String buildBrief(String agentName, String instructions) {
+        return buildBrief(agentName, instructions, null, null, false);
+    }
+
+    /**
+     * 构建 agent identity brief + runtime context。name + instructions 皆空 → 返回 null（不写文件）。
+     * runtime context 暴露 cliTool/model/mcpConfig，让 agent 在 workdir 自感知运行环境。
+     */
+    static String buildBrief(String agentName, String instructions, String cliTool,
+                             String model, boolean hasMcpConfig) {
         String name = agentName == null ? "" : agentName.trim();
         String instr = instructions == null ? "" : instructions.trim();
         if (name.isEmpty() && instr.isEmpty()) {
             return null;
         }
+        String tool = (cliTool == null || cliTool.isBlank()) ? CliRunnerRegistry.DEFAULT_TOOL : cliTool;
         StringBuilder sb = new StringBuilder();
         sb.append("# SEI Agent Runtime\n\n");
         sb.append("## Agent Identity\n\n");
@@ -98,6 +118,12 @@ public final class AgentBriefWriter {
         if (!instr.isEmpty()) {
             sb.append(instr).append('\n');
         }
+        sb.append("## Runtime Context\n\n");
+        sb.append("- CLI tool: ").append(tool).append('\n');
+        if (model != null && !model.isBlank()) {
+            sb.append("- Model: ").append(model.trim()).append('\n');
+        }
+        sb.append("- MCP config: ").append(hasMcpConfig ? "configured" : "not configured").append('\n');
         return sb.toString();
     }
 
