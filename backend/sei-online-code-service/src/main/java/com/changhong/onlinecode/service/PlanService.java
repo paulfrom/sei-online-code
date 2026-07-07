@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.SpecDao;
 import com.changhong.onlinecode.dto.PlanDto;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.dto.plan.PlanContent;
@@ -32,17 +33,20 @@ public class PlanService extends BaseEntityService<Plan> {
     private final SpecDao specDao;
     private final SpecAgentService specAgentService;
     private final PlanAgentService planAgentService;
+    private final FailureInfoSupport failureInfoSupport;
 
     public PlanService(PlanDao planDao,
                        FeatureDesignDao featureDesignDao,
                        SpecDao specDao,
                        SpecAgentService specAgentService,
-                       PlanAgentService planAgentService) {
+                       PlanAgentService planAgentService,
+                       FailureInfoSupport failureInfoSupport) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.specDao = specDao;
         this.specAgentService = specAgentService;
         this.planAgentService = planAgentService;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     @Override
@@ -104,6 +108,7 @@ public class PlanService extends BaseEntityService<Plan> {
         newPlan.setContent(content);
         newPlan.setModifyHint(null);
         newPlan.setIsLatest(true);
+        failureInfoSupport.clearPlanFailure(newPlan);
 
         // 级联标记功能设计为 STALE
         featureDesignDao.cascadeStale(projectId);
@@ -140,6 +145,7 @@ public class PlanService extends BaseEntityService<Plan> {
         newPlan.setContent(null);
         newPlan.setModifyHint(modifyHint);
         newPlan.setIsLatest(true);
+        newPlan.setLastTriggerSource(TriggerSource.USER_ACTION);
 
         OperateResultWithData<Plan> saved = super.save(newPlan);
         if (!saved.successful()) {
@@ -193,7 +199,7 @@ public class PlanService extends BaseEntityService<Plan> {
         return OperateResultWithData.operationSuccessWithData(toDto(saved.getData()));
     }
 
-    private List<PlanModule> modulesOrFallback(PlanContent content) {
+    List<PlanModule> modulesOrFallback(PlanContent content) {
         if (content == null) {
             return List.of();
         }
@@ -254,6 +260,15 @@ public class PlanService extends BaseEntityService<Plan> {
         dto.setIsLatest(plan.getIsLatest());
         dto.setCreatedDate(plan.getCreatedDate());
         dto.setLastEditedDate(plan.getLastEditedDate());
+        dto.setFailureCode(plan.getFailureCode());
+        dto.setFailureStage(plan.getFailureStage());
+        dto.setFailureSummary(plan.getFailureSummary());
+        dto.setFailureDetail(plan.getFailureDetail());
+        dto.setLastFailedAt(plan.getLastFailedAt());
+        dto.setLastRetryAt(plan.getLastRetryAt());
+        dto.setRetryCount(plan.getRetryCount());
+        dto.setNextRetryAt(plan.getNextRetryAt());
+        dto.setLastTriggerSource(plan.getLastTriggerSource());
         return dto;
     }
 }

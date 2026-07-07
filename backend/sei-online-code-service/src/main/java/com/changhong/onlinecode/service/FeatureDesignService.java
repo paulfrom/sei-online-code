@@ -26,10 +26,14 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
 
     private final FeatureDesignDao featureDesignDao;
     private final PlanAgentService planAgentService;
+    private final FailureInfoSupport failureInfoSupport;
 
-    public FeatureDesignService(FeatureDesignDao featureDesignDao, PlanAgentService planAgentService) {
+    public FeatureDesignService(FeatureDesignDao featureDesignDao,
+                                PlanAgentService planAgentService,
+                                FailureInfoSupport failureInfoSupport) {
         this.featureDesignDao = featureDesignDao;
         this.planAgentService = planAgentService;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     @Override
@@ -89,6 +93,7 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
         newDesign.setContent(content);
         newDesign.setModifyHint(null);
         newDesign.setIsLatest(true);
+        failureInfoSupport.clearFeatureDesignFailure(newDesign);
         // 若旧 build_status 为 BUILT/BUILD_FAILED，新 build_status 为 STALE；否则继承旧值
         if (latest.getBuildStatus() == FeatureDesignBuildStatus.BUILT
                 || latest.getBuildStatus() == FeatureDesignBuildStatus.BUILD_FAILED) {
@@ -134,6 +139,7 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
         newDesign.setContent(null);
         newDesign.setModifyHint(modifyHint);
         newDesign.setIsLatest(true);
+        newDesign.setLastTriggerSource(com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION);
         // 若旧 build_status 为 BUILT/BUILD_FAILED，新 build_status 为 STALE；否则继承旧值
         if (latest.getBuildStatus() == FeatureDesignBuildStatus.BUILT
                 || latest.getBuildStatus() == FeatureDesignBuildStatus.BUILD_FAILED) {
@@ -245,6 +251,15 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
         dto.setIsLatest(design.getIsLatest());
         dto.setCreatedDate(design.getCreatedDate());
         dto.setLastEditedDate(design.getLastEditedDate());
+        dto.setFailureCode(design.getFailureCode());
+        dto.setFailureStage(design.getFailureStage());
+        dto.setFailureSummary(design.getFailureSummary());
+        dto.setFailureDetail(design.getFailureDetail());
+        dto.setLastFailedAt(design.getLastFailedAt());
+        dto.setLastRetryAt(design.getLastRetryAt());
+        dto.setRetryCount(design.getRetryCount());
+        dto.setNextRetryAt(design.getNextRetryAt());
+        dto.setLastTriggerSource(design.getLastTriggerSource());
         return dto;
     }
 }

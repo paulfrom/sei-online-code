@@ -7,7 +7,10 @@ import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.SpecDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.spec.SpecApiContract;
 import com.changhong.onlinecode.dto.spec.SpecComponent;
 import com.changhong.onlinecode.dto.spec.SpecContent;
@@ -56,11 +59,13 @@ public class SpecAgentService {
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final FailureInfoSupport failureInfoSupport;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public SpecAgentService(SpecDao specDao, AgentService agentService, SkillService skillService,
                             ProjectService projectService, CliRunnerRegistry cliRunnerRegistry,
-                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry) {
+                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry,
+                            FailureInfoSupport failureInfoSupport) {
         this.specDao = specDao;
         this.agentService = agentService;
         this.skillService = skillService;
@@ -68,6 +73,7 @@ public class SpecAgentService {
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -78,11 +84,16 @@ public class SpecAgentService {
      * @param specId     待填充的 GENERATING Spec id
      */
     public void spawnRequirement(String projectId, String modifyHint, String specId) {
+        spawnRequirement(projectId, modifyHint, specId, TriggerSource.USER_ACTION);
+    }
+
+    public void spawnRequirement(String projectId, String modifyHint, String specId, TriggerSource triggerSource) {
         Spec spec = specDao.findById(specId).orElse(null);
         if (spec == null) {
             LOGGER.warn("spawnRequirement: no Spec specId={} for projectId={}, skip", specId, projectId);
             return;
         }
+        spec.setLastTriggerSource(triggerSource);
         Agent agent = agentService.findByName("requirement-agent");
         Project project = projectService.findOne(projectId);
         String prompt = buildSpecPrompt(project, spec, modifyHint);
@@ -113,6 +124,7 @@ public class SpecAgentService {
                     spec.setEntities(content.getEntities());
                     spec.setApiContract(content.getApiContract());
                     spec.setState(SpecState.SPEC_REVIEW);
+                    failureInfoSupport.clearSpecFailure(spec);
                     specDao.save(spec);
                     // refineSpec 路径项目停在 SPEC_REFINING，此处推进到 SPEC_REVIEW；
                     // regenerate 路径项目已在 SPEC_REVIEW，自环合法（见 SpecService 注释）。
@@ -121,6 +133,13 @@ public class SpecAgentService {
                 .exceptionally(e -> {
                     LOGGER.error("spawnRequirement failed projectId={} specId={}", projectId, specId, e);
                     spec.setState(SpecState.FAILED);
+                    failureInfoSupport.markSpecFailure(spec,
+                            FailureCode.AGENT_JSON_PARSE_FAILED,
+                            FailureStage.SPEC,
+                            "详细设计生成失败",
+                            rootMessage(e),
+                            triggerSource,
+                            new java.util.Date());
                     specDao.save(spec);
                     projectService.transitionState(projectId, LifecycleState.FAILED);
                     return null;
@@ -267,6 +286,14 @@ public class SpecAgentService {
             repaired.append(closers.pop());
         }
         return repaired.toString();
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage();
     }
 
     private Path materializeSkills(Agent agent) {

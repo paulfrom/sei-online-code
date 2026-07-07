@@ -50,6 +50,7 @@ class PlanServiceTest {
     private SpecDao specDao;
     private SpecAgentService specAgentService;
     private PlanAgentService planAgentService;
+    private FailureInfoSupport failureInfoSupport;
     private PlanService planService;
 
     @BeforeEach
@@ -59,7 +60,9 @@ class PlanServiceTest {
         specDao = mock(SpecDao.class);
         specAgentService = mock(SpecAgentService.class);
         planAgentService = mock(PlanAgentService.class);
-        planService = new PlanService(planDao, featureDesignDao, specDao, specAgentService, planAgentService);
+        failureInfoSupport = mock(FailureInfoSupport.class);
+        planService = new PlanService(planDao, featureDesignDao, specDao, specAgentService, planAgentService,
+                failureInfoSupport);
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dao;
 
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
+import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import org.springframework.data.jpa.repository.Modifying;
@@ -66,7 +67,7 @@ public interface FeatureDesignDao extends BaseEntityDao<FeatureDesign> {
      * @return affected rows（0 或 1）
      */
     @Modifying(clearAutomatically = true)
-    @Query("UPDATE FeatureDesign f SET f.buildStatus = :building WHERE f.id = :id AND f.buildStatus <> :building")
+    @Query("UPDATE FeatureDesign f SET f.buildStatus = :building, f.lastEditedDate = CURRENT_TIMESTAMP WHERE f.id = :id AND f.buildStatus <> :building")
     int tryAcquireBuildLock(@Param("id") String id, @Param("building") FeatureDesignBuildStatus building);
 
     /**
@@ -91,4 +92,8 @@ public interface FeatureDesignDao extends BaseEntityDao<FeatureDesign> {
     @Transactional
     @Query(nativeQuery = true, value = "UPDATE oc_feature_design SET status = 'STALE', build_status = CASE WHEN build_status IN ('BUILT', 'BUILD_FAILED') THEN 'STALE' ELSE build_status END, last_edited_date = NOW() WHERE project_id = :projectId AND is_latest = TRUE")
     void cascadeStale(@Param("projectId") String projectId);
+
+    List<FeatureDesign> findByStatusAndIsLatestTrue(FeatureDesignStatus status);
+
+    List<FeatureDesign> findByBuildStatusAndIsLatestTrue(FeatureDesignBuildStatus buildStatus);
 }

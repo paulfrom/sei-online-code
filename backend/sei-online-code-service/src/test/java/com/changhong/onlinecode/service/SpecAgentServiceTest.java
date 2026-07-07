@@ -36,6 +36,7 @@ class SpecAgentServiceTest {
     private CliRunner runner;
     private SkillMaterializer skillMaterializer;
     private BuiltInSkillRegistry builtInSkillRegistry;
+    private FailureInfoSupport failureInfoSupport;
     private SpecAgentService service;
 
     @BeforeEach
@@ -49,8 +50,9 @@ class SpecAgentServiceTest {
         when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
+        failureInfoSupport = mock(FailureInfoSupport.class);
         service = new SpecAgentService(specDao, agentService, skillService, projectService,
-                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry);
+                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport);
     }
 
     @Test

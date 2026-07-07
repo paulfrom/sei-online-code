@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.dao;
 
+import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import org.springframework.data.jpa.repository.Modifying;
@@ -40,6 +41,8 @@ public interface PlanDao extends BaseEntityDao<Plan> {
      * @return 全部版本（含非 latest），版本倒序
      */
     List<Plan> findByProjectIdOrderByVersionDesc(String projectId);
+
+    List<Plan> findByStatusAndIsLatestTrue(PlanStatus status);
 
     /**
      * 将项目下所有 is_latest=true 的 Plan 置为 false（标记非最新）。

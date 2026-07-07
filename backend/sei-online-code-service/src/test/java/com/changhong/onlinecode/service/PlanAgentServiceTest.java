@@ -46,6 +46,7 @@ class PlanAgentServiceTest {
     private CliRunner runner;
     private SkillMaterializer skillMaterializer;
     private BuiltInSkillRegistry builtInSkillRegistry;
+    private FailureInfoSupport failureInfoSupport;
     private PlanAgentService service;
 
     @BeforeEach
@@ -60,8 +61,10 @@ class PlanAgentServiceTest {
         when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
+        failureInfoSupport = mock(FailureInfoSupport.class);
         service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillService, projectService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry);
+                skillService, projectService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry,
+                failureInfoSupport);
     }
 
     @Test

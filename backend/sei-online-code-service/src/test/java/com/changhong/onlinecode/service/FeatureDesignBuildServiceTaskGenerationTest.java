@@ -61,13 +61,15 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         RunService runService = mock(RunService.class);
         CliRunnerRegistry cliRunnerRegistry = mock(CliRunnerRegistry.class);
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
+        FailureInfoSupport failureInfoSupport = mock(FailureInfoSupport.class);
         FeatureDesignBuildService service = new FeatureDesignBuildService(
                 featureDesignDao,
                 agentService,
                 taskService,
                 runService,
                 cliRunnerRegistry,
-                workspaceManager
+                workspaceManager,
+                failureInfoSupport
         );
 
         FeatureDesignContent content = new FeatureDesignContent();

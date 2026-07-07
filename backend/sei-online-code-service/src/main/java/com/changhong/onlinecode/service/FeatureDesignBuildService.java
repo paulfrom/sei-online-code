@@ -7,8 +7,11 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskState;
@@ -40,6 +43,7 @@ public class FeatureDesignBuildService {
     private final RunService runService;
     private final CliRunnerRegistry cliRunnerRegistry;
     private final WorkspaceManager workspaceManager;
+    private final FailureInfoSupport failureInfoSupport;
 
     public FeatureDesignBuildService(
             FeatureDesignDao featureDesignDao,
@@ -47,7 +51,8 @@ public class FeatureDesignBuildService {
             TaskService taskService,
             RunService runService,
             CliRunnerRegistry cliRunnerRegistry,
-            WorkspaceManager workspaceManager
+            WorkspaceManager workspaceManager,
+            FailureInfoSupport failureInfoSupport
     ) {
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
@@ -55,6 +60,7 @@ public class FeatureDesignBuildService {
         this.runService = runService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.workspaceManager = workspaceManager;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -65,6 +71,11 @@ public class FeatureDesignBuildService {
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<FeatureDesignBuildResultDto> build(String featureDesignId) {
+        return build(featureDesignId, TriggerSource.USER_ACTION);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<FeatureDesignBuildResultDto> build(String featureDesignId, TriggerSource triggerSource) {
         // 1. 查找最新版 FD
         FeatureDesign fd = featureDesignDao.findLatestById(featureDesignId);
         if (fd == null) {
@@ -79,13 +90,22 @@ public class FeatureDesignBuildService {
         // 3. 抢占构建锁
         int acquired = featureDesignDao.tryAcquireBuildLock(featureDesignId, FeatureDesignBuildStatus.BUILDING);
         if (acquired == 0) {
+            FeatureDesign latest = featureDesignDao.findLatestById(featureDesignId);
+            if (latest != null) {
+                failureInfoSupport.markFeatureDesignFailure(latest, FailureCode.BUILD_CONFLICT, FailureStage.BUILD,
+                        "编码执行抢占失败", "该功能正在编码执行中", triggerSource, new java.util.Date());
+                featureDesignDao.save(latest);
+            }
             throw new ConflictException("该功能正在编码执行中");
         }
+        fd.setLastTriggerSource(triggerSource);
 
         // 4. 查找 dev-agent
         Agent devAgent = agentService.findByName("dev-agent");
         if (devAgent == null) {
             // 回退构建状态
+            failureInfoSupport.markFeatureDesignFailure(fd, FailureCode.UPSTREAM_MISSING, FailureStage.BUILD,
+                    "编码执行失败", "dev-agent 未配置", triggerSource, new java.util.Date());
             rollbackBuildStatus(fd, FeatureDesignBuildStatus.IDLE);
             return OperateResultWithData.operationFailure("dev-agent 未配置");
         }
@@ -103,6 +123,8 @@ public class FeatureDesignBuildService {
         OperateResultWithData<Task> taskResult = taskService.save(task);
         if (!taskResult.successful()) {
             // 回退构建状态
+            failureInfoSupport.markFeatureDesignFailure(fd, FailureCode.UNKNOWN, FailureStage.BUILD,
+                    "编码执行失败", taskResult.getMessage(), triggerSource, new java.util.Date());
             rollbackBuildStatus(fd, FeatureDesignBuildStatus.IDLE);
             return OperateResultWithData.operationFailure(taskResult.getMessage());
         }
@@ -118,6 +140,8 @@ public class FeatureDesignBuildService {
         OperateResultWithData<Run> runResult = runService.save(run);
         if (!runResult.successful()) {
             // 回退构建状态
+            failureInfoSupport.markFeatureDesignFailure(fd, FailureCode.UNKNOWN, FailureStage.BUILD,
+                    "编码执行失败", runResult.getMessage(), triggerSource, new java.util.Date());
             rollbackBuildStatus(fd, FeatureDesignBuildStatus.IDLE);
             return OperateResultWithData.operationFailure(runResult.getMessage());
         }
@@ -143,7 +167,8 @@ public class FeatureDesignBuildService {
         executeFuture.thenAccept(result -> {
             // 解析结果，判断成功或失败
             boolean success = parseSuccess(result);
-            updateBuildStatus(featureDesignId, success);
+            updateBuildStatus(featureDesignId, success, triggerSource,
+                    success ? null : "构建执行返回失败结果");
         });
 
         // 8. 返回结果
@@ -201,11 +226,22 @@ public class FeatureDesignBuildService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void updateBuildStatus(String featureDesignId, boolean success) {
+        updateBuildStatus(featureDesignId, success, TriggerSource.USER_ACTION, success ? null : "构建失败");
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void updateBuildStatus(String featureDesignId, boolean success, TriggerSource triggerSource, String detail) {
         FeatureDesign fd = featureDesignDao.findLatestById(featureDesignId);
         if (fd == null) {
             return;
         }
         fd.setBuildStatus(success ? FeatureDesignBuildStatus.BUILT : FeatureDesignBuildStatus.BUILD_FAILED);
+        if (success) {
+            failureInfoSupport.clearFeatureDesignFailure(fd);
+        } else {
+            failureInfoSupport.markFeatureDesignFailure(fd, FailureCode.UNKNOWN, FailureStage.BUILD,
+                    "编码执行失败", detail, triggerSource, new java.util.Date());
+        }
         // 直接用 DAO save，不走 super.save，避免 validateUniqueCode
         featureDesignDao.save(fd);
     }

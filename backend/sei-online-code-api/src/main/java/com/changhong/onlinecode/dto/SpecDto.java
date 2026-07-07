@@ -1,6 +1,9 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.spec.SpecApiContract;
 import com.changhong.onlinecode.dto.spec.SpecComponent;
 import com.changhong.onlinecode.dto.spec.SpecEntity;
@@ -56,6 +59,33 @@ public class SpecDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
+
+    @Schema(description = "失败码")
+    private FailureCode failureCode;
+
+    @Schema(description = "失败阶段")
+    private FailureStage failureStage;
+
+    @Schema(description = "失败摘要")
+    private String failureSummary;
+
+    @Schema(description = "失败详情")
+    private String failureDetail;
+
+    @Schema(description = "最近失败时间")
+    private Date lastFailedAt;
+
+    @Schema(description = "最近重试时间")
+    private Date lastRetryAt;
+
+    @Schema(description = "重试次数")
+    private Integer retryCount;
+
+    @Schema(description = "下次可重试时间")
+    private Date nextRetryAt;
+
+    @Schema(description = "最近触发来源")
+    private TriggerSource lastTriggerSource;
 
     public String getProjectId() {
         return projectId;
@@ -151,5 +181,77 @@ public class SpecDto extends BaseEntityDto {
 
     public void setCreatedDate(Date createdDate) {
         this.createdDate = createdDate;
+    }
+
+    public FailureCode getFailureCode() {
+        return failureCode;
+    }
+
+    public void setFailureCode(FailureCode failureCode) {
+        this.failureCode = failureCode;
+    }
+
+    public FailureStage getFailureStage() {
+        return failureStage;
+    }
+
+    public void setFailureStage(FailureStage failureStage) {
+        this.failureStage = failureStage;
+    }
+
+    public String getFailureSummary() {
+        return failureSummary;
+    }
+
+    public void setFailureSummary(String failureSummary) {
+        this.failureSummary = failureSummary;
+    }
+
+    public String getFailureDetail() {
+        return failureDetail;
+    }
+
+    public void setFailureDetail(String failureDetail) {
+        this.failureDetail = failureDetail;
+    }
+
+    public Date getLastFailedAt() {
+        return lastFailedAt;
+    }
+
+    public void setLastFailedAt(Date lastFailedAt) {
+        this.lastFailedAt = lastFailedAt;
+    }
+
+    public Date getLastRetryAt() {
+        return lastRetryAt;
+    }
+
+    public void setLastRetryAt(Date lastRetryAt) {
+        this.lastRetryAt = lastRetryAt;
+    }
+
+    public Integer getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(Integer retryCount) {
+        this.retryCount = retryCount;
+    }
+
+    public Date getNextRetryAt() {
+        return nextRetryAt;
+    }
+
+    public void setNextRetryAt(Date nextRetryAt) {
+        this.nextRetryAt = nextRetryAt;
+    }
+
+    public TriggerSource getLastTriggerSource() {
+        return lastTriggerSource;
+    }
+
+    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
+        this.lastTriggerSource = lastTriggerSource;
     }
 }

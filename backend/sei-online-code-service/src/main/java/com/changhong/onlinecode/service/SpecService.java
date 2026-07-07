@@ -36,17 +36,20 @@ public class SpecService extends BaseEntityService<Spec> {
     private final SpecAgentService specAgentService;
     private final PlanService planService;
     private final PlanAgentService planAgentService;
+    private final FailureInfoSupport failureInfoSupport;
 
     public SpecService(SpecDao dao,
                        ProjectService projectService,
                        SpecAgentService specAgentService,
                        PlanService planService,
-                       PlanAgentService planAgentService) {
+                       PlanAgentService planAgentService,
+                       FailureInfoSupport failureInfoSupport) {
         this.dao = dao;
         this.projectService = projectService;
         this.specAgentService = specAgentService;
         this.planService = planService;
         this.planAgentService = planAgentService;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     @Override
@@ -84,7 +87,7 @@ public class SpecService extends BaseEntityService<Spec> {
         return saved;
     }
 
-    private List<PlanFeature> featuresForModule(Spec spec) {
+    List<PlanFeature> featuresForModule(Spec spec) {
         PlanDto plan = planService.findLatestConfirmed(spec.getProjectId());
         if (plan == null) {
             plan = planService.findLatest(spec.getProjectId());
@@ -149,6 +152,7 @@ public class SpecService extends BaseEntityService<Spec> {
         spec.setVersion(nextVersion(projectId));
         spec.setState(SpecState.GENERATING);
         spec.setModifyHint(null);
+        failureInfoSupport.clearSpecFailure(spec);
         OperateResultWithData<Spec> saved = super.save(spec);
         if (saved.notSuccessful()) {
             // 业务失败：显式置 FAILED（SPEC_REFINING→FAILED，UNIVERSAL 允许），避免卡死 SPEC_REFINING
@@ -242,6 +246,7 @@ public class SpecService extends BaseEntityService<Spec> {
         spec.setVersion(nextVersion(projectId));
         spec.setState(SpecState.GENERATING);
         spec.setModifyHint(modifyHint);
+        failureInfoSupport.clearSpecFailure(spec);
         OperateResultWithData<Spec> saved = super.save(spec);
         if (saved.notSuccessful()) {
             return saved;

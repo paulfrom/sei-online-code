@@ -29,4 +29,8 @@ public interface SpecDao extends BaseEntityDao<Spec> {
      * @return Spec 列表
      */
     List<Spec> findByProjectIdOrderByVersionAsc(String projectId);
+
+    List<Spec> findByProjectId(String projectId);
+
+    List<Spec> findByStateOrderByCreatedDateAsc(com.changhong.onlinecode.dto.enums.SpecState state);
 }

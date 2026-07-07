@@ -62,6 +62,8 @@ class FeatureDesignBuildServiceTest {
     private CliRunnerRegistry cliRunnerRegistry;
     @Mock
     private WorkspaceManager workspaceManager;
+    @Mock
+    private FailureInfoSupport failureInfoSupport;
 
     private FeatureDesignBuildService service;
 
@@ -73,7 +75,8 @@ class FeatureDesignBuildServiceTest {
                 taskService,
                 runService,
                 cliRunnerRegistry,
-                workspaceManager
+                workspaceManager,
+                failureInfoSupport
         );
     }
 

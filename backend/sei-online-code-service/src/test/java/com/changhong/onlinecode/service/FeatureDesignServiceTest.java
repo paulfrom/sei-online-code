@@ -41,13 +41,15 @@ class FeatureDesignServiceTest {
 
     private FeatureDesignDao featureDesignDao;
     private PlanAgentService planAgentService;
+    private FailureInfoSupport failureInfoSupport;
     private FeatureDesignService featureDesignService;
 
     @BeforeEach
     void setUp() {
         featureDesignDao = mock(FeatureDesignDao.class);
         planAgentService = mock(PlanAgentService.class);
-        featureDesignService = new FeatureDesignService(featureDesignDao, planAgentService);
+        failureInfoSupport = mock(FailureInfoSupport.class);
+        featureDesignService = new FeatureDesignService(featureDesignDao, planAgentService, failureInfoSupport);
     }
 
     @Test

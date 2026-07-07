@@ -8,7 +8,10 @@ import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.plan.PlanContent;
 import com.changhong.onlinecode.dto.plan.PlanFeature;
@@ -58,6 +61,7 @@ public class PlanAgentService {
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final FailureInfoSupport failureInfoSupport;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Semaphore fdPermits = new Semaphore(MAX_CONCURRENT_FD);
@@ -65,7 +69,8 @@ public class PlanAgentService {
 
     public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
                             SkillService skillService, ProjectService projectService, CliRunnerRegistry cliRunnerRegistry,
-                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry) {
+                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry,
+                            FailureInfoSupport failureInfoSupport) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
@@ -74,17 +79,23 @@ public class PlanAgentService {
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
      * spawn 规划智能体（latest Plan 应已由 caller 置 GENERATING）。D11 链式落库 DRAFT/FAILED。
      */
     public void spawnPlanning(String projectId, String modifyHint) {
+        spawnPlanning(projectId, modifyHint, TriggerSource.USER_ACTION);
+    }
+
+    public void spawnPlanning(String projectId, String modifyHint, TriggerSource triggerSource) {
         Plan plan = planDao.findLatestByProjectId(projectId);
         if (plan == null) {
             LOGGER.warn("spawnPlanning: no Plan for projectId={}, skip", projectId);
             return;
         }
+        plan.setLastTriggerSource(triggerSource);
         Agent agent = agentService.findByName("planning-agent");
         Project project = projectService.findOne(projectId);
         String prompt = buildPlanningPrompt(project, modifyHint);
@@ -106,11 +117,19 @@ public class PlanAgentService {
                 .thenAccept(content -> {
                     plan.setContent(content);
                     plan.setStatus(PlanStatus.DRAFT);
+                    failureInfoSupport.clearPlanFailure(plan);
                     planDao.save(plan);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("spawnPlanning failed projectId={}", projectId, e);
                     plan.setStatus(PlanStatus.FAILED);
+                    failureInfoSupport.markPlanFailure(plan,
+                            FailureCode.AGENT_JSON_PARSE_FAILED,
+                            FailureStage.PLAN,
+                            "概要设计生成失败",
+                            rootMessage(e),
+                            triggerSource,
+                            new java.util.Date());
                     planDao.save(plan);
                     return null;
                 });
@@ -120,6 +139,10 @@ public class PlanAgentService {
      * 批量 spawn 功能设计智能体（bounded concurrency，单条失败不影响其他，E3）。fire-and-forget。
      */
     public void spawnFeatureDesigns(String projectId, List<PlanFeature> features) {
+        spawnFeatureDesigns(projectId, features, TriggerSource.USER_ACTION);
+    }
+
+    public void spawnFeatureDesigns(String projectId, List<PlanFeature> features, TriggerSource triggerSource) {
         if (features == null || features.isEmpty()) {
             return;
         }
@@ -127,7 +150,7 @@ public class PlanAgentService {
             CompletableFuture.runAsync(() -> {
                 try {
                     fdPermits.acquire();
-                    spawnFeatureDesign(projectId, f.getFeatureId(), null);
+                    spawnFeatureDesign(projectId, f.getFeatureId(), null, triggerSource);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -141,6 +164,10 @@ public class PlanAgentService {
      * spawn 单个功能设计智能体（latest FD 应已由 caller 建）。D11 链式落库 DRAFT/FAILED。
      */
     public void spawnFeatureDesign(String projectId, String featureId, String modifyHint) {
+        spawnFeatureDesign(projectId, featureId, modifyHint, TriggerSource.USER_ACTION);
+    }
+
+    public void spawnFeatureDesign(String projectId, String featureId, String modifyHint, TriggerSource triggerSource) {
         FeatureDesign fd = featureDesignDao.findLatestByProjectId(projectId).stream()
                 .filter(x -> featureId.equals(x.getFeatureId()))
                 .findFirst().orElse(null);
@@ -155,6 +182,7 @@ public class PlanAgentService {
             fd.setIsLatest(true);
         }
         fd.setStatus(FeatureDesignStatus.GENERATING);
+        fd.setLastTriggerSource(triggerSource);
         featureDesignDao.save(fd);
 
         Agent agent = agentService.findByName("feature-design-agent");
@@ -186,11 +214,19 @@ public class PlanAgentService {
                 .thenAccept(content -> {
                     target.setContent(content);
                     target.setStatus(FeatureDesignStatus.DRAFT);
+                    failureInfoSupport.clearFeatureDesignFailure(target);
                     featureDesignDao.save(target);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
                     target.setStatus(FeatureDesignStatus.FAILED);
+                    failureInfoSupport.markFeatureDesignFailure(target,
+                            FailureCode.AGENT_JSON_PARSE_FAILED,
+                            FailureStage.FEATURE_DESIGN,
+                            "功能设计生成失败",
+                            rootMessage(e),
+                            triggerSource,
+                            new java.util.Date());
                     featureDesignDao.save(target);
                     return null;
                 });
@@ -245,6 +281,14 @@ public class PlanAgentService {
             return t.substring(start, end + 1);
         }
         return t;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage();
     }
 
     private Path materializeSkills(Agent agent) {
