@@ -8,6 +8,7 @@
 import { request } from '@ead/suid-utils-react';
 import { PROJECT_SERVER_PATH } from '@/utils/constants';
 import type { PlanDto } from './plan';
+import type { FailureInfoFields } from './plan';
 
 /**
  * API base. In Phase 1 MSW intercepts by path suffix (`*​/...`), so any
@@ -61,7 +62,7 @@ export interface ProjectDto {
   lastEditedDate: string;
 }
 
-export interface SpecDto {
+export interface SpecDto extends FailureInfoFields {
   id: string;
   projectId: string;
   version: number;

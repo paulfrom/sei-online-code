@@ -5,6 +5,7 @@
 import { request } from '@ead/suid-utils-react';
 import { PROJECT_SERVER_PATH } from '@/utils/constants';
 import type { Search, ResultData, PageResult } from './onlineCode';
+import type { FailureInfoFields } from './plan';
 
 const API = `${PROJECT_SERVER_PATH}`;
 
@@ -35,7 +36,7 @@ export interface FeatureDesignContent {
 }
 
 /** FeatureDesignDto (contract §2.3) */
-export interface FeatureDesignDto {
+export interface FeatureDesignDto extends FailureInfoFields {
   id: string;
   projectId: string;
   featureId: string;

@@ -26,6 +26,7 @@ import {
 import type { SpecDto } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import { ExtModal } from '@ead/suid';
+import FailureInfoPanel from './components/FailureInfoPanel';
 
 const SPEC_STATE_COLOR: Record<SpecDto['state'], string> = {
   GENERATING: 'processing',
@@ -187,6 +188,8 @@ const DetailedDesignReview: React.FC = () => {
           <Spin spinning tip="正在生成详细设计..." />
         </Card>
       )}
+
+      <FailureInfoPanel info={spec} title="详细设计失败信息" />
 
       <Card title="页面">
         <Table

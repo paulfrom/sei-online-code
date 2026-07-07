@@ -20,6 +20,7 @@ import {
   getLatest,
 } from '@/services/featureDesign';
 import type { FeatureDesignDto, FeatureDesignContent } from '@/services/featureDesign';
+import FailureInfoPanel from './components/FailureInfoPanel';
 
 const useStyles = createStyles(({ token, css }) => ({
   section: css`
@@ -202,6 +203,8 @@ const FeatureDesignEditor: React.FC<FeatureDesignEditorProps> = ({
             />
             {featureDesign.isLatest && <Tag color="blue">最新</Tag>}
           </div>
+
+          <FailureInfoPanel info={featureDesign} title="功能设计失败信息" />
 
           {isGenerating ? (
             <div className={styles.section}>

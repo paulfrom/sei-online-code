@@ -7,6 +7,18 @@ import { PROJECT_SERVER_PATH } from '@/utils/constants';
 
 const API = `${PROJECT_SERVER_PATH}`;
 
+export interface FailureInfoFields {
+  failureCode?: string | null;
+  failureStage?: string | null;
+  failureSummary?: string | null;
+  failureDetail?: string | null;
+  lastFailedAt?: string | null;
+  lastRetryAt?: string | null;
+  retryCount?: number | null;
+  nextRetryAt?: string | null;
+  lastTriggerSource?: string | null;
+}
+
 /** PlanStatus enum (contract §3.1) */
 export type PlanStatus = 'GENERATING' | 'DRAFT' | 'CONFIRMED' | 'FAILED';
 
@@ -34,7 +46,7 @@ export interface PlanContent {
 }
 
 /** PlanDto (contract §2.1) */
-export interface PlanDto {
+export interface PlanDto extends FailureInfoFields {
   id: string;
   projectId: string;
   version: number;

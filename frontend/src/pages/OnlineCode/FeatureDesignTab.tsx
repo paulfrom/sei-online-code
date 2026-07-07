@@ -32,6 +32,7 @@ import {
 } from '@/services/featureDesign';
 import type { FeatureDesignDto } from '@/services/featureDesign';
 import FeatureDesignEditor from './FeatureDesignEditor';
+import FailureInfoPanel from './components/FailureInfoPanel';
 
 const useStyles = createStyles(({ token, css }) => ({
   container: css`
@@ -99,6 +100,7 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
   const [regenerateForm] = Form.useForm<{ modifyHint: string }>();
   const [buildModalOpen, setBuildModalOpen] = useState(false);
   const [currentBuildRunId, setCurrentBuildRunId] = useState<string | null>(null);
+  const [currentFailureRecord, setCurrentFailureRecord] = useState<FeatureDesignDto | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const refreshTable = useCallback(() => {
@@ -249,6 +251,13 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
       ),
     },
     {
+      title: '失败摘要',
+      dataIndex: 'failureSummary',
+      width: 240,
+      render: (value: string | null | undefined, record) =>
+        value || (record.retryCount ? `已重试 ${record.retryCount} 次` : '-'),
+    },
+    {
       title: '版本',
       dataIndex: 'version',
       width: 80,
@@ -268,6 +277,11 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
           >
             查看
           </ActionButton>
+          {(record.failureSummary || record.failureCode) && (
+            <ActionButton type="text" onClick={() => setCurrentFailureRecord(record)}>
+              失败信息
+            </ActionButton>
+          )}
           {!isConfirmed(record) && !isGenerating(record) && !isBuilding(record) && (
             <ActionButton
               type="text"
@@ -351,7 +365,7 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
         ref={tableRef}
         rowKey="id"
         columns={columns}
-        url={FEATURE_DESIGN_FIND_BY_PAGE_URL}
+        store={{ url: FEATURE_DESIGN_FIND_BY_PAGE_URL, type: 'POST' }}
         remotePaging
         search={tableSearch}
         rowSelection={rowSelection}
@@ -364,6 +378,16 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
         onCancel={() => setEditorOpen(false)}
         onSuccess={handleEditorSuccess}
       />
+
+      <ExtModal
+        open={Boolean(currentFailureRecord)}
+        title="功能设计失败信息"
+        footer={null}
+        onCancel={() => setCurrentFailureRecord(null)}
+        destroyOnHidden
+      >
+        <FailureInfoPanel info={currentFailureRecord} />
+      </ExtModal>
 
       <ExtModal
         open={regenerateModalOpen}

@@ -80,6 +80,13 @@ const DetailedDesignTab: React.FC<DetailedDesignTabProps> = ({ projectId }) => {
           },
         },
         {
+          title: '失败摘要',
+          dataIndex: 'failureSummary',
+          width: 260,
+          render: (value: string | null | undefined, record: SpecDto) =>
+            value || (record.retryCount ? `已重试 ${record.retryCount} 次` : '-'),
+        },
+        {
           title: '操作',
           dataIndex: 'id',
           width: 120,

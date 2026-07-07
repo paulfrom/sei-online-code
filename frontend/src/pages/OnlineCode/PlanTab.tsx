@@ -39,6 +39,7 @@ import type {
   PlanFeature,
   PlanModule,
 } from '@/services/plan';
+import FailureInfoPanel from './components/FailureInfoPanel';
 
 const useStyles = createStyles(({ token, css }) => ({
   container: css`
@@ -355,6 +356,8 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           )}
         </Space>
       </div>
+
+      <FailureInfoPanel info={plan} title="概要设计失败信息" />
 
       {isGenerating ? (
         <div className={styles.section}>
