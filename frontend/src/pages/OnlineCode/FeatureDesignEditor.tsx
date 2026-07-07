@@ -85,10 +85,10 @@ const buildStatusColorMap: Record<string, string> = {
 };
 
 const buildStatusTextMap: Record<string, string> = {
-  IDLE: '未构建',
-  BUILDING: '构建中',
-  BUILT: '已构建',
-  BUILD_FAILED: '构建失败',
+  IDLE: '未执行',
+  BUILDING: '编码执行中',
+  BUILT: '已执行',
+  BUILD_FAILED: '执行失败',
   STALE: '已过期',
 };
 
@@ -159,7 +159,7 @@ const FeatureDesignEditor: React.FC<FeatureDesignEditorProps> = ({
       }
     } catch (e: any) {
       if (e.status === 409) {
-        message.error('该功能正在构建中，无法编辑');
+        message.error('该功能正在编码执行中，无法编辑');
       } else {
         message.error('保存失败');
       }

@@ -1,6 +1,6 @@
 /**
- * F3: PlanTab UI - Plan management tab for a project
- * Shows the latest plan, allows editing, regenerating, confirming, and viewing history
+ * F3: PlanTab UI - overview design management tab for a project.
+ * Shows the latest overview design, allows editing, regenerating, confirming, and viewing history.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
@@ -118,7 +118,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           form.setFieldsValue(res.data.content);
         }
       } else if (!silent) {
-        message.error(res.message ?? '获取计划失败');
+        message.error(res.message ?? '获取概要设计失败');
       }
     } finally {
       if (!silent) setLoading(false);
@@ -245,7 +245,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
     return (
       <div className={styles.container}>
         <div className={styles.section}>
-          暂无计划
+          暂无概要设计
         </div>
       </div>
     );
@@ -258,7 +258,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.statusRow}>
-          <span style={{ fontWeight: 600 }}>计划 v{plan.version}</span>
+          <span style={{ fontWeight: 600 }}>概要设计 v{plan.version}</span>
           <Badge
             status={statusColorMap[plan.status] as any}
             text={statusTextMap[plan.status]}
@@ -281,7 +281,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
                   onClick={handleConfirm}
                   loading={submitting}
                 >
-                  确认计划
+                  确认概要设计
                 </Button>
               )}
             </>
@@ -291,7 +291,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
 
       {isGenerating ? (
         <div className={styles.section}>
-          <Spin spinning tip="正在生成计划..." />
+          <Spin spinning tip="正在生成概要设计..." />
         </div>
       ) : editing ? (
         <Form form={form} onFinish={handleSaveEdit} layout="vertical">
@@ -418,21 +418,37 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           <div className={styles.section}>
             <div className={styles.sectionTitle}>技术假设</div>
             <div className={styles.tags}>
-              {plan.content.techAssumptions.map((tech, i) => (
+              {(plan.content.techAssumptions ?? []).map((tech, i) => (
                 <Tag key={i}>{tech}</Tag>
               ))}
             </div>
           </div>
 
           <div className={styles.section}>
-            <div className={styles.sectionTitle}>功能列表</div>
+            <div className={styles.sectionTitle}>模块划分</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {plan.content.features.map((feature) => (
-                <div key={feature.featureId}>
-                  <div style={{ fontWeight: 600 }}>
-                    {feature.featureId} - {feature.title}
+              {(plan.content.modules?.length
+                ? plan.content.modules
+                : [{
+                    moduleId: 'default',
+                    title: '默认模块',
+                    summary: plan.content.summary,
+                    features: plan.content.features ?? [],
+                  }]
+              ).map((module) => (
+                <div key={module.moduleId || module.title}>
+                  <div style={{ fontWeight: 600 }}>{module.title}</div>
+                  <div className={styles.content}>{module.summary}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {(module.features ?? []).map((feature) => (
+                      <div key={feature.featureId}>
+                        <div style={{ fontWeight: 600 }}>
+                          {feature.featureId} - {feature.title}
+                        </div>
+                        <div className={styles.content}>{feature.outline}</div>
+                      </div>
+                    ))}
                   </div>
-                  <div className={styles.content}>{feature.outline}</div>
                 </div>
               ))}
             </div>
@@ -441,7 +457,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           <div className={styles.section}>
             <div className={styles.sectionTitle}>不包含的内容</div>
             <div className={styles.tags}>
-              {plan.content.nonGoals.map((goal, i) => (
+              {(plan.content.nonGoals ?? []).map((goal, i) => (
                 <Tag key={i} color="default">{goal}</Tag>
               ))}
             </div>
@@ -462,7 +478,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
         </>
       ) : (
         <div className={styles.section}>
-          计划生成失败，内容为空。请点击右上方“重新生成”重试。
+          概要设计生成失败，内容为空。请点击右上方“重新生成”重试。
         </div>
       )}
 
@@ -483,7 +499,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
 
       <ExtModal
         open={regenerateModalOpen}
-        title="重新生成计划"
+        title="重新生成概要设计"
         confirmLoading={submitting}
         onCancel={() => {
           setRegenerateModalOpen(false);
@@ -496,7 +512,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           <Form.Item name="modifyHint" label="修改提示（可选）">
             <Input.TextArea
               rows={4}
-              placeholder="描述你希望如何修改计划，例如：添加更多关于用户管理的功能"
+              placeholder="描述你希望如何修改概要设计，例如：添加更多关于用户管理的功能"
             />
           </Form.Item>
         </Form>

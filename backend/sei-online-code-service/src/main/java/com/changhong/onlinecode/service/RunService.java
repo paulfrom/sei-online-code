@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Run 服务。承载运行记录的查询与状态更新（由 {@link DispatchService} 并行 fan-out 驱动）。
+ * Run 服务。承载运行记录的查询与状态更新，由 FeatureDesign 编码执行流程写入。
  *
  * @author sei-online-code
  */

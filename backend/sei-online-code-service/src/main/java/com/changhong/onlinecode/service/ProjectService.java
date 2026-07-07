@@ -2,6 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.ProjectDao;
+import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.entity.Plan;
@@ -26,11 +27,16 @@ public class ProjectService extends BaseEntityService<Project> {
     private final ProjectDao dao;
     private final PlanDao planDao;
     private final PlanAgentService planAgentService;
+    private final PlanService planService;
 
-    public ProjectService(ProjectDao dao, PlanDao planDao, @Lazy PlanAgentService planAgentService) {
+    public ProjectService(ProjectDao dao,
+                          PlanDao planDao,
+                          @Lazy PlanAgentService planAgentService,
+                          @Lazy PlanService planService) {
         this.dao = dao;
         this.planDao = planDao;
         this.planAgentService = planAgentService;
+        this.planService = planService;
     }
 
     @Override
@@ -84,5 +90,20 @@ public class ProjectService extends BaseEntityService<Project> {
         }
         project.setState(target);
         return super.save(project);
+    }
+
+    /**
+     * 兼容旧 refineSpec 入口：发起概要设计生成。
+     *
+     * @param projectId 项目 id
+     * @return 写操作结果（携带新建 GENERATING 概要设计）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<PlanDto> refineSpec(String projectId) {
+        Project project = dao.findOne(projectId);
+        if (Objects.isNull(project)) {
+            return OperateResultWithData.operationFailure("项目不存在: " + projectId);
+        }
+        return planService.regenerate(projectId, null);
     }
 }

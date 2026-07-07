@@ -1,5 +1,5 @@
 /**
- * Project Detail page with tabs for Plan and Feature Design
+ * Project detail page with tabs for overview design and feature design.
  */
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'umi';
@@ -8,6 +8,7 @@ import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import PlanTab from './PlanTab';
+import DetailedDesignTab from './DetailedDesignTab';
 import FeatureDesignTab from './FeatureDesignTab';
 import BuildActions from './BuildActions';
 
@@ -54,8 +55,13 @@ const ProjectDetail: React.FC = () => {
   const tabItems = [
     {
       key: 'plan',
-      label: '计划',
+      label: '概要设计',
       children: <PlanTab projectId={projectId} />,
+    },
+    {
+      key: 'detailedDesign',
+      label: '详细设计',
+      children: <DetailedDesignTab projectId={projectId} />,
     },
     {
       key: 'featureDesign',

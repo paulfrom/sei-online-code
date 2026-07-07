@@ -83,7 +83,7 @@ public class SpecAgentService {
         }
         Agent agent = agentService.findByName("requirement-agent");
         Project project = projectService.findOne(projectId);
-        String prompt = buildSpecPrompt(project, modifyHint);
+        String prompt = buildSpecPrompt(project, spec, modifyHint);
         Path workdir = materializeSkills(agent);
 
         String iterationId = projectId; // 需求阶段无 Run，用 projectId 作日志键
@@ -226,15 +226,23 @@ public class SpecAgentService {
         return refs;
     }
 
-    private String buildSpecPrompt(Project project, String modifyHint) {
+    private String buildSpecPrompt(Project project, Spec spec, String modifyHint) {
         String desc = project == null ? "" : project.getDesign();
         String hint = modifyHint == null ? "" : modifyHint;
-        return "项目描述：" + desc + "\n修改提示：" + hint
-                + "\n输出 Spec JSON 骨架：pages[]{key,title,route,description}"
+        String module = spec == null ? "" : "\n模块 id：" + nullToEmpty(spec.getModuleId())
+                + "\n模块标题：" + nullToEmpty(spec.getModuleTitle())
+                + "\n模块概要：" + nullToEmpty(spec.getModuleSummary());
+        return "项目描述：" + desc + module + "\n修改提示：" + hint
+                + "\n输出模块详细设计 JSON 骨架：pages[]{key,title,route,description}"
                 + "/components[]{key,type,page,description}"
                 + "/entities[]{key,fields[]{name,type,description}}"
                 + "/apiContract[]{method,path,requestShape,responseShape,description}"
+                + "\n要求：只围绕上述模块生成详细设计，不要展开其他模块。"
                 + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
                 + "四字段均为数组，数组可为空 []；key/path 为字符串";
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 }

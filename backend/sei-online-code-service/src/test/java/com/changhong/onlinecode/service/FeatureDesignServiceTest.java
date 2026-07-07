@@ -27,7 +27,7 @@ import static org.mockito.Mockito.*;
  * FeatureDesignService 单元测试。
  *
  * <p>OperateResult 构造经 ApplicationContextHolder 解析 i18n，单测缺容器会 NPE；
- * {@code @BeforeAll} 注入回显消息码的 mock 上下文（模式参照 BuildLoopServiceOptimizeTest）。
+ * {@code @BeforeAll} 注入回显消息码的 mock 上下文。
  */
 class FeatureDesignServiceTest {
 

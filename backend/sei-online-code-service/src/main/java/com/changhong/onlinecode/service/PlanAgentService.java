@@ -273,7 +273,7 @@ public class PlanAgentService {
         }
     }
 
-    /** Skill 辅助文件 → materializer SkillFileRef（与 DispatchService 一致，files 经 SkillService.findOne populate）。 */
+    /** Skill 辅助文件 → materializer SkillFileRef（files 经 SkillService.findOne populate）。 */
     private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
         List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
         if (skill.getFiles() != null) {
@@ -288,9 +288,11 @@ public class PlanAgentService {
         String desc = project == null ? "" : project.getDesign();
         String hint = modifyHint == null ? "" : modifyHint;
         return "项目描述：" + desc + "\n修改提示：" + hint
-                + "\n输出 Plan JSON 骨架：summary/techAssumptions/features[]{featureId,title,outline}/nonGoals"
+                + "\n输出概要设计 JSON 骨架：summary/techAssumptions/modules[]{moduleId,title,summary,features[]{featureId,title,outline}}/nonGoals"
+                + "\n要求：先按业务边界划分 modules；每个 module 内列出后续需要生成详细设计和功能设计的 features。"
+                + "兼容字段 features 可为空数组。"
                 + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
-                + "summary/techAssumptions/nonGoals 为字符串，features 为数组，featureId 为字符串";
+                + "summary 为字符串，techAssumptions/nonGoals 为字符串数组，modules/features 为数组，moduleId/featureId 为字符串";
     }
 
     private String buildFeatureDesignPrompt(Plan plan, String featureId, String modifyHint) {

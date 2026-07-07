@@ -1,6 +1,5 @@
 package com.changhong.onlinecode.api;
 
-import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.SpecDto;
 import com.changhong.onlinecode.dto.request.ConfirmSpecRequest;
 import com.changhong.onlinecode.dto.request.RegenerateSpecRequest;
@@ -23,7 +22,7 @@ import java.util.List;
  *
  * <ul>
  *   <li>#5  GET  /spec/findOne       —— BaseEntityApi.findOne</li>
- *   <li>#6  POST /spec/confirm       —— 确认 Spec 并生成任务规划</li>
+ *   <li>#6  POST /spec/confirm       —— 确认模块详细设计并生成功能设计</li>
  *   <li>#30 GET  /spec/findByProject —— 项目的 Spec 版本历史（version 升序）</li>
  *   <li>#R  POST /spec/{projectId}/regenerate —— 重新生成 Spec</li>
  * </ul>
@@ -37,8 +36,8 @@ public interface SpecApi extends BaseEntityApi<SpecDto> {
     String PATH = "spec";
 
     @PostMapping(path = "confirm", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "确认 Spec", description = "确认 Spec 后生成任务规划，进入任务审批")
-    ResultData<PlanDto> confirm(@RequestBody @Valid ConfirmSpecRequest request);
+    @Operation(summary = "确认模块详细设计", description = "确认模块详细设计后，根据该模块功能项生成功能设计")
+    ResultData<SpecDto> confirm(@RequestBody @Valid ConfirmSpecRequest request);
 
     @GetMapping(path = "findByProject")
     @Operation(summary = "Spec 版本历史", description = "返回项目的 Spec 版本历史，按 version 升序（可 diff 的不可变历史）")

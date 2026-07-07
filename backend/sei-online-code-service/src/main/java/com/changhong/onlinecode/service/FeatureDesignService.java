@@ -74,7 +74,7 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
             return OperateResultWithData.operationFailure("功能设计不存在");
         }
         if (latest.getBuildStatus() == FeatureDesignBuildStatus.BUILDING) {
-            throw new ConflictException("功能设计正在构建中，不可编辑");
+            throw new ConflictException("功能设计正在编码执行中，不可编辑");
         }
 
         // 标记旧版本为非最新
@@ -119,7 +119,7 @@ public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
             return OperateResultWithData.operationFailure("功能设计不存在");
         }
         if (latest.getBuildStatus() == FeatureDesignBuildStatus.BUILDING) {
-            throw new ConflictException("功能设计正在构建中，不可重复发起");
+            throw new ConflictException("功能设计正在编码执行中，不可重复发起");
         }
 
         // 标记旧版本为非最新

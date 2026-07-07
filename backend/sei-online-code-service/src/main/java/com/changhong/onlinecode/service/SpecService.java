@@ -1,8 +1,13 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.SpecDao;
+import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
+import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dto.plan.PlanContent;
+import com.changhong.onlinecode.dto.plan.PlanFeature;
+import com.changhong.onlinecode.dto.plan.PlanModule;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.dao.BaseEntityDao;
@@ -15,7 +20,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Spec 服务。承载「需求 → Spec」精炼与状态流转（契约 §4 端点 4/6）。
+ * Spec 服务。承载模块详细设计生成与状态流转。
  *
  * <p>接入 Requirement Agent：{@link #refineSpec} / {@link #regenerate} 建 GENERATING 行后
  * 由 {@link SpecAgentService#spawnRequirement} 异步填充 content 并收口到 SPEC_REVIEW / FAILED。</p>
@@ -28,11 +33,19 @@ public class SpecService extends BaseEntityService<Spec> {
     private final SpecDao dao;
     private final ProjectService projectService;
     private final SpecAgentService specAgentService;
+    private final PlanService planService;
+    private final PlanAgentService planAgentService;
 
-    public SpecService(SpecDao dao, ProjectService projectService, SpecAgentService specAgentService) {
+    public SpecService(SpecDao dao,
+                       ProjectService projectService,
+                       SpecAgentService specAgentService,
+                       PlanService planService,
+                       PlanAgentService planAgentService) {
         this.dao = dao;
         this.projectService = projectService;
         this.specAgentService = specAgentService;
+        this.planService = planService;
+        this.planAgentService = planAgentService;
     }
 
     @Override
@@ -41,7 +54,60 @@ public class SpecService extends BaseEntityService<Spec> {
     }
 
     /**
-     * 精炼 Spec：项目 DRAFTING/FAILED → SPEC_REFINING，产出 GENERATING 态 Spec 并 spawn Requirement Agent。
+     * 确认模块详细设计：Spec → CONFIRMED，然后为该模块功能项生成 FeatureDesign。
+     *
+     * @param specId Spec id
+     * @return 写操作结果（携带确认后的 Spec）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<Spec> confirmSpec(String specId) {
+        Spec spec = findOne(specId);
+        if (Objects.isNull(spec)) {
+            return OperateResultWithData.operationFailure("Spec 不存在: " + specId);
+        }
+        if (spec.getState() != SpecState.SPEC_REVIEW) {
+            return OperateResultWithData.operationFailure(
+                    "仅 SPEC_REVIEW 状态可确认 Spec，当前为 " + spec.getState());
+        }
+
+        spec.setState(SpecState.CONFIRMED);
+        OperateResultWithData<Spec> saved = save(spec);
+        if (saved.notSuccessful()) {
+            return OperateResultWithData.operationFailure(saved.getMessage());
+        }
+
+        List<PlanFeature> features = featuresForModule(spec);
+        if (!features.isEmpty()) {
+            planAgentService.spawnFeatureDesigns(spec.getProjectId(), features);
+        }
+        return saved;
+    }
+
+    private List<PlanFeature> featuresForModule(Spec spec) {
+        PlanDto plan = planService.findLatestConfirmed(spec.getProjectId());
+        if (plan == null) {
+            plan = planService.findLatest(spec.getProjectId());
+            if (plan == null || plan.getStatus() != PlanStatus.CONFIRMED) {
+                return List.of();
+            }
+        }
+        PlanContent content = plan.getContent();
+        if (content == null) {
+            return List.of();
+        }
+        if (content.getModules() != null && !content.getModules().isEmpty()) {
+            return content.getModules().stream()
+                    .filter(module -> Objects.equals(module.getModuleId(), spec.getModuleId()))
+                    .findFirst()
+                    .map(PlanModule::getFeatures)
+                    .filter(Objects::nonNull)
+                    .orElse(List.of());
+        }
+        return content.getFeatures() == null ? List.of() : content.getFeatures();
+    }
+
+    /**
+     * 兼容旧模块详细设计生成入口：项目 DRAFTING/FAILED → SPEC_REFINING，产出 GENERATING 态 Spec 并 spawn Requirement Agent。
      *
      * <p>版本号按项目已有最大版本 + 1 递增。项目在生成期间停在 SPEC_REFINING，
      * 由 {@link SpecAgentService} 回调推进到 SPEC_REVIEW（成功）/ FAILED（失败）。</p>
@@ -60,7 +126,7 @@ public class SpecService extends BaseEntityService<Spec> {
         LifecycleState entry = project.getState();
         if (entry != LifecycleState.DRAFTING && entry != LifecycleState.FAILED) {
             return OperateResultWithData.operationFailure(
-                    "仅 DRAFTING/FAILED 状态可精炼 Spec，当前为 " + entry);
+                    "仅 DRAFTING/FAILED 状态可生成模块详细设计，当前为 " + entry);
         }
         // FAILED 重试回流：先回 DRAFTING，再走原 DRAFTING→SPEC_REFINING
         if (entry == LifecycleState.FAILED) {

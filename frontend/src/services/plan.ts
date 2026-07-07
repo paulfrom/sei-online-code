@@ -17,11 +17,19 @@ export interface PlanFeature {
   outline: string;
 }
 
+export interface PlanModule {
+  moduleId: string;
+  title: string;
+  summary: string;
+  features: PlanFeature[];
+}
+
 /** PlanContent (contract §2.2) */
 export interface PlanContent {
   summary: string;
   techAssumptions: string[];
-  features: PlanFeature[];
+  modules?: PlanModule[];
+  features?: PlanFeature[];
   nonGoals: string[];
 }
 

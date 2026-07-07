@@ -1,14 +1,10 @@
 /**
  * RunLog WebSocket client for P2: D4 WS client
- * Connects to /ws/run/{iterationId}, parses NDJSON frames, filters by runId
- *
- * Dependencies:
- * - Backend iterationId === featureDesignId (FeatureDesignBuildService.java:92)
- *   TODO: backend cleanup will require changing to build-returned iterationId
+ * Connects to /ws/run/{featureDesignId}, parses NDJSON frames, filters by runId.
  */
 
 export interface RunLogFrame {
-  iterationId: string;
+  featureDesignId: string;
   taskId: string;
   runId: string;
   stream: string;
@@ -18,7 +14,7 @@ export interface RunLogFrame {
 }
 
 export interface RunLogSocketOptions {
-  iterationId: string;
+  featureDesignId: string;
   runId: string;
   onLine: (frame: RunLogFrame) => void;
   onTerminal: (state: string) => void;
@@ -54,14 +50,14 @@ function parseNDJSON(data: string): RunLogFrame[] {
  * Returns close() function to clean up connection
  */
 export function subscribeRunLog({
-  iterationId,
+  featureDesignId,
   runId,
   onLine,
   onTerminal,
   onError,
 }: RunLogSocketOptions): RunLogSocket {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws/run/${iterationId}`;
+  const wsUrl = `${protocol}//${window.location.host}/ws/run/${featureDesignId}`;
   const ws = new WebSocket(wsUrl);
 
   ws.onmessage = (event) => {

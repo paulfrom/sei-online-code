@@ -16,8 +16,8 @@ import java.nio.file.Path;
  * 替换块体而非追加。brief 内容为 agent identity（name + instructions），对齐 multica
  * {@code ## Agent Identity}。由 service 层在 spawn 前调用（multica 亦由 daemon 写、非 backend）。</p>
  *
- * <p><b>不做 cleanup</b>：SEI workdir 为临时区（PlanAgentService）或 worktree（DispatchService，
- * WorktreeManager 管理生命周期），非用户本地仓库，无需 byte-exact 回滚（multica 仅 local_directory
+ * <p><b>不做 cleanup</b>：SEI workdir 为临时区（PlanAgentService）或受 WorktreeManager
+ * 管理生命周期的 worktree，非用户本地仓库，无需 byte-exact 回滚（multica 仅 local_directory
  * 流才 cleanup）。对齐「仅用最少代码」。marker 块仍提供幂等性（同 workdir 重跑不追加重复块）。</p>
  *
  * @author sei-online-code

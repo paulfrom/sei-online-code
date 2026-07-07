@@ -6,11 +6,11 @@ import jakarta.validation.constraints.NotBlank;
 import java.io.Serializable;
 
 /**
- * 精炼 Spec 请求体。契约 §3 端点 4：POST /api/project/refineSpec。
+ * 生成概要设计请求体。兼容旧端点名：POST /api/project/refineSpec。
  *
  * @author sei-online-code
  */
-@Schema(description = "精炼 Spec 请求")
+@Schema(description = "生成概要设计请求")
 public class RefineSpecRequest implements Serializable {
 
     private static final long serialVersionUID = 1L;

@@ -1,8 +1,13 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.SpecDao;
+import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
+import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dto.plan.PlanContent;
+import com.changhong.onlinecode.dto.plan.PlanFeature;
+import com.changhong.onlinecode.dto.plan.PlanModule;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.context.ApplicationContextHolder;
@@ -28,7 +33,7 @@ import static org.mockito.Mockito.*;
  * SpecService 单元测试
  *
  * <p>OperateResult 构造经 ApplicationContextHolder 解析 i18n，单测缺容器会 NPE；
- * {@code @BeforeAll} 注入回显消息码的 mock 上下文（模式参照 BuildLoopServiceOptimizeTest）。
+ * {@code @BeforeAll} 注入回显消息码的 mock 上下文。
  */
 class SpecServiceTest {
 
@@ -43,6 +48,8 @@ class SpecServiceTest {
     private SpecDao specDao;
     private ProjectService projectService;
     private SpecAgentService specAgentService;
+    private PlanService planService;
+    private PlanAgentService planAgentService;
     private SpecService specService;
 
     @BeforeEach
@@ -50,7 +57,128 @@ class SpecServiceTest {
         specDao = mock(SpecDao.class);
         projectService = mock(ProjectService.class);
         specAgentService = mock(SpecAgentService.class);
-        specService = new SpecService(specDao, projectService, specAgentService);
+        planService = mock(PlanService.class);
+        planAgentService = mock(PlanAgentService.class);
+        specService = new SpecService(specDao, projectService, specAgentService, planService, planAgentService);
+    }
+
+    @Test
+    void confirmSpec_spawnsFeatureDesignsForMatchingModule() {
+        // 准备
+        SpecService service = spy(specService);
+        Spec spec = new Spec();
+        spec.setId("spec1");
+        spec.setProjectId("project1");
+        spec.setVersion(1);
+        spec.setState(SpecState.SPEC_REVIEW);
+        spec.setModuleId("mod-inventory");
+        doReturn(spec).when(service).findOne("spec1");
+        OperateResultWithData<Spec> savedSpec = OperateResultWithData.operationSuccessWithData(spec);
+        doReturn(savedSpec).when(service).save(spec);
+
+        PlanFeature f1 = new PlanFeature();
+        f1.setFeatureId("feat1");
+        f1.setTitle("入库");
+        PlanFeature f2 = new PlanFeature();
+        f2.setFeatureId("feat2");
+        f2.setTitle("出库");
+        PlanModule module = new PlanModule();
+        module.setModuleId("mod-inventory");
+        module.setTitle("库存模块");
+        module.setFeatures(List.of(f1, f2));
+        PlanContent content = new PlanContent();
+        content.setModules(List.of(module));
+        PlanDto confirmedPlan = new PlanDto();
+        confirmedPlan.setProjectId("project1");
+        confirmedPlan.setStatus(PlanStatus.CONFIRMED);
+        confirmedPlan.setContent(content);
+        when(planService.findLatest("project1")).thenReturn(confirmedPlan);
+
+        // 执行
+        OperateResultWithData<Spec> result = service.confirmSpec("spec1");
+
+        // 验证
+        assertTrue(result.successful());
+        assertEquals(SpecState.CONFIRMED, spec.getState());
+        verify(service).save(spec);
+        ArgumentCaptor<List<PlanFeature>> featuresCaptor = ArgumentCaptor.forClass(List.class);
+        verify(planAgentService).spawnFeatureDesigns(eq("project1"), featuresCaptor.capture());
+        assertEquals(List.of("feat1", "feat2"), featuresCaptor.getValue().stream()
+                .map(PlanFeature::getFeatureId)
+                .toList());
+        verify(planService, never()).regenerate(anyString(), any());
+    }
+
+    @Test
+    void confirmSpec_spawnsFeatureDesignsFromLegacyFeaturesWhenPlanHasNoModules() {
+        // 准备
+        SpecService service = spy(specService);
+        Spec spec = new Spec();
+        spec.setId("spec1");
+        spec.setProjectId("project1");
+        spec.setVersion(1);
+        spec.setState(SpecState.SPEC_REVIEW);
+        doReturn(spec).when(service).findOne("spec1");
+        doReturn(OperateResultWithData.operationSuccessWithData(spec)).when(service).save(spec);
+
+        PlanFeature feature = new PlanFeature();
+        feature.setFeatureId("legacy-feat");
+        feature.setTitle("旧功能");
+        PlanContent content = new PlanContent();
+        content.setFeatures(List.of(feature));
+        PlanDto confirmedPlan = new PlanDto();
+        confirmedPlan.setProjectId("project1");
+        confirmedPlan.setStatus(PlanStatus.CONFIRMED);
+        confirmedPlan.setContent(content);
+        when(planService.findLatest("project1")).thenReturn(confirmedPlan);
+
+        // 执行
+        OperateResultWithData<Spec> result = service.confirmSpec("spec1");
+
+        // 验证
+        assertTrue(result.successful());
+        ArgumentCaptor<List<PlanFeature>> featuresCaptor = ArgumentCaptor.forClass(List.class);
+        verify(planAgentService).spawnFeatureDesigns(eq("project1"), featuresCaptor.capture());
+        assertEquals(1, featuresCaptor.getValue().size());
+        assertEquals("legacy-feat", featuresCaptor.getValue().get(0).getFeatureId());
+    }
+
+    @Test
+    void confirmSpec_rejectsWhenSpecNotExists() {
+        // 准备
+        SpecService service = spy(specService);
+        doReturn(null).when(service).findOne("missing");
+
+        // 执行
+        OperateResultWithData<Spec> result = service.confirmSpec("missing");
+
+        // 验证
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("Spec 不存在"));
+        verify(service, never()).save(any(Spec.class));
+        verify(planService, never()).regenerate(anyString(), any());
+        verify(planAgentService, never()).spawnFeatureDesigns(anyString(), any());
+    }
+
+    @Test
+    void confirmSpec_rejectsWhenNotSpecReview() {
+        // 准备
+        SpecService service = spy(specService);
+        Spec spec = new Spec();
+        spec.setId("spec1");
+        spec.setProjectId("project1");
+        spec.setState(SpecState.GENERATING);
+        doReturn(spec).when(service).findOne("spec1");
+
+        // 执行
+        OperateResultWithData<Spec> result = service.confirmSpec("spec1");
+
+        // 验证
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("仅 SPEC_REVIEW 状态可确认 Spec"));
+        verify(service, never()).save(any(Spec.class));
+        verify(planService, never()).regenerate(anyString(), any());
+        verify(planAgentService, never()).spawnFeatureDesigns(anyString(), any());
     }
 
     @Test
@@ -183,7 +311,7 @@ class SpecServiceTest {
 
         // 验证
         assertFalse(result.successful());
-        assertTrue(result.getMessage().contains("仅 DRAFTING/FAILED 状态可精炼 Spec"));
+        assertTrue(result.getMessage().contains("仅 DRAFTING/FAILED 状态可生成模块详细设计"));
         verify(specDao, never()).save(any(Spec.class));
     }
 

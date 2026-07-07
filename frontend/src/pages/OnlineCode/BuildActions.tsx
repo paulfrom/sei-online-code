@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'umi';
 import { createStyles } from '@ead/antd-style';
 import { Badge, Button, Space, Tooltip, message, Modal } from '@ead/suid';
-import { PlayCircleOutlined } from '@ead/suid-icons';
+import { PlayCircleFilled } from '@ead/suid-icons';
 import type { FeatureDesignDto } from '@/services/featureDesign';
 import { subscribeRunLog, type RunLogFrame } from '@/utils/run-log-socket';
 
@@ -51,16 +51,18 @@ const buildStatusColorMap: Record<string, string> = {
 };
 
 const buildStatusTextMap: Record<string, string> = {
-  IDLE: '未构建',
-  BUILDING: '构建中',
-  BUILT: '已构建',
-  BUILD_FAILED: '构建失败',
+  IDLE: '未执行',
+  BUILDING: '编码执行中',
+  BUILT: '已执行',
+  BUILD_FAILED: '执行失败',
   STALE: '已过期',
 };
 
 const projectStateTextMap: Record<string, string> = {
-  DRAFTING: '项目初始化中',
-  PLANNING: '计划制定中',
+  DRAFTING: '项目描述待处理',
+  SPEC_REFINING: '概要设计生成中',
+  SPEC_REVIEW: '详细设计待确认',
+  PLANNING: '概要设计中',
   DESIGNING: '功能设计中',
   READY_TO_BUILD: '准备就绪',
   FAILED: '失败',
@@ -148,12 +150,11 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
 
       let msg = `已开始 ${startedCount} 个功能的编码`;
       if (skippedCount > 0) {
-        msg += `（跳过 ${skippedCount} 个已在构建中的功能）`;
+        msg += `（跳过 ${skippedCount} 个正在编码执行的功能）`;
       }
       message.success(msg);
 
-      // Subscribe to WS for each started build
-      // TODO: currently iterationId === featureDesignId (FeatureDesignBuildService.java:92)
+      // Subscribe to WS for each started FeatureDesign build.
       const startedBuilds = results.filter((r: any) => !r.skipped && r.runId && r.id);
       if (startedBuilds.length > 0) {
         // For simplicity, subscribe to the first build's logs
@@ -162,7 +163,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
 
         try {
           const { close } = subscribeRunLog({
-            iterationId: featureDesignId,
+            featureDesignId,
             runId,
             onLine: appendLog,
             onTerminal: () => {
@@ -233,7 +234,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
           <Tooltip title={!isReady ? projectStateTextMap[projectState || ''] : ''}>
             <Button
               type="primary"
-              icon={<PlayCircleOutlined />}
+              icon={<PlayCircleFilled />}
               onClick={handleBuild}
               disabled={!isReady || loading}
               loading={loading}
@@ -245,7 +246,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
       </div>
 
       <Modal
-        title="构建日志"
+        title="编码执行日志"
         open={logVisible}
         onCancel={() => setLogVisible(false)}
         footer={[
@@ -257,7 +258,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
       >
         <div ref={logBodyRef} className={styles.logPanel}>
           {logs.length === 0 ? (
-            <span style={{ color: '#8c8c8c' }}>等待构建开始…</span>
+            <span style={{ color: '#8c8c8c' }}>等待编码执行开始…</span>
           ) : (
             logs.map((line, index) => <div key={index}>{line}</div>)
           )}

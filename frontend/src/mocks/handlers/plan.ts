@@ -20,7 +20,7 @@ function fail(message: string) {
   return HttpResponse.json({ success: false, message, data: null });
 }
 
-// Seed mock Plan data for existing projects
+// Seed mock overview design data for existing projects.
 function seedPlans() {
   const projects = Array.from(db.projects.values());
   const plansMap = (db as any).plans as Map<string, PlanDto>;
@@ -34,29 +34,29 @@ function seedPlans() {
       version: 1,
       status: 'DRAFT',
       content: {
-        summary: 'This is a sample project plan that outlines the main features and scope.',
+        summary: '这是一个示例概要设计，用于说明主要功能和范围。',
         techAssumptions: ['React 18', 'TypeScript', '@ead/suid', 'MSW', 'Umi 4'],
         features: [
           {
             featureId: 'FEAT-001',
-            title: 'Project Dashboard',
-            outline: 'A dashboard showing project overview, status, and key metrics.',
+            title: '项目看板',
+            outline: '展示项目概览、状态和关键指标的看板。',
           },
           {
             featureId: 'FEAT-002',
-            title: 'Feature Management',
-            outline: 'CRUD operations for managing feature designs and their status.',
+            title: '功能设计管理',
+            outline: '管理功能设计及其状态的增删改查能力。',
           },
           {
             featureId: 'FEAT-003',
-            title: 'Build Execution',
-            outline: 'Interface to trigger and monitor feature builds.',
+            title: '编码执行',
+            outline: '触发并监控功能编码执行的入口。',
           },
         ],
         nonGoals: [
-          'Multi-tenant support',
-          'Advanced analytics',
-          'Third-party integrations',
+          '多租户支持',
+          '高级分析',
+          '第三方集成',
         ],
       },
       isLatest: true,
@@ -80,7 +80,7 @@ export const planHandlers = [
     if (latestPlan) {
       return ok(latestPlan);
     }
-    return fail(`No plan found for project ${projectId}`);
+    return fail(`项目 ${projectId} 暂无概要设计`);
   }),
 
   // P3: PUT /plan/{projectId} - Edit Plan
@@ -92,7 +92,7 @@ export const planHandlers = [
     const latestPlan = plans.find(p => p.isLatest);
 
     if (!latestPlan) {
-      return fail(`No plan found for project ${projectId}`);
+      return fail(`项目 ${projectId} 暂无概要设计`);
     }
 
     // Update the latest plan to DRAFT
@@ -113,7 +113,7 @@ export const planHandlers = [
         });
     }
 
-    return ok(latestPlan, 'Plan updated successfully');
+    return ok(latestPlan, '概要设计已更新');
   }),
 
   // P4: POST /plan/{projectId}/regenerate - Regenerate Plan
@@ -125,7 +125,7 @@ export const planHandlers = [
     const latestPlan = plans.find(p => p.isLatest);
 
     if (!latestPlan) {
-      return fail(`No plan found for project ${projectId}`);
+      return fail(`项目 ${projectId} 暂无概要设计`);
     }
 
     // Mark old plan as not latest
@@ -160,7 +160,7 @@ export const planHandlers = [
 
     // Simulate async generation - in a real mock, we'd flip to DRAFT after some time
     // For this static mock, we'll just return GENERATING
-    return ok(newPlan, 'Plan regeneration started');
+    return ok(newPlan, '概要设计重新生成已开始');
   }),
 
   // P5: POST /plan/{projectId}/confirm - Confirm Plan
@@ -171,11 +171,11 @@ export const planHandlers = [
     const latestPlan = plans.find(p => p.isLatest);
 
     if (!latestPlan) {
-      return fail(`No plan found for project ${projectId}`);
+      return fail(`项目 ${projectId} 暂无概要设计`);
     }
 
     if (latestPlan.status !== 'DRAFT') {
-      return fail(`Only DRAFT plans can be confirmed, current status: ${latestPlan.status}`);
+      return fail(`仅草稿概要设计可确认，当前状态：${latestPlan.status}`);
     }
 
     // Update plan to CONFIRMED
@@ -207,7 +207,7 @@ export const planHandlers = [
       });
     }
 
-    return ok(latestPlan, 'Plan confirmed successfully');
+    return ok(latestPlan, '概要设计已确认');
   }),
 
   // P13: GET /plan/{projectId}/history - Get Plan history

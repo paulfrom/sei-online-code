@@ -21,7 +21,10 @@ public class PlanContent implements Serializable {
     @Schema(description = "技术假设", example = "[\"React + TypeScript\", \"@ead/suid\", \"MSW\"]")
     private List<String> techAssumptions;
 
-    @Schema(description = "功能项列表")
+    @Schema(description = "模块划分")
+    private List<PlanModule> modules;
+
+    @Schema(description = "功能项列表（兼容旧概要设计，无 modules 时作为 fallback）")
     private List<PlanFeature> features;
 
     @Schema(description = "本期不做项", example = "[\"支付功能\", \"多租户支持\"]")
@@ -49,6 +52,14 @@ public class PlanContent implements Serializable {
 
     public void setFeatures(List<PlanFeature> features) {
         this.features = features;
+    }
+
+    public List<PlanModule> getModules() {
+        return modules;
+    }
+
+    public void setModules(List<PlanModule> modules) {
+        this.modules = modules;
     }
 
     public List<String> getNonGoals() {

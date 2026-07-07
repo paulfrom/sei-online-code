@@ -50,6 +50,15 @@ public class Spec extends BaseAuditableEntity {
     @Column(name = "state", nullable = false, length = 20)
     private SpecState state;
 
+    @Column(name = "module_id", length = 64)
+    private String moduleId;
+
+    @Column(name = "module_title", length = 200)
+    private String moduleTitle;
+
+    @Column(name = "module_summary", columnDefinition = "TEXT")
+    private String moduleSummary;
+
     @Convert(converter = SpecPageListConverter.class)
     @Column(name = "pages", columnDefinition = "TEXT")
     private List<SpecPage> pages;
@@ -92,6 +101,30 @@ public class Spec extends BaseAuditableEntity {
 
     public void setState(SpecState state) {
         this.state = state;
+    }
+
+    public String getModuleId() {
+        return moduleId;
+    }
+
+    public void setModuleId(String moduleId) {
+        this.moduleId = moduleId;
+    }
+
+    public String getModuleTitle() {
+        return moduleTitle;
+    }
+
+    public void setModuleTitle(String moduleTitle) {
+        this.moduleTitle = moduleTitle;
+    }
+
+    public String getModuleSummary() {
+        return moduleSummary;
+    }
+
+    public void setModuleSummary(String moduleSummary) {
+        this.moduleSummary = moduleSummary;
     }
 
     public List<SpecPage> getPages() {

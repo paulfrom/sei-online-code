@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 编码前项目状态实时聚合（D12）。职责仅"编码前状态聚合"，与 {@link BuildLoopService}（编码中）边界隔离。
+ * 编码前项目状态实时聚合（D12）。职责仅"编码前状态聚合"，与 FeatureDesign 编码执行边界隔离。
  *
  * <p>契约 §4.1 聚合规则（含 D7 FAILED / D15 空集→DESIGNING）。状态不持久化，按最新 Plan + 最新 FeatureDesign
  * 实时计算。</p>

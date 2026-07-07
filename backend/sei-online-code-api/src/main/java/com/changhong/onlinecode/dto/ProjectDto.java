@@ -1,6 +1,5 @@
 package com.changhong.onlinecode.dto;
 
-import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -27,14 +26,11 @@ public class ProjectDto extends BaseEntityDto {
     @Schema(description = "用户输入的原始 Project Design 文字")
     private String design;
 
-    @Schema(description = "生命周期状态", example = "DRAFTING")
-    private LifecycleState state;
+    @Schema(description = "编码前聚合状态", example = "READY_TO_BUILD")
+    private String state;
 
     @Schema(description = "当前已确认/活动的 Spec id")
     private String currentSpecId;
-
-    @Schema(description = "当前迭代 id")
-    private String currentIterationId;
 
     @Schema(description = "创建时间")
     private Date createdDate;
@@ -58,11 +54,11 @@ public class ProjectDto extends BaseEntityDto {
         this.design = design;
     }
 
-    public LifecycleState getState() {
+    public String getState() {
         return state;
     }
 
-    public void setState(LifecycleState state) {
+    public void setState(String state) {
         this.state = state;
     }
 
@@ -72,14 +68,6 @@ public class ProjectDto extends BaseEntityDto {
 
     public void setCurrentSpecId(String currentSpecId) {
         this.currentSpecId = currentSpecId;
-    }
-
-    public String getCurrentIterationId() {
-        return currentIterationId;
-    }
-
-    public void setCurrentIterationId(String currentIterationId) {
-        this.currentIterationId = currentIterationId;
     }
 
     public Date getCreatedDate() {

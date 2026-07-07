@@ -1,9 +1,7 @@
 /**
- * Track F5 — Spec review page.
+ * Track F5 — Module detailed design page.
  * Renders the structured SpecDto (pages / components / entities / apiContract)
- * as read-only tables; on confirm calls `/api/spec/confirm` which starts an
- * iteration and moves the project to DISPATCHING, then routes to the preview
- * page to drive the deploy → PREVIEW flow (F6/F7).
+ * as read-only tables; legacy API names remain in the service layer for compatibility.
  */
 import React, { useEffect, useState } from 'react';
 import { history, useSearchParams } from 'umi';
@@ -20,7 +18,11 @@ import {
   message,
 } from '@ead/suid';
 import { CheckOutlined, ReloadOutlined } from '@ead/suid-icons';
-import { confirmSpec, findOneSpec, regenerateSpec } from '@/services/onlineCode';
+import {
+  confirmDetailedDesign,
+  findOneDetailedDesign,
+  regenerateDetailedDesign,
+} from '@/services/onlineCode';
 import type { SpecDto } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import { ExtModal } from '@ead/suid';
@@ -33,7 +35,15 @@ const SPEC_STATE_COLOR: Record<SpecDto['state'], string> = {
   FAILED: 'error',
 };
 
-const SpecReview: React.FC = () => {
+const DETAILED_DESIGN_STATE_TEXT: Record<SpecDto['state'], string> = {
+  GENERATING: '生成中',
+  DRAFT: '草稿',
+  SPEC_REVIEW: '待确认',
+  CONFIRMED: '已确认',
+  FAILED: '失败',
+};
+
+const DetailedDesignReview: React.FC = () => {
   const [searchParams] = useSearchParams();
   const specId = searchParams.get('id') ?? '';
   const [spec, setSpec] = useState<SpecDto | null>(null);
@@ -47,12 +57,12 @@ const SpecReview: React.FC = () => {
     let alive = true;
     (async () => {
       setLoading(true);
-      const res = await findOneSpec(specId);
+      const res = await findOneDetailedDesign(specId);
       if (!alive) return;
       if (res.success && res.data) {
         setSpec(res.data);
       } else {
-        message.error(res.message ?? '加载 Spec 失败');
+        message.error(res.message ?? '加载详细设计失败');
       }
       setLoading(false);
     })();
@@ -61,13 +71,13 @@ const SpecReview: React.FC = () => {
     };
   }, [specId]);
 
-  // GENERATING 期间轮询，让「解析需求 / 重新生成」后能自动看到 SPEC_REVIEW/FAILED 结果；
+  // GENERATING 期间轮询，让「生成 / 重新生成」后能自动看到 SPEC_REVIEW/FAILED 结果；
   // 状态离开 GENERATING 即停止（对齐 PlanTab 轮询模式）。
   const specState = spec?.state;
   useEffect(() => {
     if (specState !== 'GENERATING') return;
     const timer = setInterval(async () => {
-      const res = await findOneSpec(specId);
+      const res = await findOneDetailedDesign(specId);
       if (res.success && res.data) {
         setSpec(res.data);
       }
@@ -79,12 +89,12 @@ const SpecReview: React.FC = () => {
     if (!spec) return;
     setConfirming(true);
     try {
-      const res = await confirmSpec(spec.id);
+      const res = await confirmDetailedDesign(spec.id);
       if (!res.success || !res.data) {
         message.error(res.message ?? '确认失败');
         return;
       }
-      message.success('Spec 已确认，任务生成已启动');
+      message.success('详细设计已确认，功能设计生成已启动');
       history.push(`/online-code/project?id=${spec.projectId}`);
     } finally {
       setConfirming(false);
@@ -95,12 +105,12 @@ const SpecReview: React.FC = () => {
     if (!spec) return;
     setRegenerating(true);
     try {
-      const res = await regenerateSpec(spec.projectId, values.modifyHint);
+      const res = await regenerateDetailedDesign(spec.projectId, values.modifyHint);
       if (!res.success || !res.data) {
         message.error(res.message ?? '重新生成失败');
         return;
       }
-      message.success('已重新生成 Spec');
+      message.success('已重新生成详细设计');
       setSpec(res.data);
       history.replace(`/online-code/spec?id=${res.data.id}`);
       setRegenerateModalOpen(false);
@@ -121,7 +131,7 @@ const SpecReview: React.FC = () => {
   if (!spec) {
     return (
       <PageContainer scroll>
-        <PageState error="Spec 不存在" />
+        <PageState error="详细设计不存在" />
       </PageContainer>
     );
   }
@@ -133,9 +143,13 @@ const SpecReview: React.FC = () => {
   return (
     <PageContainer scroll>
       <PageHeader
-        title="Spec 评审"
-        subTitle={`版本 v${spec.version}`}
-        extra={<Tag color={SPEC_STATE_COLOR[spec.state]}>{spec.state}</Tag>}
+        title="详细设计"
+        subTitle={`${spec.moduleTitle ? `${spec.moduleTitle} · ` : ''}版本 v${spec.version}`}
+        extra={
+          <Tag color={SPEC_STATE_COLOR[spec.state]}>
+            {DETAILED_DESIGN_STATE_TEXT[spec.state]}
+          </Tag>
+        }
         actions={
           <>
             <Button
@@ -146,7 +160,7 @@ const SpecReview: React.FC = () => {
               重新生成
             </Button>
             <Popconfirm
-              title="确认该 Spec 并启动迭代？"
+              title="确认该详细设计并启动功能设计？"
               onConfirm={handleConfirm}
               disabled={confirmed || isGenerating || failed}
             >
@@ -156,7 +170,7 @@ const SpecReview: React.FC = () => {
                 loading={confirming}
                 disabled={confirmed || isGenerating || failed}
               >
-                {confirmed ? '已确认' : '确认 Spec'}
+                {confirmed ? '已确认' : '确认详细设计并启动功能设计'}
               </Button>
             </Popconfirm>
           </>
@@ -165,11 +179,11 @@ const SpecReview: React.FC = () => {
 
       {isGenerating && (
         <Card>
-          <Spin spinning tip="正在生成 Spec..." />
+          <Spin spinning tip="正在生成详细设计..." />
         </Card>
       )}
 
-      <Card title="页面 Pages">
+      <Card title="页面">
         <Table
           rowKey="key"
           size="small"
@@ -184,7 +198,7 @@ const SpecReview: React.FC = () => {
         />
       </Card>
 
-      <Card title="组件 Components">
+      <Card title="组件">
         <Table
           rowKey="key"
           size="small"
@@ -199,9 +213,9 @@ const SpecReview: React.FC = () => {
         />
       </Card>
 
-      <Card title="实体 Entities">
+      <Card title="实体">
         {/* guard: backend serializes empty entities/fields as null (contract
-            mismatch with SpecDto); Tables tolerate null dataSource, .map does not */}
+            mismatch with legacy SpecDto); Tables tolerate null dataSource, .map does not */}
         {(spec.entities ?? []).map((entity) => (
           <Descriptions
             key={entity.key}
@@ -220,7 +234,7 @@ const SpecReview: React.FC = () => {
         ))}
       </Card>
 
-      <Card title="接口契约 API Contract">
+      <Card title="接口契约">
         <Table
           rowKey="path"
           size="small"
@@ -238,7 +252,7 @@ const SpecReview: React.FC = () => {
 
       <ExtModal
         open={regenerateModalOpen}
-        title="重新生成 Spec"
+        title="重新生成详细设计"
         confirmLoading={regenerating}
         onCancel={() => {
           setRegenerateModalOpen(false);
@@ -251,7 +265,7 @@ const SpecReview: React.FC = () => {
           <Form.Item name="modifyHint" label="修改提示（可选）">
             <Input.TextArea
               rows={4}
-              placeholder="描述你希望如何修改 Spec"
+              placeholder="描述你希望如何修改详细设计"
             />
           </Form.Item>
         </Form>
@@ -260,4 +274,4 @@ const SpecReview: React.FC = () => {
   );
 };
 
-export default SpecReview;
+export default DetailedDesignReview;

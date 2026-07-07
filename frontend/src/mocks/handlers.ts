@@ -6,33 +6,21 @@
 import { http, HttpResponse } from 'msw';
 import type { Search } from '@/services/onlineCode';
 import {
-  acceptIteration,
   attachAgentSkills,
-  cancelIteration,
   confirmSpec,
   createProject,
   db,
   deleteAgent,
   deleteSkill,
-  deployIteration,
-  dispatchIteration,
+  generateOverviewDesign,
   getConfig,
   importSkill,
-  iterationsOf,
-  mergeIteration,
-  optimizeProject,
-  readIteration,
-  readRun,
-  refineSpec,
   regenerateSpec,
   resolveWorkspace,
-  retryIteration,
-  runsOf,
   saveAgent,
   saveConfig,
   seed,
   specsOf,
-  tasksOf,
 } from './db';
 import { planHandlers } from './handlers/plan';
 import { featureDesignHandlers } from './handlers/featureDesign';
@@ -103,11 +91,11 @@ export const handlers = [
 
   // TODO(cleanup): sibling spec handlers below use stale */api/ prefix, broken in mock mode; migrate separately
 
-  // #R regenerate Spec — new version from SPEC_REVIEW
+  // #R regenerate detailed design — new version from SPEC_REVIEW
   http.post('*/sei-online-code/spec/:projectId/regenerate', async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as { modifyHint?: string };
     const res = regenerateSpec(String(params.projectId), body?.modifyHint);
-    return res.ok ? ok(res.spec, '已重新生成 Spec') : fail(res.message);
+    return res.ok ? ok(res.spec, '已重新生成详细设计') : fail(res.message);
   }),
 
   // #1 create project
@@ -134,39 +122,25 @@ export const handlers = [
     return ok(paginate(rows, search));
   }),
 
-  // #4 refine design → Spec
+  // #4 legacy endpoint path; semantically starts overview design generation
   http.post('*/api/project/refineSpec', async ({ request }) => {
     const body = (await request.json()) as { projectId?: string };
-    const res = refineSpec(body?.projectId ?? '');
-    return res.ok ? ok(res.spec, '需求已解析为 Spec') : fail(res.message);
+    const res = generateOverviewDesign(body?.projectId ?? '');
+    return res.ok ? ok(res.plan, '概要设计生成已启动') : fail(res.message);
   }),
 
-  // #5 load a Spec
+  // #5 load a detailed design (legacy spec endpoint)
   http.get('*/api/spec/findOne', ({ request }) => {
     const id = new URL(request.url).searchParams.get('id') ?? '';
     const spec = db.specs.get(id);
-    return spec ? ok(spec) : fail(`spec ${id} not found`);
+    return spec ? ok(spec) : fail(`详细设计 ${id} 不存在`);
   }),
 
-  // #6 confirm Spec → start iteration
+  // #6 confirm detailed design → start overview design generation
   http.post('*/api/spec/confirm', async ({ request }) => {
     const body = (await request.json()) as { specId?: string };
-    const iteration = confirmSpec(body?.specId ?? '');
-    return iteration ? ok(iteration, 'Spec 已确认，迭代已启动') : fail('spec not found');
-  }),
-
-  // #7 deploy iteration
-  http.post('*/api/iteration/deploy', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const iteration = deployIteration(body?.iterationId ?? '');
-    return iteration ? ok(iteration, '开始部署') : fail('iteration not found');
-  }),
-
-  // #8 poll iteration state / previewUrl
-  http.get('*/api/iteration/findOne', ({ request }) => {
-    const id = new URL(request.url).searchParams.get('id') ?? '';
-    const iteration = readIteration(id);
-    return iteration ? ok(iteration) : fail(`iteration ${id} not found`);
+    const plan = confirmSpec(body?.specId ?? '');
+    return plan ? ok(plan, '详细设计已确认，概要设计生成已启动') : fail('详细设计不存在');
   }),
 
   // #9 poll project lifecycle
@@ -174,60 +148,7 @@ export const handlers = [
     const id = new URL(request.url).searchParams.get('id') ?? '';
     const project = db.projects.get(id);
     if (!project) return fail(`project ${id} not found`);
-    // advance iteration state if a deploy is in flight so state stays coherent
-    if (project.currentIterationId) readIteration(project.currentIterationId);
-    return ok({ state: project.state, iterationId: project.currentIterationId });
-  }),
-
-  // #10 dispatch: confirmed Spec → disjoint tasks (state DISPATCHING→DEVELOPING)
-  http.post('*/api/iteration/dispatch', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const tasks = dispatchIteration(body?.iterationId ?? '');
-    return tasks ? ok(tasks, `已派发 ${tasks.length} 个任务`) : fail('iteration not found');
-  }),
-
-  // #11 list tasks (Search body → PageResult), filter by iterationId
-  http.post('*/api/task/findByPage', async ({ request }) => {
-    const search = (await request.json().catch(() => ({}))) as Search;
-    const iterationId = search?.filters?.find((f) => f.fieldName === 'iterationId')?.value;
-    let rows = Array.from(db.tasks.values());
-    if (iterationId) rows = rows.filter((t) => t.iterationId === String(iterationId));
-    rows = rows.sort((a, b) => a.seq - b.seq);
-    return ok(paginate(rows, search));
-  }),
-
-  // #12 load one task
-  http.get('*/api/task/findOne', ({ request }) => {
-    const id = new URL(request.url).searchParams.get('id') ?? '';
-    const task = db.tasks.get(id);
-    return task ? ok(task) : fail(`task ${id} not found`);
-  }),
-
-  // #13 list runs (Search body → PageResult), filter by iterationId / taskId
-  http.post('*/api/run/findByPage', async ({ request }) => {
-    const search = (await request.json().catch(() => ({}))) as Search;
-    const iterationId = search?.filters?.find((f) => f.fieldName === 'iterationId')?.value;
-    const taskId = search?.filters?.find((f) => f.fieldName === 'taskId')?.value;
-    // advance runs for the scoped iteration so states stay coherent while polling
-    if (iterationId) runsOf(String(iterationId), taskId ? String(taskId) : undefined);
-    let rows = Array.from(db.runs.values());
-    if (iterationId) rows = rows.filter((r) => r.iterationId === String(iterationId));
-    if (taskId) rows = rows.filter((r) => r.taskId === String(taskId));
-    return ok(paginate(rows, search));
-  }),
-
-  // #14 poll one run's state / exitCode
-  http.get('*/api/run/findOne', ({ request }) => {
-    const id = new URL(request.url).searchParams.get('id') ?? '';
-    const run = readRun(id);
-    return run ? ok(run) : fail(`run ${id} not found`);
-  }),
-
-  // #15 merge all task worktrees back (state MERGING→DEPLOYING)
-  http.post('*/api/iteration/merge', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const iteration = mergeIteration(body?.iterationId ?? '');
-    return iteration ? ok(iteration, '开始合并') : fail('iteration not found');
+    return ok({ state: project.state });
   }),
 
   // #16 import a skill; dedup by name (409 on conflict)
@@ -340,50 +261,7 @@ export const handlers = [
     return agent ? ok(agent, '技能已绑定') : fail('agent not found');
   }),
 
-  // --- Phase 4: Full Build Loop (contract eps #25–30) ---
-
-  // #25 accept: PREVIEW → ACCEPTED (sets finishedDate)
-  http.post('*/api/iteration/accept', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const res = acceptIteration(body?.iterationId ?? '');
-    return res.ok ? ok(res.iteration, '已验收') : fail(res.message);
-  }),
-
-  // #26 optimize: PREVIEW → new Spec version + new iteration (round+1) → SPEC_REVIEW
-  http.post('*/api/project/optimize', async ({ request }) => {
-    const body = (await request.json()) as { projectId?: string; feedback?: string };
-    const res = optimizeProject(body?.projectId ?? '', body?.feedback ?? '');
-    return res.ok ? ok(res.iteration, '已生成新一轮 Spec，请评审确认') : fail(res.message);
-  }),
-
-  // #27 timeline: list a project's iterations (filter by projectId, order by round)
-  http.post('*/api/iteration/findByPage', async ({ request }) => {
-    const search = (await request.json().catch(() => ({}))) as Search;
-    const projectId = search?.filters?.find((f) => f.fieldName === 'projectId')?.value;
-    let rows = Array.from(db.iterations.values());
-    if (projectId) {
-      rows = iterationsOf(String(projectId));
-    } else {
-      rows = rows.sort((a, b) => a.round - b.round);
-    }
-    return ok(paginate(rows, search));
-  }),
-
-  // #28 cancel: abort active iteration → CANCELLED (cascade RUNNING tasks/runs)
-  http.post('*/api/iteration/cancel', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const res = cancelIteration(body?.iterationId ?? '');
-    return res.ok ? ok(res.iteration, '迭代已取消') : fail(res.message);
-  }),
-
-  // #29 retry: from FAILED, re-dispatch the same Spec version → DISPATCHING
-  http.post('*/api/iteration/retry', async ({ request }) => {
-    const body = (await request.json()) as { iterationId?: string };
-    const res = retryIteration(body?.iterationId ?? '');
-    return res.ok ? ok(res.iteration, '迭代已重新派发') : fail(res.message);
-  }),
-
-  // #30 spec version history for a project (ordered by version)
+  // #30 detailed design version history for a project (ordered by version)
   http.get('*/api/spec/findByProject', ({ request }) => {
     const projectId = new URL(request.url).searchParams.get('projectId') ?? '';
     if (!projectId) return fail('projectId is required');

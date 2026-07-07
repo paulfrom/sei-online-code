@@ -2,22 +2,21 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
+import com.changhong.onlinecode.dao.SpecDao;
 import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
+import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.dto.plan.PlanContent;
-import com.changhong.onlinecode.dto.plan.PlanFeature;
-import com.changhong.onlinecode.entity.FeatureDesign;
+import com.changhong.onlinecode.dto.plan.PlanModule;
 import com.changhong.onlinecode.entity.Plan;
+import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
-import com.changhong.sei.core.service.bo.OperateResult;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -30,11 +29,19 @@ public class PlanService extends BaseEntityService<Plan> {
 
     private final PlanDao planDao;
     private final FeatureDesignDao featureDesignDao;
+    private final SpecDao specDao;
+    private final SpecAgentService specAgentService;
     private final PlanAgentService planAgentService;
 
-    public PlanService(PlanDao planDao, FeatureDesignDao featureDesignDao, PlanAgentService planAgentService) {
+    public PlanService(PlanDao planDao,
+                       FeatureDesignDao featureDesignDao,
+                       SpecDao specDao,
+                       SpecAgentService specAgentService,
+                       PlanAgentService planAgentService) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
+        this.specDao = specDao;
+        this.specAgentService = specAgentService;
         this.planAgentService = planAgentService;
     }
 
@@ -52,6 +59,24 @@ public class PlanService extends BaseEntityService<Plan> {
     public PlanDto findLatest(String projectId) {
         Plan plan = planDao.findLatestByProjectId(projectId);
         return plan == null ? null : toDto(plan);
+    }
+
+    /**
+     * 查找项目最新已确认概要设计。
+     *
+     * @param projectId 项目 id
+     * @return 最新已确认概要设计 DTO，不存在时返回 null
+     */
+    public PlanDto findLatestConfirmed(String projectId) {
+        List<Plan> plans = planDao.findByProjectIdOrderByVersionDesc(projectId);
+        if (plans == null || plans.isEmpty()) {
+            return null;
+        }
+        return plans.stream()
+                .filter(plan -> plan.getStatus() == PlanStatus.CONFIRMED)
+                .findFirst()
+                .map(this::toDto)
+                .orElse(null);
     }
 
     /**
@@ -145,29 +170,57 @@ public class PlanService extends BaseEntityService<Plan> {
 
         // 置为 CONFIRMED
         latest.setStatus(PlanStatus.CONFIRMED);
-        OperateResultWithData<Plan> saved = super.save(latest);
+        OperateResultWithData<Plan> saved = savePlan(latest);
         if (!saved.successful()) {
             return OperateResultWithData.operationFailure(saved.getMessage());
         }
 
-        // 筛选无 latest FD 的 feature
         PlanContent content = latest.getContent();
-        if (content != null && content.getFeatures() != null && !content.getFeatures().isEmpty()) {
-            List<FeatureDesign> existingFds = featureDesignDao.findLatestByProjectId(projectId);
-            Set<String> existingFeatureIds = existingFds.stream()
-                    .map(FeatureDesign::getFeatureId)
-                    .collect(Collectors.toSet());
-
-            List<PlanFeature> featuresToSpawn = content.getFeatures().stream()
-                    .filter(f -> !existingFeatureIds.contains(f.getFeatureId()))
-                    .collect(Collectors.toList());
-
-            if (!featuresToSpawn.isEmpty()) {
-                planAgentService.spawnFeatureDesigns(projectId, featuresToSpawn);
-            }
+        List<PlanModule> modules = modulesOrFallback(content);
+        int version = nextSpecVersion(projectId);
+        for (PlanModule module : modules) {
+            Spec spec = new Spec();
+            spec.setProjectId(projectId);
+            spec.setVersion(version++);
+            spec.setState(SpecState.GENERATING);
+            spec.setModuleId(module.getModuleId());
+            spec.setModuleTitle(module.getTitle());
+            spec.setModuleSummary(module.getSummary());
+            Spec savedSpec = specDao.save(spec);
+            specAgentService.spawnRequirement(projectId, null, savedSpec.getId());
         }
 
         return OperateResultWithData.operationSuccessWithData(toDto(saved.getData()));
+    }
+
+    private List<PlanModule> modulesOrFallback(PlanContent content) {
+        if (content == null) {
+            return List.of();
+        }
+        if (content.getModules() != null && !content.getModules().isEmpty()) {
+            return content.getModules();
+        }
+        if (content.getFeatures() == null || content.getFeatures().isEmpty()) {
+            return List.of();
+        }
+        PlanModule fallback = new PlanModule();
+        fallback.setModuleId(null);
+        fallback.setTitle("默认模块");
+        fallback.setSummary(content.getSummary());
+        fallback.setFeatures(content.getFeatures());
+        return List.of(fallback);
+    }
+
+    private Integer nextSpecVersion(String projectId) {
+        List<Spec> specs = specDao.findByProjectIdOrderByVersionDesc(projectId);
+        if (specs == null || specs.isEmpty() || specs.get(0).getVersion() == null) {
+            return 1;
+        }
+        return specs.get(0).getVersion() + 1;
+    }
+
+    protected OperateResultWithData<Plan> savePlan(Plan plan) {
+        return super.save(plan);
     }
 
     /**

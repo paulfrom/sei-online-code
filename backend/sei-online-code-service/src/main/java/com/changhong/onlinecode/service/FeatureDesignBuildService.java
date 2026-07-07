@@ -79,7 +79,7 @@ public class FeatureDesignBuildService {
         // 3. 抢占构建锁
         int acquired = featureDesignDao.tryAcquireBuildLock(featureDesignId, FeatureDesignBuildStatus.BUILDING);
         if (acquired == 0) {
-            throw new ConflictException("该功能正在构建中");
+            throw new ConflictException("该功能正在编码执行中");
         }
 
         // 4. 查找 dev-agent

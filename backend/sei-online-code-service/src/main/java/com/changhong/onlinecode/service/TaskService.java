@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Task 服务。查询与状态更新的入口，分派切分逻辑见 {@link DispatchService}。
+ * Task 服务。查询与状态更新的入口；FeatureDesign 编码运行仍使用 Task 作为运行记录。
  *
  * @author sei-online-code
  */

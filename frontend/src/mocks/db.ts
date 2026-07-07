@@ -1,7 +1,8 @@
 /**
  * In-memory mock database for the sei-online-code Phase 1 walking skeleton.
- * Holds Project / Spec / Iteration entities and drives the lifecycle state
- * machine defined in docs/contracts/API-CONTRACT.md §4.
+ * Holds Project / Spec / Plan / FeatureDesign entities for the current
+ * Project Description -> Overview Design -> Module Detailed Design -> Feature Design
+ * -> Coding Execution flow.
  *
  * MSW-first (ADR-0002): this is the single source of live data for the
  * frontend; no real backend is involved in Phase 1.
@@ -12,14 +13,10 @@ export type LifecycleState =
   | 'DRAFTING'
   | 'SPEC_REFINING'
   | 'SPEC_REVIEW'
-  | 'DISPATCHING'
-  | 'DEVELOPING'
-  | 'MERGING'
-  | 'DEPLOYING'
-  | 'PREVIEW'
-  | 'ACCEPTED'
-  | 'FAILED'
-  | 'CANCELLED';
+  | 'PLANNING'
+  | 'DESIGNING'
+  | 'READY_TO_BUILD'
+  | 'FAILED';
 
 export interface ProjectDto {
   id: string;
@@ -27,7 +24,6 @@ export interface ProjectDto {
   design: string;
   state: LifecycleState;
   currentSpecId: string | null;
-  currentIterationId: string | null;
   createdDate: string;
   lastEditedDate: string;
 }
@@ -52,62 +48,6 @@ export interface SpecDto {
   }>;
   modifyHint?: string | null;
   createdDate: string;
-}
-
-export interface IterationDto {
-  id: string;
-  projectId: string;
-  specId: string;
-  specVersion: number;
-  /** 1-based loop-round ordinal within the project (Phase 4 §1.1) */
-  round: number;
-  state: LifecycleState;
-  previewUrl: string | null;
-  /** the iteration this round refined from; null for round 1 (Phase 4 §1.1) */
-  parentIterationId: string | null;
-  /** user optimization prose that seeded this round; null for round 1 (Phase 4 §1.1) */
-  feedback: string | null;
-  createdDate: string;
-  /** set on ACCEPTED/FAILED/CANCELLED (Phase 4 §1.1) */
-  finishedDate: string | null;
-  /** internal: epoch ms when merge was triggered (drives MERGING→DEPLOYING flip) */
-  _mergeAt?: number;
-  /** internal: epoch ms when deploy was triggered (drives DEPLOYING→PREVIEW flip) */
-  _deployAt?: number;
-}
-
-/** Task-level state tokens — verbatim per contract §1.1 / §4. */
-export type TaskState = 'PENDING' | 'RUNNING' | 'MERGING' | 'MERGED' | 'FAILED' | 'CANCELLED';
-
-/** Run-level state tokens — verbatim per contract §1.2 / §4. */
-export type RunState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
-
-/** TaskDto — one non-overlapping unit of work cut by the Dispatch Agent (contract §1.1). */
-export interface TaskDto {
-  id: string;
-  iterationId: string;
-  title: string;
-  description: string;
-  fileScope: string[];
-  assignedAgent: string;
-  state: TaskState;
-  worktreeBranch: string | null;
-  seq: number;
-  createdDate: string;
-}
-
-/** RunDto — one ClaudeRunner execution of a Task in its worktree (contract §1.2). */
-export interface RunDto {
-  id: string;
-  taskId: string;
-  iterationId: string;
-  state: RunState;
-  worktreePath: string;
-  exitCode: number | null;
-  startedDate: string;
-  finishedDate: string | null;
-  /** internal: epoch ms when this run started (drives RUNNING→SUCCEEDED flip) */
-  _startAt?: number;
 }
 
 /** SkillConfig — origin-bearing config (Phase 4, multica dim d). */
@@ -253,18 +193,6 @@ export const now = () => new Date().toISOString().slice(0, 19);
 let seq = 1;
 export const nextId = (prefix: string) => `${prefix}${String(seq++).padStart(4, '0')}`;
 
-/** simulated deploy duration in ms — findOne flips DEPLOYING → PREVIEW after this */
-export const DEPLOY_DURATION_MS = 4000;
-
-/** simulated per-run duration in ms — readRun flips RUNNING → SUCCEEDED after this */
-export const RUN_DURATION_MS = 3000;
-
-/** simulated merge duration in ms — readIteration flips MERGING → DEPLOYING after this */
-export const MERGE_DURATION_MS = 2000;
-
-/** per-project static preview port base (contract §2.3 example uses 41001) */
-let previewPort = 41001;
-
 /** Fixed singleton id for the platform config row (Phase 5 §1.1). */
 export const CONFIG_ID = 'CONFIG';
 
@@ -274,9 +202,6 @@ export const DEFAULT_WORKSPACE_ROOT = '/tmp/sei-online-code';
 interface Db {
   projects: Map<string, ProjectDto>;
   specs: Map<string, SpecDto>;
-  iterations: Map<string, IterationDto>;
-  tasks: Map<string, TaskDto>;
-  runs: Map<string, RunDto>;
   skills: Map<string, SkillDto>;
   agents: Map<string, AgentDto>;
   /** singleton platform config row (Phase 5); null until first get creates it */
@@ -292,9 +217,6 @@ interface Db {
 export const db: Db = {
   projects: new Map(),
   specs: new Map(),
-  iterations: new Map(),
-  tasks: new Map(),
-  runs: new Map(),
   skills: new Map(),
   agents: new Map(),
   config: null,
@@ -303,7 +225,7 @@ export const db: Db = {
   featureDesigns: new Map(),
 };
 
-/** Build a demo Spec structure from a project's design prose. */
+/** Build a demo detailed design structure from a project's description prose. */
 function buildSpec(project: ProjectDto, version: number): SpecDto {
   return {
     id: nextId('SPEC'),
@@ -361,7 +283,55 @@ function buildSpec(project: ProjectDto, version: number): SpecDto {
   };
 }
 
-/** create project → DRAFTING (contract ep #1) */
+/** Build demo overview design content from a project description. */
+function buildOverviewDesign(project: ProjectDto): PlanContent {
+  return {
+    summary: `${project.name}概要设计：基于项目描述「${project.design}」梳理核心范围、模块边界和后续功能设计输入。`,
+    techAssumptions: ['React', 'TypeScript', '@ead/suid', 'Umi'],
+    features: [
+      {
+        featureId: 'FEAT-001',
+        title: '基础列表与查询',
+        outline: '提供主数据列表、关键字搜索和基础分页能力。',
+      },
+      {
+        featureId: 'FEAT-002',
+        title: '详情与编辑',
+        outline: '提供详情查看、新增和编辑入口，并保持表单校验一致。',
+      },
+      {
+        featureId: 'FEAT-003',
+        title: '状态流转与编码执行',
+        outline: '串联功能设计确认后的编码执行状态展示与日志查看。',
+      },
+    ],
+    nonGoals: ['复杂权限模型', '跨系统集成', '高级数据分析'],
+  };
+}
+
+/** Upsert a mock overview design so the project detail overview tab has content. */
+function upsertOverviewDesign(project: ProjectDto): PlanDto {
+  const plans = Array.from(db.plans?.values() ?? []).filter((p) => p.projectId === project.id);
+  plans.forEach((p) => {
+    p.isLatest = false;
+  });
+  const latestVersion = plans.reduce((max, p) => Math.max(max, p.version), 0);
+  const plan: PlanDto = {
+    id: nextId('PLAN'),
+    projectId: project.id,
+    version: latestVersion + 1,
+    status: 'DRAFT',
+    content: buildOverviewDesign(project),
+    modifyHint: undefined,
+    isLatest: true,
+    createdDate: now(),
+    lastEditedDate: now(),
+  };
+  db.plans?.set(plan.id, plan);
+  return plan;
+}
+
+/** create project description → DRAFTING (contract ep #1) */
 export function createProject(name: string, design: string): ProjectDto {
   const ts = now();
   const project: ProjectDto = {
@@ -370,7 +340,6 @@ export function createProject(name: string, design: string): ProjectDto {
     design,
     state: 'DRAFTING',
     currentSpecId: null,
-    currentIterationId: null,
     createdDate: ts,
     lastEditedDate: ts,
   };
@@ -378,14 +347,14 @@ export function createProject(name: string, design: string): ProjectDto {
   return project;
 }
 
-/** refine design → Spec, project → SPEC_REVIEW (contract ep #4) */
+/** compatibility implementation: legacy refine design → detailed design, project → SPEC_REVIEW. */
 export function refineSpec(
   projectId: string,
 ): { ok: true; spec: SpecDto } | { ok: false; message: string } {
   const project = db.projects.get(projectId);
   if (!project) return { ok: false, message: `project ${projectId} not found` };
   if (project.state !== 'DRAFTING' && project.state !== 'FAILED') {
-    return { ok: false, message: `仅 DRAFTING/FAILED 状态可精炼 Spec，当前为 ${project.state}` };
+    return { ok: false, message: `仅 DRAFTING/FAILED 状态可生成概要设计，当前为 ${project.state}` };
   }
   const version =
     Array.from(db.specs.values()).filter((s) => s.projectId === projectId).length + 1;
@@ -397,7 +366,23 @@ export function refineSpec(
   return { ok: true, spec };
 }
 
-/** confirm Spec → generate Plan for task approval (contract ep #6) */
+/** Semantic mock wrapper for UI-facing overview design generation. */
+export function generateOverviewDesign(
+  projectId: string,
+): { ok: true; spec: SpecDto; plan: PlanDto } | { ok: false; message: string } {
+  const res = refineSpec(projectId);
+  if (!res.ok) return res;
+  const project = db.projects.get(projectId);
+  let plan: PlanDto | null = null;
+  if (project) {
+    plan = upsertOverviewDesign(project);
+    project.state = 'PLANNING';
+    project.lastEditedDate = now();
+  }
+  return plan ? { ...res, plan } : { ok: false, message: `project ${projectId} not found` };
+}
+
+/** confirm detailed design → generate overview design for task approval (contract ep #6) */
 export function confirmSpec(specId: string): PlanDto | null {
   const spec = db.specs.get(specId);
   if (!spec) return null;
@@ -432,332 +417,7 @@ export function confirmSpec(specId: string): PlanDto | null {
   return plan;
 }
 
-/** deploy iteration → DEPLOYING (flips to PREVIEW after DEPLOY_DURATION_MS) */
-export function deployIteration(iterationId: string): IterationDto | null {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return null;
-  const project = db.projects.get(iteration.projectId);
-  iteration.state = 'DEPLOYING';
-  iteration._deployAt = Date.now();
-  if (project) {
-    project.state = 'DEPLOYING';
-    project.lastEditedDate = now();
-  }
-  return iteration;
-}
-
-/**
- * Read an iteration, advancing DEPLOYING → PREVIEW once the simulated build
- * duration has elapsed, and MERGING → DEPLOYING once the merge duration has
- * elapsed. This is the polling fallback (contract §3.1 / F2 / F12).
- */
-export function readIteration(iterationId: string): IterationDto | null {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return null;
-  // MERGING → DEPLOYING (ep #15 completes async; contract §4)
-  if (
-    iteration.state === 'MERGING' &&
-    iteration._mergeAt &&
-    Date.now() - iteration._mergeAt >= MERGE_DURATION_MS
-  ) {
-    iteration.state = 'DEPLOYING';
-    iteration._deployAt = Date.now();
-    // all tasks finish merging back
-    Array.from(db.tasks.values())
-      .filter((t) => t.iterationId === iterationId)
-      .forEach((t) => {
-        if (t.state === 'MERGING') t.state = 'MERGED';
-      });
-    const project = db.projects.get(iteration.projectId);
-    if (project) {
-      project.state = 'DEPLOYING';
-      project.lastEditedDate = now();
-    }
-  }
-  if (
-    iteration.state === 'DEPLOYING' &&
-    iteration._deployAt &&
-    Date.now() - iteration._deployAt >= DEPLOY_DURATION_MS
-  ) {
-    iteration.state = 'PREVIEW';
-    iteration.previewUrl = `http://localhost:${previewPort++}`;
-    const project = db.projects.get(iteration.projectId);
-    if (project) {
-      project.state = 'PREVIEW';
-      project.lastEditedDate = now();
-    }
-  }
-  return iteration;
-}
-
-/**
- * Dispatch Agent (contract ep #10): cut the confirmed Spec into ≥2 disjoint
- * tasks by fileScope, spawn one parallel Run per task (state RUNNING), and move
- * the project DISPATCHING → DEVELOPING. Idempotent: returns existing tasks if
- * already dispatched.
- */
-export function dispatchIteration(iterationId: string): TaskDto[] | null {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return null;
-  const project = db.projects.get(iteration.projectId);
-  if (!project) return null;
-
-  const existing = tasksOf(iterationId);
-  if (existing.length) return existing;
-
-  // Cut disjoint tasks from the spec's pages (fallback to a 2-task default).
-  const spec = db.specs.get(iteration.specId);
-  const pages = spec?.pages?.length
-    ? spec.pages
-    : [
-        { key: 'list', title: '列表页', route: '/list', description: '分页列表' },
-        { key: 'detail', title: '详情页', route: '/detail', description: '详情视图' },
-      ];
-
-  const tasks: TaskDto[] = pages.map((page, idx) => {
-    const seq = idx + 1;
-    const iterNum = iterationId.replace(/\D/g, '').slice(-4) || '0001';
-    const task: TaskDto = {
-      id: nextId('TASK'),
-      iterationId,
-      title: page.title,
-      description: `实现 ${page.route} 页面 + 对应 mock`,
-      fileScope: [`src/pages${page.route}.tsx`, `src/mocks/${page.key}.ts`],
-      assignedAgent: 'dev-agent',
-      state: 'RUNNING',
-      worktreeBranch: `task/${iterNum}-${String(seq).padStart(4, '0')}`,
-      seq,
-      createdDate: now(),
-    };
-    db.tasks.set(task.id, task);
-
-    // one parallel Run per task, starts RUNNING
-    const run: RunDto = {
-      id: nextId('RUN'),
-      taskId: task.id,
-      iterationId,
-      state: 'RUNNING',
-      worktreePath: `/tmp/rapid-app-dev/${project.id}/wt-${task.id}`,
-      exitCode: null,
-      startedDate: now(),
-      finishedDate: null,
-      _startAt: Date.now(),
-    };
-    db.runs.set(run.id, run);
-    return task;
-  });
-
-  iteration.state = 'DEVELOPING';
-  project.state = 'DEVELOPING';
-  project.lastEditedDate = now();
-  return tasks;
-}
-
-/** All tasks of an iteration, ordered by dispatch seq. */
-export function tasksOf(iterationId: string): TaskDto[] {
-  return Array.from(db.tasks.values())
-    .filter((t) => t.iterationId === iterationId)
-    .sort((a, b) => a.seq - b.seq);
-}
-
-/**
- * Read a run, advancing RUNNING → SUCCEEDED once the simulated run duration has
- * elapsed (also marks its task's dev work done, keeping the task RUNNING until
- * merge). This is the per-run polling fallback for the WS run-log (contract §3).
- */
-export function readRun(runId: string): RunDto | null {
-  const run = db.runs.get(runId);
-  if (!run) return null;
-  if (run.state === 'RUNNING' && run._startAt && Date.now() - run._startAt >= RUN_DURATION_MS) {
-    run.state = 'SUCCEEDED';
-    run.exitCode = 0;
-    run.finishedDate = now();
-  }
-  return run;
-}
-
-/** All runs of an iteration (optionally scoped to a task), advancing each. */
-export function runsOf(iterationId: string, taskId?: string): RunDto[] {
-  return Array.from(db.runs.values())
-    .filter((r) => r.iterationId === iterationId && (!taskId || r.taskId === taskId))
-    .map((r) => readRun(r.id) as RunDto)
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
-}
-
-/**
- * Merge all task worktrees back (contract ep #15): move tasks RUNNING → MERGING,
- * project DEVELOPING → MERGING; readIteration then advances MERGING → DEPLOYING
- * asynchronously. Returns the iteration.
- */
-export function mergeIteration(iterationId: string): IterationDto | null {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return null;
-  const project = db.projects.get(iteration.projectId);
-  // ensure runs have advanced before merging
-  runsOf(iterationId);
-  tasksOf(iterationId).forEach((t) => {
-    if (t.state === 'RUNNING') t.state = 'MERGING';
-  });
-  iteration.state = 'MERGING';
-  iteration._mergeAt = Date.now();
-  if (project) {
-    project.state = 'MERGING';
-    project.lastEditedDate = now();
-  }
-  return iteration;
-}
-
-/** Terminal states — no further transitions; carry `finishedDate` (Phase 4 §3). */
-const TERMINAL_STATES: LifecycleState[] = ['ACCEPTED', 'FAILED', 'CANCELLED'];
-
-/**
- * Accept (contract ep #25): PREVIEW → ACCEPTED, set finishedDate. Guarded:
- * only PREVIEW iterations accept sign-off.
- */
-export function acceptIteration(
-  iterationId: string,
-): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
-  if (iteration.state !== 'PREVIEW') {
-    return { ok: false, message: `仅 PREVIEW 状态可验收，当前为 ${iteration.state}` };
-  }
-  iteration.state = 'ACCEPTED';
-  iteration.finishedDate = now();
-  const project = db.projects.get(iteration.projectId);
-  if (project) {
-    project.state = 'ACCEPTED';
-    project.lastEditedDate = now();
-  }
-  return { ok: true, iteration };
-}
-
-/**
- * Optimize (contract ep #26): from PREVIEW, the Requirement Agent incrementally
- * updates the Spec → a NEW immutable version, opens a new iteration (round+1,
- * parent chain, feedback) in SPEC_REVIEW. Feedback must be non-empty; the prior
- * Spec is never edited (Phase 4 §3 — Spec is the single source of truth).
- */
-export function optimizeProject(
-  projectId: string,
-  feedback: string,
-): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
-  const project = db.projects.get(projectId);
-  if (!project) return { ok: false, message: `project ${projectId} not found` };
-  if (!feedback || !feedback.trim()) return { ok: false, message: 'feedback 不能为空' };
-  if (project.state !== 'PREVIEW') {
-    return { ok: false, message: `仅 PREVIEW 状态可优化，当前为 ${project.state}` };
-  }
-  const parent = project.currentIterationId
-    ? db.iterations.get(project.currentIterationId) ?? null
-    : null;
-
-  // new immutable Spec version = prior max + 1
-  const priorVersion = Array.from(db.specs.values())
-    .filter((s) => s.projectId === projectId)
-    .reduce((m, s) => Math.max(m, s.version), 0);
-  const spec = buildSpec(project, priorVersion + 1);
-  db.specs.set(spec.id, spec);
-
-  const iteration: IterationDto = {
-    id: nextId('ITER'),
-    projectId: project.id,
-    specId: spec.id,
-    specVersion: spec.version,
-    round: (parent?.round ?? 0) + 1,
-    state: 'SPEC_REVIEW',
-    previewUrl: null,
-    parentIterationId: parent?.id ?? null,
-    feedback: feedback.trim(),
-    createdDate: now(),
-    finishedDate: null,
-  };
-  db.iterations.set(iteration.id, iteration);
-  project.currentSpecId = spec.id;
-  project.currentIterationId = iteration.id;
-  project.state = 'SPEC_REVIEW';
-  project.lastEditedDate = now();
-  return { ok: true, iteration };
-}
-
-/** All iterations of a project, ordered by round (contract ep #27). */
-export function iterationsOf(projectId: string): IterationDto[] {
-  return Array.from(db.iterations.values())
-    .filter((it) => it.projectId === projectId)
-    .sort((a, b) => a.round - b.round);
-}
-
-/**
- * Cancel (contract ep #28): abort a non-terminal iteration → CANCELLED, cascade
- * RUNNING tasks/runs → CANCELLED in the same pass (backend rule #9). Guarded:
- * terminal iterations cannot be cancelled.
- */
-export function cancelIteration(
-  iterationId: string,
-): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
-  if (TERMINAL_STATES.includes(iteration.state)) {
-    return { ok: false, message: `终态迭代不可取消，当前为 ${iteration.state}` };
-  }
-  // cascade: RUNNING/MERGING tasks and RUNNING runs → CANCELLED
-  Array.from(db.tasks.values())
-    .filter((t) => t.iterationId === iterationId)
-    .forEach((t) => {
-      if (t.state === 'RUNNING' || t.state === 'MERGING' || t.state === 'PENDING') {
-        t.state = 'CANCELLED';
-      }
-    });
-  Array.from(db.runs.values())
-    .filter((r) => r.iterationId === iterationId)
-    .forEach((r) => {
-      if (r.state === 'RUNNING') {
-        r.state = 'CANCELLED';
-        r.finishedDate = now();
-      }
-    });
-  iteration.state = 'CANCELLED';
-  iteration.finishedDate = now();
-  const project = db.projects.get(iteration.projectId);
-  if (project) {
-    project.state = 'CANCELLED';
-    project.lastEditedDate = now();
-  }
-  return { ok: true, iteration };
-}
-
-/**
- * Retry (contract ep #29): from FAILED, re-dispatch the same Spec version — new
- * tasks/runs, state → DISPATCHING. Guarded: only FAILED iterations retry. Prior
- * tasks/runs of this iteration are cleared so re-dispatch starts clean.
- */
-export function retryIteration(
-  iterationId: string,
-): { ok: true; iteration: IterationDto } | { ok: false; message: string } {
-  const iteration = db.iterations.get(iterationId);
-  if (!iteration) return { ok: false, message: `iteration ${iterationId} not found` };
-  if (iteration.state !== 'FAILED') {
-    return { ok: false, message: `仅 FAILED 状态可重试，当前为 ${iteration.state}` };
-  }
-  // drop stale tasks/runs so re-dispatch cuts a fresh set
-  Array.from(db.tasks.values())
-    .filter((t) => t.iterationId === iterationId)
-    .forEach((t) => db.tasks.delete(t.id));
-  Array.from(db.runs.values())
-    .filter((r) => r.iterationId === iterationId)
-    .forEach((r) => db.runs.delete(r.id));
-  iteration.state = 'DISPATCHING';
-  iteration.finishedDate = null;
-  const project = db.projects.get(iteration.projectId);
-  if (project) {
-    project.currentIterationId = iteration.id;
-    project.state = 'DISPATCHING';
-    project.lastEditedDate = now();
-  }
-  return { ok: true, iteration };
-}
-
-/** Spec version history for a project, ordered by version (contract ep #30). */
+/** Detailed design version history for a project, ordered by version (legacy endpoint). */
 export function specsOf(projectId: string): SpecDto[] {
   return Array.from(db.specs.values())
     .filter((s) => s.projectId === projectId)
@@ -765,8 +425,8 @@ export function specsOf(projectId: string): SpecDto[] {
 }
 
 /**
- * regenerate Spec — version+1, latest → GENERATING（契约 #R，镜像 Plan regenerate）。
- * mock 异步：2s 后填充内容并翻 SPEC_REVIEW，让前端轮询能拿到结果（plan mock 无此翻转，spec 此处增强）。
+ * regenerate detailed design — version+1, latest → GENERATING（契约 #R，镜像 Plan regenerate）。
+ * mock 异步：2s 后填充内容并翻 SPEC_REVIEW，让前端轮询能拿到结果。
  */
 export function regenerateSpec(
   projectId: string,
@@ -775,13 +435,13 @@ export function regenerateSpec(
   const project = db.projects.get(projectId);
   if (!project) return { ok: false, message: `project ${projectId} not found` };
   if (project.state !== 'SPEC_REVIEW') {
-    return { ok: false, message: `仅 SPEC_REVIEW 状态可重新生成 Spec，当前为 ${project.state}` };
+    return { ok: false, message: `仅 SPEC_REVIEW 状态可重新生成详细设计，当前为 ${project.state}` };
   }
   const latest = Array.from(db.specs.values())
     .filter((s) => s.projectId === projectId)
     .sort((a, b) => b.version - a.version)[0];
   if (latest && latest.state === 'GENERATING') {
-    return { ok: false, message: 'Spec 正在生成中，不可重复发起' };
+    return { ok: false, message: '详细设计正在生成中，不可重复发起' };
   }
   const version = (latest?.version ?? 0) + 1;
   const spec: SpecDto = {
@@ -799,7 +459,7 @@ export function regenerateSpec(
   db.specs.set(spec.id, spec);
   project.currentSpecId = spec.id;
   project.lastEditedDate = now();
-  // project 保持 SPEC_REVIEW（不经过 SPEC_REFINING）；2s 后填充内容并翻 SPEC_REVIEW
+  // project 保持 SPEC_REVIEW（不经过 SPEC_REFINING）；2s 后填充内容并翻 SPEC_REVIEW。
   setTimeout(() => {
     const built = buildSpec(project, version);
     spec.pages = built.pages;
@@ -1028,7 +688,7 @@ function seedSkillsAndAgents(): void {
     };
     db.agents.set(agent.id, agent);
   };
-  seedAgent('requirement-agent', '内置：需求解析 Agent');
+  seedAgent('requirement-agent', '内置：概要设计 Agent');
   seedAgent('dispatch-agent', '内置：任务派发 Agent');
   seedAgent('deploy-agent', '内置：部署 Agent');
 

@@ -30,6 +30,15 @@ public class SpecDto extends BaseEntityDto {
     @Schema(description = "Spec 状态", example = "SPEC_REVIEW")
     private SpecState state;
 
+    @Schema(description = "所属概要设计模块 id", example = "MOD001")
+    private String moduleId;
+
+    @Schema(description = "所属概要设计模块标题", example = "库存模块")
+    private String moduleTitle;
+
+    @Schema(description = "所属概要设计模块概要")
+    private String moduleSummary;
+
     @Schema(description = "页面列表")
     private List<SpecPage> pages;
 
@@ -70,6 +79,30 @@ public class SpecDto extends BaseEntityDto {
 
     public void setState(SpecState state) {
         this.state = state;
+    }
+
+    public String getModuleId() {
+        return moduleId;
+    }
+
+    public void setModuleId(String moduleId) {
+        this.moduleId = moduleId;
+    }
+
+    public String getModuleTitle() {
+        return moduleTitle;
+    }
+
+    public void setModuleTitle(String moduleTitle) {
+        this.moduleTitle = moduleTitle;
+    }
+
+    public String getModuleSummary() {
+        return moduleSummary;
+    }
+
+    public void setModuleSummary(String moduleSummary) {
+        this.moduleSummary = moduleSummary;
     }
 
     public List<SpecPage> getPages() {

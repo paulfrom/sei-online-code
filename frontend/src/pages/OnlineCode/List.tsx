@@ -2,8 +2,8 @@
  * Track F3 + F4 — Projects list with create-project flow.
  * F3: ExtTable remotePaging against `/api/project/findByPage`.
  * F4: create form (name, design) → `/api/project/save`.
- * Lifecycle-aware row action drives the walking skeleton: DRAFTING → refine,
- * SPEC_REVIEW → review, DISPATCHING/DEPLOYING/PREVIEW → preview (F7).
+ * Row action enters the current Project Description -> Overview Design -> Module Detailed Design
+ * -> Feature Design -> Coding Execution flow.
  */
 import React, { useRef, useState } from 'react';
 import { history } from 'umi';
@@ -20,18 +20,12 @@ import type { ExtTableProps, ExtTableRef } from '@ead/suid';
 import { PlusOutlined } from '@ead/suid-icons';
 import {
   PROJECT_FIND_BY_PAGE_URL,
-  refineSpec,
+  generateOverviewDesign,
   saveProject,
 } from '@/services/onlineCode';
 import type { LifecycleState, ProjectDto } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
 import { PageContainer } from './components/PageLayout';
-
-/** states routed to the dispatch (concurrency) view */
-const DISPATCH_STATES: LifecycleState[] = ['DISPATCHING', 'DEVELOPING', 'MERGING'];
-
-/** states from which the user should go straight to the preview page */
-const PREVIEW_STATES: LifecycleState[] = ['DEPLOYING', 'PREVIEW', 'ACCEPTED'];
 
 const ProjectList: React.FC = () => {
   const tableRef = useRef<ExtTableRef>(null);
@@ -39,41 +33,33 @@ const ProjectList: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const goSpec = async (record: ProjectDto) => {
-    // DRAFTING: run the Requirement Agent first, then open the Spec review.
-    if (record.state === 'DRAFTING' || (record.state === 'FAILED' && !record.currentIterationId)) {
-      const res = await refineSpec(record.id);
+  const goOverviewDesign = async (record: ProjectDto) => {
+    // DRAFTING: start overview design generation, then open the project workspace.
+    if (record.state === 'DRAFTING' || (!record.currentSpecId && record.state === 'FAILED')) {
+      const res = await generateOverviewDesign(record.id);
       if (!res.success || !res.data) {
-        message.error(res.message ?? '需求解析失败');
+        message.error(res.message ?? '概要设计生成失败');
         return;
       }
-      history.push(`/online-code/spec?id=${res.data.id}`);
+      history.push(`/online-code/project?id=${record.id}`);
       return;
     }
-    if (record.currentSpecId) {
+    if (record.state === 'SPEC_REVIEW' && record.currentSpecId) {
       history.push(`/online-code/spec?id=${record.currentSpecId}`);
+      return;
     }
+    history.push(`/online-code/project?id=${record.id}`);
   };
 
   const handleRowAction = (record: ProjectDto) => {
-    if (DISPATCH_STATES.includes(record.state) && record.currentIterationId) {
-      history.push(`/online-code/dispatch?id=${record.id}`);
-      return;
-    }
-    if (PREVIEW_STATES.includes(record.state) && record.currentIterationId) {
-      history.push(`/online-code/preview?id=${record.id}`);
-      return;
-    }
-    goSpec(record);
+    goOverviewDesign(record);
   };
 
   const rowActionLabel = (record: ProjectDto): string => {
-    if (record.state === 'DRAFTING') return '解析需求';
-    if (record.state === 'FAILED' && !record.currentIterationId) return '重新解析需求';
-    if (record.state === 'SPEC_REVIEW') return '评审 Spec';
-    if (DISPATCH_STATES.includes(record.state)) return '查看派发';
-    if (PREVIEW_STATES.includes(record.state)) return '查看预览';
-    return '查看';
+    if (record.state === 'DRAFTING') return '生成概要设计';
+    if (record.state === 'FAILED' && !record.currentSpecId) return '重新生成概要设计';
+    if (record.state === 'SPEC_REVIEW') return '查看详细设计';
+    return '查看项目';
   };
 
   const columns: ExtTableProps<ProjectDto>['columns'] = [
@@ -93,7 +79,7 @@ const ProjectList: React.FC = () => {
       ),
     },
     { title: '项目名称', dataIndex: 'name', width: 200 },
-    { title: '需求描述', dataIndex: 'design', expandUnusedSpace: true },
+    { title: '项目描述', dataIndex: 'design', expandUnusedSpace: true },
     {
       title: '状态',
       dataIndex: 'state',
@@ -162,8 +148,8 @@ const ProjectList: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="design"
-            label="Project Design（需求描述）"
-            rules={[{ required: true, message: '请输入需求描述' }]}
+            label="项目描述"
+            rules={[{ required: true, message: '请输入项目描述' }]}
           >
             <Input.TextArea
               rows={6}

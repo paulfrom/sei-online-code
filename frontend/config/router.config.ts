@@ -38,24 +38,6 @@ const routes: any[] = [
             component: './OnlineCode/ProjectDetail',
           },
           {
-            path: '/online-code/dispatch',
-            name: 'onlineCodeDispatch',
-            title: 'menu.onlineCodeDispatch',
-            component: './OnlineCode/Dispatch',
-          },
-          {
-            path: '/online-code/preview',
-            name: 'onlineCodePreview',
-            title: 'menu.onlineCodePreview',
-            component: './OnlineCode/Preview',
-          },
-          {
-            path: '/online-code/timeline',
-            name: 'onlineCodeTimeline',
-            title: 'menu.onlineCodeTimeline',
-            component: './OnlineCode/Timeline',
-          },
-          {
             path: '/online-code/skills',
             name: 'onlineCodeSkills',
             title: 'menu.onlineCodeSkills',

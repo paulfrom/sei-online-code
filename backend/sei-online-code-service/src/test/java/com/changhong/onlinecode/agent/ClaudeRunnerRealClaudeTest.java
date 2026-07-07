@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * {@link ClaudeRunner} 端到端 real-claude 测试。
  *
- * <p>验证 WHY：ClaudeRunner 是 PlanAgentService / DispatchService / FeatureDesignBuildService 等
+ * <p>验证 WHY：ClaudeRunner 是 PlanAgentService / FeatureDesignBuildService 等
  * agent 链路的执行底座，核心契约是「spawn 真实 claude CLI → 解析 {@code --output-format json}
  * 的 result envelope → 剥离 markdown 围栏 → 返回非空 result 文本」。单元测试 mock 掉进程，
  * 无法证明真实 envelope 解析与进程 stdout/stderr 流式读取端到端正确。本测试钉死这条路径：

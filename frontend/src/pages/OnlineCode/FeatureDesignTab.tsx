@@ -20,7 +20,7 @@ import {
   EditOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
-  PlayCircleOutlined,
+  PlayCircleFilled,
   EyeOutlined,
 } from '@ead/suid-icons';
 import {
@@ -80,10 +80,10 @@ const buildStatusColorMap: Record<string, string> = {
 };
 
 const buildStatusTextMap: Record<string, string> = {
-  IDLE: '未构建',
-  BUILDING: '构建中',
-  BUILT: '已构建',
-  BUILD_FAILED: '构建失败',
+  IDLE: '未执行',
+  BUILDING: '编码执行中',
+  BUILT: '已执行',
+  BUILD_FAILED: '执行失败',
   STALE: '已过期',
 };
 
@@ -139,7 +139,7 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
       }
     } catch (e: any) {
       if (e.status === 409) {
-        message.error('该功能正在构建中，无法重新生成');
+        message.error('该功能正在编码执行中，无法重新生成');
       } else {
         message.error('重新生成失败');
       }
@@ -189,18 +189,18 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
     try {
       const res = await build(record.id);
       if (res.success && res.data) {
-        message.success('构建已开始');
+        message.success('编码执行已开始');
         setCurrentBuildRunId(res.data.runId);
         setBuildModalOpen(true);
         refreshTable();
       } else {
-        message.error(res.message ?? '构建失败');
+        message.error(res.message ?? '编码执行失败');
       }
     } catch (e: any) {
       if (e.status === 409) {
-        message.error('该功能正在构建中');
+        message.error('该功能正在编码执行中');
       } else {
-        message.error('构建失败');
+        message.error('编码执行失败');
       }
     } finally {
       setSubmitting(false);
@@ -238,7 +238,7 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
       ),
     },
     {
-      title: '构建状态',
+      title: '编码执行状态',
       dataIndex: 'buildStatus',
       width: 120,
       render: (buildStatus: string) => (
@@ -299,7 +299,7 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
           {isConfirmed(record) && !isBuilding(record) && (
             <ActionButton
               type="text"
-              icon={<PlayCircleOutlined />}
+              icon={<PlayCircleFilled />}
               onClick={() => handleBuild(record)}
             >
               执行编码
@@ -386,13 +386,13 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
 
       <ExtModal
         open={buildModalOpen}
-        title="构建已开始"
+        title="编码执行已开始"
         onCancel={() => setBuildModalOpen(false)}
         onOk={() => setBuildModalOpen(false)}
         destroyOnHidden
       >
         <div>
-          <p>构建任务已启动</p>
+          <p>编码执行任务已启动</p>
           {currentBuildRunId && (
             <p>
               运行ID: <strong>{currentBuildRunId}</strong>

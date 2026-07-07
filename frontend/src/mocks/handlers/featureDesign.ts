@@ -131,16 +131,16 @@ function seedFeatureDesigns() {
           buildStatus: 'IDLE',
           content: {
             featureId: 'FEAT-003',
-            goal: 'As a developer, I want to trigger builds so that I can see the implemented features.',
+            goal: '作为开发者，我希望触发编码执行，以查看已实现的功能。',
             design: {
-              buildButton: true,
+              codingExecutionButton: true,
               statusIndicator: true,
               logView: true,
             },
             acceptance: [
-              'Can trigger a build for confirmed features',
-              'Can see real-time build status',
-              'Can view build logs',
+              '可对已确认的功能触发编码执行',
+              '可查看实时编码执行状态',
+              '可查看编码执行日志',
             ],
             fileScope: ['src/pages/Build/index.tsx', 'src/pages/Build/components/BuildLog.tsx'],
           },
@@ -177,7 +177,7 @@ export const featureDesignHandlers = [
     if (fd) {
       return ok(fd);
     }
-    return fail(`FeatureDesign ${id} not found`);
+    return fail(`功能设计 ${id} 不存在`);
   }),
 
   // P8: PUT /featureDesign/{id} - Edit FeatureDesign
@@ -188,13 +188,13 @@ export const featureDesignHandlers = [
     const fd = featureDesignsMap.get(id as string);
 
     if (!fd) {
-      return fail(`FeatureDesign ${id} not found`);
+      return fail(`功能设计 ${id} 不存在`);
     }
 
     if (fd.buildStatus === 'BUILDING') {
       // Return 409 Conflict when BUILDING
       return new HttpResponse(
-        JSON.stringify({ success: false, message: '该功能正在构建中', data: null }),
+        JSON.stringify({ success: false, message: '该功能正在编码执行中', data: null }),
         { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -207,7 +207,7 @@ export const featureDesignHandlers = [
     }
     fd.lastEditedDate = now();
 
-    return ok(fd, 'FeatureDesign updated successfully');
+    return ok(fd, '功能设计已更新');
   }),
 
   // P9: POST /featureDesign/{id}/regenerate - Regenerate FeatureDesign
@@ -218,13 +218,13 @@ export const featureDesignHandlers = [
     const fd = featureDesignsMap.get(id as string);
 
     if (!fd) {
-      return fail(`FeatureDesign ${id} not found`);
+      return fail(`功能设计 ${id} 不存在`);
     }
 
     if (fd.buildStatus === 'BUILDING') {
       // Return 409 Conflict when BUILDING
       return new HttpResponse(
-        JSON.stringify({ success: false, message: '该功能正在构建中', data: null }),
+        JSON.stringify({ success: false, message: '该功能正在编码执行中', data: null }),
         { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -249,7 +249,7 @@ export const featureDesignHandlers = [
     }
     featureDesignsMap.set(newFd.id, newFd);
 
-    return ok(newFd, 'FeatureDesign regeneration started');
+    return ok(newFd, '功能设计重新生成已开始');
   }),
 
   // P10: POST /featureDesign/confirm - Batch confirm FeatureDesigns
@@ -262,7 +262,7 @@ export const featureDesignHandlers = [
       const fd = featureDesignsMap.get(id);
       if (fd) {
         if (fd.status === 'STALE') {
-          return fail(`Cannot confirm STALE FeatureDesign ${id}`);
+          return fail(`功能设计 ${id} 已过期，需重新生成`);
         }
         fd.status = 'CONFIRMED';
         fd.lastEditedDate = now();
@@ -270,7 +270,7 @@ export const featureDesignHandlers = [
       }
     }
 
-    return ok(results, 'FeatureDesigns confirmed successfully');
+    return ok(results, '功能设计已批量确认');
   }),
 
   // P11: POST /featureDesign/{id}/confirm - Confirm one FeatureDesign
@@ -280,17 +280,17 @@ export const featureDesignHandlers = [
     const fd = featureDesignsMap.get(id as string);
 
     if (!fd) {
-      return fail(`FeatureDesign ${id} not found`);
+      return fail(`功能设计 ${id} 不存在`);
     }
 
     if (fd.status === 'STALE') {
-      return fail('Cannot confirm STALE FeatureDesign');
+      return fail('功能设计已过期，需重新生成');
     }
 
     fd.status = 'CONFIRMED';
     fd.lastEditedDate = now();
 
-    return ok(fd, 'FeatureDesign confirmed successfully');
+    return ok(fd, '功能设计已确认');
   }),
 
   // P12a: POST /featureDesign/{id}/build - Build one FeatureDesign
@@ -300,17 +300,17 @@ export const featureDesignHandlers = [
     const fd = featureDesignsMap.get(id as string);
 
     if (!fd) {
-      return fail(`FeatureDesign ${id} not found`);
+      return fail(`功能设计 ${id} 不存在`);
     }
 
     if (fd.status !== 'CONFIRMED') {
-      return fail('Only CONFIRMED FeatureDesigns can be built');
+      return fail('仅已确认的功能设计可执行编码');
     }
 
     if (fd.buildStatus === 'BUILDING') {
       // Return 409 Conflict when already BUILDING
       return new HttpResponse(
-        JSON.stringify({ success: false, message: '该功能正在构建中', data: null }),
+        JSON.stringify({ success: false, message: '该功能正在编码执行中', data: null }),
         { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -320,7 +320,7 @@ export const featureDesignHandlers = [
     fd.lastEditedDate = now();
 
     const runId = nextId('RUN');
-    return ok({ runId }, 'Build started successfully');
+    return ok({ runId }, '编码执行已开始');
   }),
 
   // P14: GET /featureDesign/{id}/history - Get FeatureDesign history
@@ -330,7 +330,7 @@ export const featureDesignHandlers = [
     const fd = featureDesignsMap.get(id as string);
 
     if (!fd) {
-      return fail(`FeatureDesign ${id} not found`);
+      return fail(`功能设计 ${id} 不存在`);
     }
 
     // Find all versions for this featureId and projectId
@@ -351,7 +351,7 @@ export const featureDesignHandlers = [
 
     const results = fds.map(fd => {
       if (fd.buildStatus === 'BUILDING') {
-        return { id: fd.id, skipped: true, reason: '该功能正在构建中' };
+        return { id: fd.id, skipped: true, reason: '该功能正在编码执行中' };
       }
 
       fd.buildStatus = 'BUILDING';
@@ -359,6 +359,6 @@ export const featureDesignHandlers = [
       return { id: fd.id, runId: nextId('RUN') };
     });
 
-    return ok(results, 'Project build started');
+    return ok(results, '项目编码执行已开始');
   }),
 ];

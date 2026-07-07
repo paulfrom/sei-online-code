@@ -39,9 +39,6 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "current_spec_id", length = 36)
     private String currentSpecId;
 
-    @Column(name = "current_iteration_id", length = 36)
-    private String currentIterationId;
-
     public String getName() {
         return name;
     }
@@ -72,14 +69,6 @@ public class Project extends BaseAuditableEntity {
 
     public void setCurrentSpecId(String currentSpecId) {
         this.currentSpecId = currentSpecId;
-    }
-
-    public String getCurrentIterationId() {
-        return currentIterationId;
-    }
-
-    public void setCurrentIterationId(String currentIterationId) {
-        this.currentIterationId = currentIterationId;
     }
 
     @Override

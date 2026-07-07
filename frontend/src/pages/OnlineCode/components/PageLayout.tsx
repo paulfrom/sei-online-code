@@ -31,7 +31,7 @@ const useContainerStyles = createStyles(({ token, css }) => ({
 }));
 
 interface PageContainerProps extends React.HTMLAttributes<HTMLDivElement> {
-  /** enable page-level scrolling for long content (Spec/Timeline/Settings/PlanTab) */
+  /** enable page-level scrolling for long content (Spec/Settings/PlanTab) */
   scroll?: boolean;
 }
 

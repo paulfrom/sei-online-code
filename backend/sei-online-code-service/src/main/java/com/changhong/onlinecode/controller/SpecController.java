@@ -1,12 +1,10 @@
 package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.SpecApi;
-import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.SpecDto;
 import com.changhong.onlinecode.dto.request.ConfirmSpecRequest;
 import com.changhong.onlinecode.dto.request.RegenerateSpecRequest;
 import com.changhong.onlinecode.entity.Spec;
-import com.changhong.onlinecode.service.IterationService;
 import com.changhong.onlinecode.service.SpecService;
 import com.changhong.sei.core.controller.BaseEntityController;
 import com.changhong.sei.core.dto.ResultData;
@@ -32,11 +30,9 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
         implements SpecApi {
 
     private final SpecService service;
-    private final IterationService iterationService;
 
-    public SpecController(SpecService service, IterationService iterationService) {
+    public SpecController(SpecService service) {
         this.service = service;
-        this.iterationService = iterationService;
     }
 
     @Override
@@ -45,12 +41,12 @@ public class SpecController extends BaseEntityController<Spec, SpecDto>
     }
 
     @Override
-    public ResultData<PlanDto> confirm(ConfirmSpecRequest request) {
-        OperateResultWithData<PlanDto> result = iterationService.confirmSpec(request.getSpecId());
+    public ResultData<SpecDto> confirm(ConfirmSpecRequest request) {
+        OperateResultWithData<Spec> result = service.confirmSpec(request.getSpecId());
         if (result.notSuccessful()) {
             return ResultData.fail(result.getMessage());
         }
-        return ResultData.success(result.getData());
+        return ResultData.success(convertToDto(result.getData()));
     }
 
     @Override
