@@ -1,0 +1,80 @@
+package com.changhong.onlinecode.controller;
+
+import com.changhong.onlinecode.api.RequirementApi;
+import com.changhong.onlinecode.dto.RequirementDto;
+import com.changhong.onlinecode.dto.request.EditPrdRequest;
+import com.changhong.onlinecode.dto.request.RegeneratePrdRequest;
+import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.service.RequirementService;
+import com.changhong.sei.core.controller.BaseEntityController;
+import com.changhong.sei.core.dto.ResultData;
+import com.changhong.sei.core.dto.serach.PageResult;
+import com.changhong.sei.core.dto.serach.Search;
+import com.changhong.sei.core.service.BaseEntityService;
+import com.changhong.sei.core.service.bo.OperateResultWithData;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.stream.Collectors;
+
+/**
+ * Requirement 控制器。
+ *
+ * @author sei-online-code
+ */
+@RestController
+@Tag(name = "RequirementApi", description = "需求管理服务")
+@RequestMapping(path = RequirementApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+public class RequirementController extends BaseEntityController<Requirement, RequirementDto>
+        implements RequirementApi {
+
+    private final RequirementService service;
+
+    public RequirementController(RequirementService service) {
+        this.service = service;
+    }
+
+    @Override
+    public BaseEntityService<Requirement> getService() {
+        return service;
+    }
+
+    @Override
+    public ResultData<PageResult<RequirementDto>> findByPage(Search search) {
+        PageResult<Requirement> page = service.findByPage(search);
+        PageResult<RequirementDto> dtoPage = new PageResult<>(page);
+        dtoPage.setRows(page.getRows().stream()
+                .map(service::convertToDto)
+                .collect(Collectors.toList()));
+        return ResultData.success(dtoPage);
+    }
+
+    @Override
+    public ResultData<RequirementDto> regeneratePrd(String id, RegeneratePrdRequest request) {
+        OperateResultWithData<Requirement> result = service.regeneratePrd(id, request.getPrompt());
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(service.convertToDto(result.getData()));
+    }
+
+    @Override
+    public ResultData<RequirementDto> editPrd(String id, EditPrdRequest request) {
+        OperateResultWithData<Requirement> result = service.editPrd(id, request.getPrdContent());
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(service.convertToDto(result.getData()));
+    }
+
+    @Override
+    public ResultData<RequirementDto> confirmPrd(String id) {
+        OperateResultWithData<Requirement> result = service.confirmPrd(id);
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(service.convertToDto(result.getData()));
+    }
+}

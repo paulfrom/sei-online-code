@@ -56,6 +56,9 @@ export interface ProjectDto {
   id: string;
   name: string;
   design: string;
+  gitUrl?: string;
+  workspacePath?: string;
+  autoRunCodingTask?: boolean;
   state: LifecycleState;
   currentSpecId: string | null;
   createdDate: string;
@@ -158,10 +161,14 @@ export const SKILL_FIND_BY_PAGE_URL = `${API}/skill/findByPage`;
 /** Store URL for the agents list ExtTable (contract ep #21). */
 export const AGENT_FIND_BY_PAGE_URL = `${API}/agent/findByPage`;
 
-/** #1 create project */
+/** #1 create/update project */
 export async function saveProject(params: {
+  id?: string;
   name: string;
   design: string;
+  gitUrl?: string;
+  workspacePath?: string;
+  autoRunCodingTask?: boolean;
 }): Promise<ResultData<ProjectDto>> {
   return request({ url: `${API}/project/save`, method: 'POST', data: params });
 }
@@ -174,11 +181,6 @@ export async function findOneProject(id: string): Promise<ResultData<ProjectDto>
 /** #4 compatibility endpoint: legacy refineSpec path now starts overview design generation. */
 export async function refineSpec(projectId: string): Promise<ResultData<PlanDto>> {
   return request({ url: `${API}/project/refineSpec`, method: 'POST', data: { projectId } });
-}
-
-/** Semantic wrapper for UI call sites; keep the legacy endpoint inside this service. */
-export async function generateOverviewDesign(projectId: string): Promise<ResultData<PlanDto>> {
-  return refineSpec(projectId);
 }
 
 /** #5 load a legacy Spec / current detailed design */

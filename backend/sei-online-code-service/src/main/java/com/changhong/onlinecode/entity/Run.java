@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
@@ -22,7 +23,8 @@ import java.util.Date;
 @Entity
 @Table(name = "oc_run", indexes = {
         @Index(name = "idx_run_iteration", columnList = "iteration_id"),
-        @Index(name = "idx_run_task", columnList = "task_id")
+        @Index(name = "idx_run_task", columnList = "task_id"),
+        @Index(name = "idx_run_coding_task", columnList = "coding_task_id")
 })
 @Access(AccessType.FIELD)
 public class Run extends BaseAuditableEntity {
@@ -31,6 +33,25 @@ public class Run extends BaseAuditableEntity {
 
     @Column(name = "task_id", nullable = false, length = 36)
     private String taskId;
+
+    @Column(name = "coding_task_id", length = 36)
+    private String codingTaskId;
+
+    @Column(name = "run_no")
+    private Integer runNo;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "trigger_source", length = 32)
+    private TriggerSource triggerSource;
+
+    @Column(name = "user_prompt", columnDefinition = "TEXT")
+    private String userPrompt;
+
+    @Column(name = "failure_summary", columnDefinition = "TEXT")
+    private String failureSummary;
+
+    @Column(name = "failure_reason", columnDefinition = "TEXT")
+    private String failureReason;
 
     @Column(name = "iteration_id", nullable = false, length = 36)
     private String iterationId;
@@ -57,6 +78,54 @@ public class Run extends BaseAuditableEntity {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    public String getCodingTaskId() {
+        return codingTaskId;
+    }
+
+    public void setCodingTaskId(String codingTaskId) {
+        this.codingTaskId = codingTaskId;
+    }
+
+    public Integer getRunNo() {
+        return runNo;
+    }
+
+    public void setRunNo(Integer runNo) {
+        this.runNo = runNo;
+    }
+
+    public TriggerSource getTriggerSource() {
+        return triggerSource;
+    }
+
+    public void setTriggerSource(TriggerSource triggerSource) {
+        this.triggerSource = triggerSource;
+    }
+
+    public String getUserPrompt() {
+        return userPrompt;
+    }
+
+    public void setUserPrompt(String userPrompt) {
+        this.userPrompt = userPrompt;
+    }
+
+    public String getFailureSummary() {
+        return failureSummary;
+    }
+
+    public void setFailureSummary(String failureSummary) {
+        this.failureSummary = failureSummary;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
     }
 
     public String getIterationId() {

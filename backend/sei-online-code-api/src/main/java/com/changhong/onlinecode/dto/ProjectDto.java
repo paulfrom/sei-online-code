@@ -32,6 +32,15 @@ public class ProjectDto extends BaseEntityDto {
     @Schema(description = "当前已确认/活动的 Spec id")
     private String currentSpecId;
 
+    @Schema(description = "项目 Git 地址")
+    private String gitUrl;
+
+    @Schema(description = "项目工作区路径")
+    private String workspacePath;
+
+    @Schema(description = "确认详细设计后是否自动执行编码任务", example = "false")
+    private Boolean autoRunCodingTask;
+
     @Schema(description = "创建时间")
     private Date createdDate;
 
@@ -68,6 +77,30 @@ public class ProjectDto extends BaseEntityDto {
 
     public void setCurrentSpecId(String currentSpecId) {
         this.currentSpecId = currentSpecId;
+    }
+
+    public String getGitUrl() {
+        return gitUrl;
+    }
+
+    public void setGitUrl(String gitUrl) {
+        this.gitUrl = gitUrl;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
+    }
+
+    public Boolean getAutoRunCodingTask() {
+        return autoRunCodingTask;
+    }
+
+    public void setAutoRunCodingTask(Boolean autoRunCodingTask) {
+        this.autoRunCodingTask = autoRunCodingTask;
     }
 
     public Date getCreatedDate() {

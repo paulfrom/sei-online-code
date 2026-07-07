@@ -1,19 +1,16 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.PlanDto;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
-import com.changhong.onlinecode.dto.enums.PlanStatus;
-import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
 import java.util.Objects;
 
 /**
@@ -25,18 +22,15 @@ import java.util.Objects;
 public class ProjectService extends BaseEntityService<Project> {
 
     private final ProjectDao dao;
-    private final PlanDao planDao;
-    private final PlanAgentService planAgentService;
     private final PlanService planService;
+    private final ConfigService configService;
 
     public ProjectService(ProjectDao dao,
-                          PlanDao planDao,
-                          @Lazy PlanAgentService planAgentService,
-                          @Lazy PlanService planService) {
+                          PlanService planService,
+                          ConfigService configService) {
         this.dao = dao;
-        this.planDao = planDao;
-        this.planAgentService = planAgentService;
         this.planService = planService;
+        this.configService = configService;
     }
 
     @Override
@@ -45,7 +39,8 @@ public class ProjectService extends BaseEntityService<Project> {
     }
 
     /**
-     * 新建项目：初始状态置为 DRAFTING（契约 §3 端点 1）。
+     * 新建项目：仅保存元数据，不再触发旧规划流程。
+     * 若未指定 workspacePath，则按平台配置自动生成。
      *
      * @param entity 项目实体
      * @return 写操作结果
@@ -53,22 +48,17 @@ public class ProjectService extends BaseEntityService<Project> {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Project> save(Project entity) {
-        boolean isNew = entity.getId() == null;
         if (Objects.isNull(entity.getState())) {
             entity.setState(LifecycleState.DRAFTING);
         }
-        OperateResultWithData<Project> result = super.save(entity);
-        if (result.successful() && isNew) {
-            // T9b (P1, D2): 新项目持久化后触发规划——建初始 Plan 行(GENERATING, v1, isLatest) + spawn
-            Plan plan = new Plan();
-            plan.setProjectId(entity.getId());
-            plan.setVersion(1);
-            plan.setStatus(PlanStatus.GENERATING);
-            plan.setIsLatest(true);
-            planDao.save(plan);
-            planAgentService.spawnPlanning(entity.getId(), null);
+        if (Objects.isNull(entity.getAutoRunCodingTask())) {
+            entity.setAutoRunCodingTask(Boolean.FALSE);
         }
-        return result;
+        if (Objects.isNull(entity.getWorkspacePath()) || entity.getWorkspacePath().isBlank()) {
+            String root = configService.resolveWorkspaceRoot(configService.get());
+            entity.setWorkspacePath(root + File.separator + entity.getId());
+        }
+        return super.save(entity);
     }
 
     /**

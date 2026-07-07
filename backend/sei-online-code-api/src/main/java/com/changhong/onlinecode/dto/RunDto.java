@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -18,6 +19,24 @@ public class RunDto extends BaseEntityDto {
 
     @Schema(description = "所属 Task id")
     private String taskId;
+
+    @Schema(description = "所属 CodingTask id")
+    private String codingTaskId;
+
+    @Schema(description = "Run 序号")
+    private Integer runNo;
+
+    @Schema(description = "触发来源")
+    private TriggerSource triggerSource;
+
+    @Schema(description = "用户提示词")
+    private String userPrompt;
+
+    @Schema(description = "失败摘要")
+    private String failureSummary;
+
+    @Schema(description = "失败原因")
+    private String failureReason;
 
     @Schema(description = "所属迭代 id")
     private String iterationId;
@@ -44,6 +63,54 @@ public class RunDto extends BaseEntityDto {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    public String getCodingTaskId() {
+        return codingTaskId;
+    }
+
+    public void setCodingTaskId(String codingTaskId) {
+        this.codingTaskId = codingTaskId;
+    }
+
+    public Integer getRunNo() {
+        return runNo;
+    }
+
+    public void setRunNo(Integer runNo) {
+        this.runNo = runNo;
+    }
+
+    public TriggerSource getTriggerSource() {
+        return triggerSource;
+    }
+
+    public void setTriggerSource(TriggerSource triggerSource) {
+        this.triggerSource = triggerSource;
+    }
+
+    public String getUserPrompt() {
+        return userPrompt;
+    }
+
+    public void setUserPrompt(String userPrompt) {
+        this.userPrompt = userPrompt;
+    }
+
+    public String getFailureSummary() {
+        return failureSummary;
+    }
+
+    public void setFailureSummary(String failureSummary) {
+        this.failureSummary = failureSummary;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
     }
 
     public String getIterationId() {

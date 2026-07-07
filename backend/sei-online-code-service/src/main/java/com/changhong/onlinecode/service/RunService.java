@@ -36,4 +36,14 @@ public class RunService extends BaseEntityService<Run> {
     public List<Run> findByIteration(String iterationId) {
         return dao.findByIterationId(iterationId);
     }
+
+    /**
+     * 按编码任务 id 取运行记录。
+     *
+     * @param codingTaskId 编码任务 id
+     * @return Run 列表
+     */
+    public List<Run> findByCodingTaskId(String codingTaskId) {
+        return dao.findByCodingTaskId(codingTaskId);
+    }
 }

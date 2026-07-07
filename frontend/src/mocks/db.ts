@@ -22,6 +22,9 @@ export interface ProjectDto {
   id: string;
   name: string;
   design: string;
+  gitUrl?: string;
+  workspacePath?: string;
+  autoRunCodingTask?: boolean;
   state: LifecycleState;
   currentSpecId: string | null;
   createdDate: string;
@@ -204,16 +207,87 @@ interface Db {
   specs: Map<string, SpecDto>;
   skills: Map<string, SkillDto>;
   agents: Map<string, AgentDto>;
-  /** singleton platform config row (Phase 5); null until first get creates it */
   config: PlatformConfigDto | null;
-  /** projectId → source of first provisioning (drives clone-once reuse, §3) */
   workspaces: Map<string, WorkspaceSource>;
-  /** Plan entities for pre-build phase */
   plans?: Map<string, PlanDto>;
-  /** FeatureDesign entities for pre-build phase */
   featureDesigns?: Map<string, FeatureDesignDto>;
+  requirements: Map<string, RequirementDto>;
+  overviewDesigns: Map<string, OverviewDesignDto>;
+  detailedDesigns: Map<string, DetailedDesignDto>;
+  codingTasks: Map<string, CodingTaskDto>;
+  runs: Map<string, RunDto>;
 }
 
+export interface RequirementDto {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  status: 'PRD_GENERATING' | 'PRD_REVIEW' | 'PRD_CONFIRMED' | 'FAILED';
+  prdVersion: number;
+  prdContent: string;
+  failureSummary?: string | null;
+  createdDate: string;
+  lastEditedDate: string;
+}
+
+export interface OverviewDesignDto {
+  id: string;
+  projectId: string;
+  requirementId: string;
+  status: 'GENERATING' | 'DRAFT' | 'CONFIRMED' | 'FAILED';
+  version: number;
+  content: string;
+  failureSummary?: string | null;
+  createdDate: string;
+  lastEditedDate: string;
+}
+
+export interface DetailedDesignDto {
+  id: string;
+  projectId: string;
+  requirementId: string;
+  overviewDesignId: string;
+  moduleId: string;
+  moduleTitle: string;
+  featureId: string;
+  featureTitle: string;
+  status: 'GENERATING' | 'REVIEW' | 'CONFIRMED' | 'FAILED';
+  version: number;
+  content: string;
+  failureSummary?: string | null;
+  createdDate: string;
+  lastEditedDate: string;
+}
+
+export interface CodingTaskDto {
+  id: string;
+  projectId: string;
+  requirementId: string;
+  detailedDesignId: string;
+  detailedDesignVersion: number;
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'STALE';
+  title: string;
+  description: string;
+  fileScope: string[];
+  failureSummary?: string | null;
+  createdDate: string;
+  lastEditedDate: string;
+}
+
+export interface RunDto {
+  id: string;
+  codingTaskId: string;
+  runNo: number;
+  triggerSource: string;
+  state: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  userPrompt?: string | null;
+  failureSummary?: string | null;
+  failureReason?: string | null;
+  worktreePath?: string | null;
+  startedDate: string;
+  finishedDate?: string | null;
+}
 export const db: Db = {
   projects: new Map(),
   specs: new Map(),
@@ -223,6 +297,11 @@ export const db: Db = {
   workspaces: new Map(),
   plans: new Map(),
   featureDesigns: new Map(),
+  requirements: new Map(),
+  overviewDesigns: new Map(),
+  detailedDesigns: new Map(),
+  codingTasks: new Map(),
+  runs: new Map(),
 };
 
 /** Build a demo detailed design structure from a project's description prose. */
@@ -332,12 +411,21 @@ function upsertOverviewDesign(project: ProjectDto): PlanDto {
 }
 
 /** create project description → DRAFTING (contract ep #1) */
-export function createProject(name: string, design: string): ProjectDto {
+export function createProject(
+  name: string,
+  design: string,
+  gitUrl?: string,
+  workspacePath?: string,
+  autoRunCodingTask?: boolean,
+): ProjectDto {
   const ts = now();
   const project: ProjectDto = {
     id: nextId('PRJ'),
     name,
     design,
+    gitUrl: gitUrl || '',
+    workspacePath: workspacePath || '',
+    autoRunCodingTask: autoRunCodingTask ?? false,
     state: 'DRAFTING',
     currentSpecId: null,
     createdDate: ts,
@@ -345,6 +433,193 @@ export function createProject(name: string, design: string): ProjectDto {
   };
   db.projects.set(project.id, project);
   return project;
+}
+
+/** create/update project */
+export function saveProject(input: {
+  id?: string;
+  name: string;
+  design: string;
+  gitUrl?: string;
+  workspacePath?: string;
+  autoRunCodingTask?: boolean;
+}): ProjectDto {
+  if (input.id) {
+    const existing = db.projects.get(input.id);
+    if (existing) {
+      existing.name = input.name;
+      existing.design = input.design;
+      existing.gitUrl = input.gitUrl || existing.gitUrl;
+      existing.workspacePath = input.workspacePath || existing.workspacePath;
+      existing.autoRunCodingTask = input.autoRunCodingTask ?? existing.autoRunCodingTask;
+      existing.lastEditedDate = now();
+      return existing;
+    }
+  }
+  return createProject(input.name, input.design, input.gitUrl, input.workspacePath, input.autoRunCodingTask);
+}
+
+/** create requirement and auto-move to PRD_REVIEW */
+export function createRequirement(projectId: string, title: string, description: string): RequirementDto {
+  const ts = now();
+  const requirement: RequirementDto = {
+    id: nextId('REQ'),
+    projectId,
+    title,
+    description,
+    status: 'PRD_GENERATING',
+    prdVersion: 1,
+    prdContent: '',
+    createdDate: ts,
+    lastEditedDate: ts,
+  };
+  db.requirements.set(requirement.id, requirement);
+  setTimeout(() => {
+    requirement.status = 'PRD_REVIEW';
+    requirement.prdContent = JSON.stringify({
+      title,
+      overview: description,
+      modules: [],
+    });
+    requirement.lastEditedDate = now();
+  }, 500);
+  return requirement;
+}
+
+/** confirm PRD and create overview design */
+export function confirmRequirementPrd(id: string): OverviewDesignDto | null {
+  const requirement = db.requirements.get(id);
+  if (!requirement || requirement.status !== 'PRD_REVIEW') return null;
+  requirement.status = 'PRD_CONFIRMED';
+  requirement.lastEditedDate = now();
+
+  const ts = now();
+  const overview: OverviewDesignDto = {
+    id: nextId('OVD'),
+    projectId: requirement.projectId,
+    requirementId: requirement.id,
+    status: 'GENERATING',
+    version: 1,
+    content: '',
+    createdDate: ts,
+    lastEditedDate: ts,
+  };
+  db.overviewDesigns.set(overview.id, overview);
+  setTimeout(() => {
+    overview.status = 'DRAFT';
+    overview.content = JSON.stringify({
+      modules: [
+        {
+          moduleId: 'default',
+          moduleTitle: '默认模块',
+          features: [{ featureId: 'default', featureTitle: '默认功能' }],
+        },
+      ],
+    });
+    overview.lastEditedDate = now();
+  }, 500);
+  return overview;
+}
+
+/** confirm overview design and create detailed designs */
+export function confirmOverviewDesignMock(id: string): DetailedDesignDto[] {
+  const overview = db.overviewDesigns.get(id);
+  if (!overview || overview.status !== 'DRAFT') return [];
+  overview.status = 'CONFIRMED';
+  overview.lastEditedDate = now();
+
+  const ts = now();
+  const design: DetailedDesignDto = {
+    id: nextId('DDD'),
+    projectId: overview.projectId,
+    requirementId: overview.requirementId,
+    overviewDesignId: overview.id,
+    moduleId: 'default',
+    moduleTitle: '默认模块',
+    featureId: 'default',
+    featureTitle: '默认功能',
+    status: 'REVIEW',
+    version: 1,
+    content: JSON.stringify({ placeholder: true }),
+    createdDate: ts,
+    lastEditedDate: ts,
+  };
+  db.detailedDesigns.set(design.id, design);
+  return [design];
+}
+
+/** confirm detailed design and create coding task */
+export function confirmDetailedDesignMock(id: string): CodingTaskDto | null {
+  const design = db.detailedDesigns.get(id);
+  if (!design || design.status !== 'REVIEW') return null;
+  design.status = 'CONFIRMED';
+  design.lastEditedDate = now();
+
+  const ts = now();
+  const task: CodingTaskDto = {
+    id: nextId('CDT'),
+    projectId: design.projectId,
+    requirementId: design.requirementId,
+    detailedDesignId: design.id,
+    detailedDesignVersion: design.version,
+    status: 'PENDING',
+    title: design.featureTitle,
+    description: design.content,
+    fileScope: [],
+    createdDate: ts,
+    lastEditedDate: ts,
+  };
+  db.codingTasks.set(task.id, task);
+  return task;
+}
+
+/** run coding task */
+export function runCodingTaskMock(id: string, userPrompt?: string | null): { ok: boolean; message?: string; task?: CodingTaskDto; run?: RunDto } {
+  const task = db.codingTasks.get(id);
+  if (!task) return { ok: false, message: 'task not found' };
+  if (task.status === 'RUNNING') return { ok: false, message: 'task already running' };
+
+  const existingRuns = Array.from(db.runs.values()).filter((r) => r.codingTaskId === id);
+  const runNo = existingRuns.length + 1;
+  const ts = now();
+  const run: RunDto = {
+    id: nextId('RUN'),
+    codingTaskId: id,
+    runNo,
+    triggerSource: userPrompt ? 'USER_ACTION' : 'AUTO',
+    state: 'RUNNING',
+    userPrompt: userPrompt || null,
+    startedDate: ts,
+  };
+  db.runs.set(run.id, run);
+  task.status = 'RUNNING';
+  task.lastEditedDate = ts;
+
+  setTimeout(() => {
+    run.state = 'SUCCEEDED';
+    run.finishedDate = now();
+    task.status = 'SUCCEEDED';
+    task.lastEditedDate = now();
+  }, 500);
+
+  return { ok: true, task, run };
+}
+
+/** rerun coding task */
+export function rerunCodingTaskMock(id: string, rerunPrompt: string): { ok: boolean; message?: string; task?: CodingTaskDto; run?: RunDto } {
+  if (!rerunPrompt || !rerunPrompt.trim()) {
+    return { ok: false, message: 'rerunPrompt is required' };
+  }
+  const task = db.codingTasks.get(id);
+  if (!task) return { ok: false, message: 'task not found' };
+
+  const previousFailure = Array.from(db.runs.values())
+    .filter((r) => r.codingTaskId === id && r.state === 'FAILED')
+    .sort((a, b) => b.runNo - a.runNo)[0];
+  const prompt = previousFailure?.failureReason
+    ? `${rerunPrompt}\n\n上一次失败原因：${previousFailure.failureReason}`
+    : rerunPrompt;
+  return runCodingTaskMock(id, prompt);
 }
 
 /** compatibility implementation: legacy refine design → detailed design, project → SPEC_REVIEW. */

@@ -7,18 +7,26 @@ import { http, HttpResponse } from 'msw';
 import type { Search } from '@/services/onlineCode';
 import {
   attachAgentSkills,
+  confirmDetailedDesignMock,
+  confirmOverviewDesignMock,
+  confirmRequirementPrd,
   confirmSpec,
   createProject,
+  createRequirement,
   db,
   deleteAgent,
   deleteSkill,
   generateOverviewDesign,
   getConfig,
   importSkill,
+  now,
   regenerateSpec,
   resolveWorkspace,
+  runCodingTaskMock,
+  rerunCodingTaskMock,
   saveAgent,
   saveConfig,
+  saveProject,
   seed,
   specsOf,
 } from './db';
@@ -98,12 +106,26 @@ export const handlers = [
     return res.ok ? ok(res.spec, '已重新生成详细设计') : fail(res.message);
   }),
 
-  // #1 create project
+  // #1 create/update project
   http.post('*/api/project/save', async ({ request }) => {
-    const body = (await request.json()) as { name?: string; design?: string };
+    const body = (await request.json()) as {
+      id?: string;
+      name?: string;
+      design?: string;
+      gitUrl?: string;
+      workspacePath?: string;
+      autoRunCodingTask?: boolean;
+    };
     if (!body?.name) return fail('name is required');
-    const project = createProject(body.name, body.design ?? '');
-    return ok(project, '创建成功');
+    const project = saveProject({
+      id: body.id,
+      name: body.name,
+      design: body.design ?? '',
+      gitUrl: body.gitUrl,
+      workspacePath: body.workspacePath,
+      autoRunCodingTask: body.autoRunCodingTask,
+    });
+    return ok(project, body.id ? '保存成功' : '创建成功');
   }),
 
   // #2 load one project
@@ -294,5 +316,152 @@ export const handlers = [
     if (!projectId) return fail('projectId is required');
     const result = resolveWorkspace(projectId);
     return result ? ok(result) : fail('workspace resolve failed');
+  }),
+
+  // --- Requirement-driven flow mocks ---
+
+  http.post('*/api/requirement/save', async ({ request }) => {
+    const body = (await request.json()) as { projectId?: string; title?: string; description?: string };
+    if (!body?.projectId) return fail('projectId is required');
+    if (!body?.title) return fail('title is required');
+    const requirement = createRequirement(body.projectId, body.title, body.description ?? '');
+    return ok(requirement, '创建成功');
+  }),
+
+  http.get('*/api/requirement/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const requirement = db.requirements.get(id);
+    return requirement ? ok(requirement) : fail(`requirement ${id} not found`);
+  }),
+
+  http.post('*/api/requirement/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const rows = Array.from(db.requirements.values()).sort((a, b) =>
+      a.createdDate && b.createdDate ? b.createdDate.localeCompare(a.createdDate) : -1,
+    );
+    return ok(paginate(rows, search));
+  }),
+
+  http.post('*/api/requirement/:id/confirmPrd', ({ params }) => {
+    const overview = confirmRequirementPrd(String(params.id));
+    return overview ? ok(db.requirements.get(String(params.id))) : fail('需求不存在或状态不允许确认');
+  }),
+
+  http.post('*/api/requirement/:id/regeneratePrd', ({ params }) => {
+    const requirement = db.requirements.get(String(params.id));
+    if (!requirement) return fail('requirement not found');
+    requirement.status = 'PRD_GENERATING';
+    requirement.prdVersion += 1;
+    setTimeout(() => {
+      requirement.status = 'PRD_REVIEW';
+      requirement.lastEditedDate = now();
+    }, 500);
+    return ok(requirement);
+  }),
+
+  http.post('*/api/requirement/:id/editPrd', async ({ params, request }) => {
+    const body = (await request.json()) as { prdContent?: string };
+    const requirement = db.requirements.get(String(params.id));
+    if (!requirement) return fail('requirement not found');
+    requirement.prdContent = body?.prdContent ?? '';
+    requirement.lastEditedDate = now();
+    return ok(requirement);
+  }),
+
+  http.get('*/api/overview-design/findOne', ({ request }) => {
+    const requirementId = new URL(request.url).searchParams.get('requirementId') ?? '';
+    const overview = Array.from(db.overviewDesigns.values()).find(
+      (o) => o.requirementId === requirementId,
+    );
+    return overview ? ok(overview) : ok(null);
+  }),
+
+  http.post('*/api/overview-design/:id/confirm', ({ params }) => {
+    const designs = confirmOverviewDesignMock(String(params.id));
+    const overview = db.overviewDesigns.get(String(params.id));
+    return overview ? ok(overview) : fail('overview not found');
+  }),
+
+  http.post('*/api/overview-design/:id/regenerate', ({ params }) => {
+    const overview = db.overviewDesigns.get(String(params.id));
+    if (!overview) return fail('overview not found');
+    overview.status = 'GENERATING';
+    overview.version += 1;
+    setTimeout(() => {
+      overview.status = 'DRAFT';
+      overview.lastEditedDate = now();
+    }, 500);
+    return ok(overview);
+  }),
+
+  http.post('*/api/overview-design/:id/edit', async ({ params, request }) => {
+    const body = (await request.json()) as { content?: string };
+    const overview = db.overviewDesigns.get(String(params.id));
+    if (!overview) return fail('overview not found');
+    overview.content = body?.content ?? '';
+    overview.lastEditedDate = now();
+    return ok(overview);
+  }),
+
+  http.get('*/api/detailed-design/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const design = db.detailedDesigns.get(id);
+    return design ? ok(design) : fail(`detailed design ${id} not found`);
+  }),
+
+  http.get('*/api/detailed-design/findByOverview', ({ request }) => {
+    const overviewDesignId = new URL(request.url).searchParams.get('overviewDesignId') ?? '';
+    const rows = Array.from(db.detailedDesigns.values()).filter(
+      (d) => d.overviewDesignId === overviewDesignId,
+    );
+    return ok(rows);
+  }),
+
+  http.post('*/api/detailed-design/:id/confirm', ({ params }) => {
+    const task = confirmDetailedDesignMock(String(params.id));
+    const design = db.detailedDesigns.get(String(params.id));
+    return design ? ok(design) : fail('detailed design not found');
+  }),
+
+  http.post('*/api/detailed-design/batchConfirm', async ({ request }) => {
+    const body = (await request.json()) as { ids?: string[] };
+    const ids = body?.ids ?? [];
+    const list: import('./db').DetailedDesignDto[] = [];
+    ids.forEach((id) => {
+      const design = db.detailedDesigns.get(id);
+      if (design && design.status === 'REVIEW') {
+        confirmDetailedDesignMock(id);
+        list.push(db.detailedDesigns.get(id)!);
+      }
+    });
+    return ok(list);
+  }),
+
+  http.post('*/api/coding-task/:id/run', async ({ params, request }) => {
+    const body = (await request.json()) as { userPrompt?: string };
+    const res = runCodingTaskMock(String(params.id), body?.userPrompt);
+    return res.ok ? ok(res.task) : fail(res.message ?? 'run failed');
+  }),
+
+  http.post('*/api/coding-task/:id/rerun', async ({ params, request }) => {
+    const body = (await request.json()) as { rerunPrompt?: string };
+    const res = rerunCodingTaskMock(String(params.id), body?.rerunPrompt ?? '');
+    return res.ok ? ok(res.task) : fail(res.message ?? 'rerun failed');
+  }),
+
+  http.post('*/api/coding-task/findByPage', async ({ request }) => {
+    const search = (await request.json().catch(() => ({}))) as Search;
+    const rows = Array.from(db.codingTasks.values()).sort((a, b) =>
+      a.createdDate && b.createdDate ? b.createdDate.localeCompare(a.createdDate) : -1,
+    );
+    return ok(paginate(rows, search));
+  }),
+
+  http.get('*/api/run/findByCodingTask', ({ request }) => {
+    const codingTaskId = new URL(request.url).searchParams.get('codingTaskId') ?? '';
+    const rows = Array.from(db.runs.values())
+      .filter((r) => r.codingTaskId === codingTaskId)
+      .sort((a, b) => a.runNo - b.runNo);
+    return ok(rows);
   }),
 ];

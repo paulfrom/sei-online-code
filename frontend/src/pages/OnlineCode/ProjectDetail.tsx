@@ -7,10 +7,9 @@ import { Tabs, message } from '@ead/suid';
 import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
-import PlanTab from './PlanTab';
-import DetailedDesignTab from './DetailedDesignTab';
-import FeatureDesignTab from './FeatureDesignTab';
-import BuildActions from './BuildActions';
+import RequirementListTab from './RequirementListTab';
+import CodingTaskTab from './CodingTaskTab';
+import ProjectSettingsTab from './ProjectSettingsTab';
 
 const ProjectDetail: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -55,22 +54,22 @@ const ProjectDetail: React.FC = () => {
 
   const tabItems = [
     {
-      key: 'plan',
-      label: '概要设计',
-      children: <PlanTab projectId={projectId} />,
+      key: 'requirements',
+      label: '需求',
+      children: <RequirementListTab projectId={projectId} />,
     },
     {
-      key: 'detailedDesign',
-      label: '详细设计',
-      children: <DetailedDesignTab projectId={projectId} />,
+      key: 'codingTasks',
+      label: '编码任务',
+      children: <CodingTaskTab projectId={projectId} />,
     },
     {
-      key: 'featureDesign',
-      label: '功能设计',
-      children: <FeatureDesignTab projectId={projectId} />,
+      key: 'settings',
+      label: '设置',
+      children: <ProjectSettingsTab project={project} />,
     },
   ];
-  const activeTab = tabItems.some((item) => item.key === requestedTab) ? requestedTab : 'plan';
+  const activeTab = tabItems.some((item) => item.key === requestedTab) ? requestedTab : 'requirements';
 
   return (
     <PageContainer>
@@ -79,7 +78,6 @@ const ProjectDetail: React.FC = () => {
         subTitle="项目详情"
         back={{ to: '/online-code/list', text: '返回列表' }}
       />
-      <BuildActions projectId={projectId} />
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         <Tabs
           items={tabItems}

@@ -39,6 +39,15 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "current_spec_id", length = 36)
     private String currentSpecId;
 
+    @Column(name = "git_url", length = 500)
+    private String gitUrl;
+
+    @Column(name = "workspace_path", length = 500)
+    private String workspacePath;
+
+    @Column(name = "auto_run_coding_task", nullable = false)
+    private Boolean autoRunCodingTask = Boolean.FALSE;
+
     public String getName() {
         return name;
     }
@@ -69,6 +78,30 @@ public class Project extends BaseAuditableEntity {
 
     public void setCurrentSpecId(String currentSpecId) {
         this.currentSpecId = currentSpecId;
+    }
+
+    public String getGitUrl() {
+        return gitUrl;
+    }
+
+    public void setGitUrl(String gitUrl) {
+        this.gitUrl = gitUrl;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
+    }
+
+    public Boolean getAutoRunCodingTask() {
+        return autoRunCodingTask;
+    }
+
+    public void setAutoRunCodingTask(Boolean autoRunCodingTask) {
+        this.autoRunCodingTask = autoRunCodingTask;
     }
 
     @Override

@@ -21,4 +21,12 @@ public interface RunDao extends BaseEntityDao<Run> {
      * @return Run 列表
      */
     List<Run> findByIterationId(String iterationId);
+
+    /**
+     * 按编码任务 ID 查询运行记录。
+     *
+     * @param codingTaskId 编码任务 ID
+     * @return Run 列表
+     */
+    List<Run> findByCodingTaskId(String codingTaskId);
 }

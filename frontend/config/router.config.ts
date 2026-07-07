@@ -26,16 +26,16 @@ const routes: any[] = [
             component: './OnlineCode/List',
           },
           {
-            path: '/online-code/spec',
-            name: 'onlineCodeSpec',
-            title: 'menu.onlineCodeSpec',
-            component: './OnlineCode/Spec',
-          },
-          {
             path: '/online-code/project',
             name: 'onlineCodeProject',
             title: 'menu.onlineCodeProject',
             component: './OnlineCode/ProjectDetail',
+          },
+          {
+            path: '/online-code/requirement',
+            name: 'onlineCodeRequirement',
+            title: 'menu.onlineCodeRequirement',
+            component: './OnlineCode/RequirementDetail',
           },
           {
             path: '/online-code/skills',

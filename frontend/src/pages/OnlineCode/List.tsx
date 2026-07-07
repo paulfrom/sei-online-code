@@ -10,6 +10,7 @@ import { history } from 'umi';
 import {
   ActionButton,
   Button,
+  Checkbox,
   ExtModal,
   ExtTable,
   Form,
@@ -20,7 +21,6 @@ import type { ExtTableProps, ExtTableRef } from '@ead/suid';
 import { PlusOutlined } from '@ead/suid-icons';
 import {
   PROJECT_FIND_BY_PAGE_URL,
-  generateOverviewDesign,
   saveProject,
 } from '@/services/onlineCode';
 import type { LifecycleState, ProjectDto } from '@/services/onlineCode';
@@ -33,34 +33,15 @@ const ProjectList: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const goOverviewDesign = async (record: ProjectDto) => {
-    // DRAFTING: start overview design generation, then open the project workspace.
-    if (record.state === 'DRAFTING' || (!record.currentSpecId && record.state === 'FAILED')) {
-      const res = await generateOverviewDesign(record.id);
-      if (!res.success || !res.data) {
-        message.error(res.message ?? '概要设计生成失败');
-        return;
-      }
-      history.push(`/online-code/project?id=${record.id}`);
-      return;
-    }
-    if (record.state === 'SPEC_REVIEW' && record.currentSpecId) {
-      history.push(`/online-code/spec?id=${record.currentSpecId}`);
-      return;
-    }
+  const goProjectDetail = (record: ProjectDto) => {
     history.push(`/online-code/project?id=${record.id}`);
   };
 
   const handleRowAction = (record: ProjectDto) => {
-    goOverviewDesign(record);
+    goProjectDetail(record);
   };
 
-  const rowActionLabel = (record: ProjectDto): string => {
-    if (record.state === 'DRAFTING') return '生成概要设计';
-    if (record.state === 'FAILED' && !record.currentSpecId) return '重新生成概要设计';
-    if (record.state === 'SPEC_REVIEW') return '查看详细设计';
-    return '查看项目';
-  };
+  const rowActionLabel = (): string => '查看项目';
 
   const columns: ExtTableProps<ProjectDto>['columns'] = [
     {
@@ -89,7 +70,13 @@ const ProjectList: React.FC = () => {
     { title: '创建时间', dataIndex: 'createdDate', width: 170, dataType: 'datetime' },
   ];
 
-  const handleSave = async (values: { name: string; design: string }) => {
+  const handleSave = async (values: {
+    name: string;
+    design: string;
+    gitUrl?: string;
+    workspacePath?: string;
+    autoRunCodingTask?: boolean;
+  }) => {
     setSaving(true);
     try {
       const res = await saveProject(values);
@@ -156,6 +143,15 @@ const ProjectList: React.FC = () => {
               placeholder="用自然语言描述你想要的产品：页面、数据、交互…"
               allowClear
             />
+          </Form.Item>
+          <Form.Item name="gitUrl" label="Git 地址">
+            <Input placeholder="https://gitlab.example.com/group/project.git" allowClear />
+          </Form.Item>
+          <Form.Item name="workspacePath" label="工作区路径">
+            <Input placeholder="留空则自动生成" allowClear />
+          </Form.Item>
+          <Form.Item name="autoRunCodingTask" valuePropName="checked" initialValue={false}>
+            <Checkbox>确认详细设计后自动执行编码任务</Checkbox>
           </Form.Item>
         </Form>
       </ExtModal>
