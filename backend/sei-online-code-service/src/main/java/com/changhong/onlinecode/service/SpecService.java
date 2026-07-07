@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Spec 服务。承载模块详细设计生成与状态流转。
@@ -96,6 +97,13 @@ public class SpecService extends BaseEntityService<Spec> {
             return List.of();
         }
         if (content.getModules() != null && !content.getModules().isEmpty()) {
+            if (spec.getModuleId() == null) {
+                return content.getModules().stream()
+                        .map(PlanModule::getFeatures)
+                        .filter(Objects::nonNull)
+                        .flatMap(List::stream)
+                        .collect(Collectors.toList());
+            }
             return content.getModules().stream()
                     .filter(module -> Objects.equals(module.getModuleId(), spec.getModuleId()))
                     .findFirst()

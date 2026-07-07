@@ -20,6 +20,13 @@ function fail(message: string) {
   return HttpResponse.json({ success: false, message, data: null });
 }
 
+function featuresFromContent(content: PlanContent) {
+  if (content.modules?.length) {
+    return content.modules.flatMap((module) => module.features ?? []);
+  }
+  return content.features ?? [];
+}
+
 // Seed mock overview design data for existing projects.
 function seedPlans() {
   const projects = Array.from(db.projects.values());
@@ -185,7 +192,7 @@ export const planHandlers = [
     // Create PENDING FeatureDesigns for each feature in the plan
     const featureDesignsMap = (db as any).featureDesigns as Map<string, any>;
     if (featureDesignsMap) {
-      latestPlan.content.features.forEach(feature => {
+      featuresFromContent(latestPlan.content).forEach(feature => {
         // Check if FeatureDesign already exists for this featureId
         const existing = Array.from(featureDesignsMap.values()).find(
           fd => fd.projectId === projectId && fd.featureId === feature.featureId && fd.isLatest

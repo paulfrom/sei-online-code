@@ -43,9 +43,13 @@ const DETAILED_DESIGN_STATE_TEXT: Record<SpecDto['state'], string> = {
   FAILED: '失败',
 };
 
+const buildProjectDetailUrl = (projectId: string, tab = 'detailedDesign') =>
+  `/online-code/project?id=${projectId}&tab=${tab}`;
+
 const DetailedDesignReview: React.FC = () => {
   const [searchParams] = useSearchParams();
   const specId = searchParams.get('id') ?? '';
+  const projectTab = searchParams.get('tab') ?? 'detailedDesign';
   const [spec, setSpec] = useState<SpecDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
@@ -95,7 +99,7 @@ const DetailedDesignReview: React.FC = () => {
         return;
       }
       message.success('详细设计已确认，功能设计生成已启动');
-      history.push(`/online-code/project?id=${spec.projectId}`);
+      history.push(buildProjectDetailUrl(spec.projectId, projectTab));
     } finally {
       setConfirming(false);
     }
@@ -112,7 +116,7 @@ const DetailedDesignReview: React.FC = () => {
       }
       message.success('已重新生成详细设计');
       setSpec(res.data);
-      history.replace(`/online-code/spec?id=${res.data.id}`);
+      history.replace(`/online-code/spec?id=${res.data.id}&tab=${projectTab}`);
       setRegenerateModalOpen(false);
       regenerateForm.resetFields();
     } finally {
@@ -145,6 +149,7 @@ const DetailedDesignReview: React.FC = () => {
       <PageHeader
         title="详细设计"
         subTitle={`${spec.moduleTitle ? `${spec.moduleTitle} · ` : ''}版本 v${spec.version}`}
+        back={{ to: buildProjectDetailUrl(spec.projectId, projectTab), text: '返回项目详情' }}
         extra={
           <Tag color={SPEC_STATE_COLOR[spec.state]}>
             {DETAILED_DESIGN_STATE_TEXT[spec.state]}

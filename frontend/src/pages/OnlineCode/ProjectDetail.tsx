@@ -2,7 +2,7 @@
  * Project detail page with tabs for overview design and feature design.
  */
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'umi';
+import { history, useSearchParams } from 'umi';
 import { Tabs, message } from '@ead/suid';
 import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
@@ -15,6 +15,7 @@ import BuildActions from './BuildActions';
 const ProjectDetail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('id') ?? '';
+  const requestedTab = searchParams.get('tab') ?? 'plan';
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -69,6 +70,7 @@ const ProjectDetail: React.FC = () => {
       children: <FeatureDesignTab projectId={projectId} />,
     },
   ];
+  const activeTab = tabItems.some((item) => item.key === requestedTab) ? requestedTab : 'plan';
 
   return (
     <PageContainer>
@@ -79,7 +81,11 @@ const ProjectDetail: React.FC = () => {
       />
       <BuildActions projectId={projectId} />
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <Tabs items={tabItems} />
+        <Tabs
+          items={tabItems}
+          activeKey={activeTab}
+          onChange={(tab) => history.replace(`/online-code/project?id=${projectId}&tab=${tab}`)}
+        />
       </div>
     </PageContainer>
   );

@@ -33,7 +33,12 @@ import {
   confirm,
   history as getHistory,
 } from '@/services/plan';
-import type { PlanDto, PlanContent, PlanFeature } from '@/services/plan';
+import type {
+  PlanDto,
+  PlanContent,
+  PlanFeature,
+  PlanModule,
+} from '@/services/plan';
 
 const useStyles = createStyles(({ token, css }) => ({
   container: css`
@@ -81,6 +86,13 @@ interface PlanTabProps {
   projectId: string;
 }
 
+interface EditablePlanContent {
+  summary: string;
+  techAssumptions: string;
+  modules: PlanModule[];
+  nonGoals: string;
+}
+
 const statusColorMap: Record<string, string> = {
   GENERATING: 'processing',
   DRAFT: 'default',
@@ -95,12 +107,67 @@ const statusTextMap: Record<string, string> = {
   FAILED: '失败',
 };
 
+const splitLines = (value?: string) =>
+  (value ?? '')
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const joinLines = (value?: string[]) => (value ?? []).join('\n');
+
+const createEmptyFeature = (): PlanFeature => ({
+  featureId: '',
+  title: '',
+  outline: '',
+});
+
+const fallbackModules = (content: PlanContent): PlanModule[] => {
+  if (content.modules?.length) {
+    return content.modules;
+  }
+  return [
+    {
+      moduleId: 'default',
+      title: '默认模块',
+      summary: content.summary ?? '',
+      features: content.features?.length ? content.features : [createEmptyFeature()],
+    },
+  ];
+};
+
+const toEditablePlanContent = (content: PlanContent): EditablePlanContent => ({
+  summary: content.summary ?? '',
+  techAssumptions: joinLines(content.techAssumptions),
+  modules: fallbackModules(content),
+  nonGoals: joinLines(content.nonGoals),
+});
+
+const toPlanContentPayload = (values: EditablePlanContent): PlanContent => {
+  const modules = (values.modules ?? []).map((module) => ({
+    moduleId: module.moduleId,
+    title: module.title,
+    summary: module.summary,
+    features: (module.features ?? []).map((feature) => ({
+      featureId: feature.featureId,
+      title: feature.title,
+      outline: feature.outline,
+    })),
+  }));
+  return {
+    summary: values.summary,
+    techAssumptions: splitLines(values.techAssumptions),
+    modules,
+    features: modules.flatMap((module) => module.features ?? []),
+    nonGoals: splitLines(values.nonGoals),
+  };
+};
+
 const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
   const { styles } = useStyles();
   const [plan, setPlan] = useState<PlanDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [form] = Form.useForm<PlanContent>();
+  const [form] = Form.useForm<EditablePlanContent>();
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [historyData, setHistoryData] = useState<PlanDto[]>([]);
   const [regenerateModalOpen, setRegenerateModalOpen] = useState(false);
@@ -115,7 +182,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
       if (res.success && res.data) {
         setPlan(res.data);
         if (editing) {
-          form.setFieldsValue(res.data.content);
+          form.setFieldsValue(toEditablePlanContent(res.data.content));
         }
       } else if (!silent) {
         message.error(res.message ?? '获取概要设计失败');
@@ -142,7 +209,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
 
   const handleEdit = () => {
     if (!plan) return;
-    form.setFieldsValue(plan.content);
+    form.setFieldsValue(toEditablePlanContent(plan.content));
     setEditing(true);
   };
 
@@ -150,11 +217,11 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
     setEditing(false);
   };
 
-  const handleSaveEdit = async (values: PlanContent) => {
+  const handleSaveEdit = async (values: EditablePlanContent) => {
     if (!plan) return;
     setSubmitting(true);
     try {
-      const res = await edit(projectId, values);
+      const res = await edit(projectId, toPlanContentPayload(values));
       if (res.success && res.data) {
         message.success('保存成功');
         setPlan(res.data);
@@ -308,11 +375,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
 
           <div className={styles.section}>
             <div className={styles.sectionTitle}>技术假设</div>
-            <Form.Item
-              name="techAssumptions"
-              label="技术假设"
-              rules={[{ required: true, message: '请输入技术假设' }]}
-            >
+            <Form.Item name="techAssumptions" label="技术假设" rules={[{ required: true, message: '请输入技术假设' }]}>
               <Input.TextArea
                 rows={3}
                 placeholder="每行一个技术假设，例如：React 18, TypeScript, @ead/suid"
@@ -321,63 +384,138 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
           </div>
 
           <div className={styles.section}>
-            <div className={styles.sectionTitle}>功能列表</div>
-            <Form.List name="features">
+            <div className={styles.sectionTitle}>模块划分</div>
+            <Form.List name="modules">
               {(fields, { add, remove }) => (
                 <>
                   {fields.map((field, index) => (
                     <div
                       key={field.key}
                       style={{
-                        display: 'flex',
-                        gap: 8,
-                        marginBottom: 8,
-                        alignItems: 'flex-start',
+                        marginBottom: 16,
+                        padding: 16,
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 6,
                       }}
                     >
-                      <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Form.Item
                           {...field}
-                          name={[field.name, 'featureId']}
-                          label="功能ID"
-                          rules={[{ required: true, message: '请输入功能ID' }]}
-                          style={{ width: 150, marginBottom: 0 }}
+                          name={[field.name, 'moduleId']}
+                          label="模块ID"
+                          rules={[{ required: true, message: '请输入模块ID' }]}
+                          style={{ width: 180 }}
                         >
-                          <Input placeholder="FEAT-001" />
+                          <Input placeholder="MOD-001" />
                         </Form.Item>
                         <Form.Item
                           {...field}
                           name={[field.name, 'title']}
-                          label="功能标题"
-                          rules={[{ required: true, message: '请输入功能标题' }]}
-                          style={{ flex: 1, minWidth: 200, marginBottom: 0 }}
+                          label="模块标题"
+                          rules={[{ required: true, message: '请输入模块标题' }]}
+                          style={{ flex: 1, minWidth: 220 }}
                         >
-                          <Input placeholder="功能标题" />
-                        </Form.Item>
-                        <Form.Item
-                          {...field}
-                          name={[field.name, 'outline']}
-                          label="功能概要"
-                          rules={[{ required: true, message: '请输入功能概要' }]}
-                          style={{ flex: 2, minWidth: 300, marginBottom: 0 }}
-                        >
-                          <Input.TextArea rows={1} placeholder="功能概要" />
+                          <Input placeholder="模块标题" />
                         </Form.Item>
                       </div>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'summary']}
+                        label="模块概要"
+                        rules={[{ required: true, message: '请输入模块概要' }]}
+                      >
+                        <Input.TextArea rows={3} placeholder="描述该模块的职责和边界" />
+                      </Form.Item>
+                      <div className={styles.sectionTitle} style={{ fontSize: 14, marginBottom: 8 }}>
+                        模块功能项
+                      </div>
+                      <Form.List name={[field.name, 'features']}>
+                        {(featureFields, { add: addFeature, remove: removeFeature }) => (
+                          <>
+                            {featureFields.map((featureField, featureIndex) => (
+                              <div
+                                key={featureField.key}
+                                style={{
+                                  display: 'flex',
+                                  gap: 8,
+                                  marginBottom: 8,
+                                  alignItems: 'flex-start',
+                                }}
+                              >
+                                <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <Form.Item
+                                    {...featureField}
+                                    name={[featureField.name, 'featureId']}
+                                    label="功能ID"
+                                    rules={[{ required: true, message: '请输入功能ID' }]}
+                                    style={{ width: 150, marginBottom: 0 }}
+                                  >
+                                    <Input placeholder="FEAT-001" />
+                                  </Form.Item>
+                                  <Form.Item
+                                    {...featureField}
+                                    name={[featureField.name, 'title']}
+                                    label="功能标题"
+                                    rules={[{ required: true, message: '请输入功能标题' }]}
+                                    style={{ flex: 1, minWidth: 200, marginBottom: 0 }}
+                                  >
+                                    <Input placeholder="功能标题" />
+                                  </Form.Item>
+                                  <Form.Item
+                                    {...featureField}
+                                    name={[featureField.name, 'outline']}
+                                    label="功能概要"
+                                    rules={[{ required: true, message: '请输入功能概要' }]}
+                                    style={{ flex: 2, minWidth: 300, marginBottom: 0 }}
+                                  >
+                                    <Input.TextArea rows={1} placeholder="功能概要" />
+                                  </Form.Item>
+                                </div>
+                                {featureIndex > 0 && (
+                                  <ActionButton
+                                    type="text"
+                                    danger
+                                    icon={<MinusCircleOutlined />}
+                                    onClick={() => removeFeature(featureField.name)}
+                                    style={{ marginTop: 24 }}
+                                  />
+                                )}
+                              </div>
+                            ))}
+                            <Form.Item>
+                              <Button type="dashed" onClick={() => addFeature(createEmptyFeature())} block>
+                                添加模块功能
+                              </Button>
+                            </Form.Item>
+                          </>
+                        )}
+                      </Form.List>
                       {index > 0 && (
                         <ActionButton
                           type="text"
                           danger
                           icon={<MinusCircleOutlined />}
                           onClick={() => remove(field.name)}
-                          style={{ marginTop: 24 }}
-                        />
+                        >
+                          删除模块
+                        </ActionButton>
                       )}
                     </div>
                   ))}
                   <Form.Item>
-                    <Button type="dashed" onClick={() => add()} block>
-                      添加功能
+                    <Button
+                      type="dashed"
+                      onClick={() =>
+                        add({
+                          moduleId: '',
+                          title: '',
+                          summary: '',
+                          features: [createEmptyFeature()],
+                        })
+                      }
+                      block
+                    >
+                      添加模块
                     </Button>
                   </Form.Item>
                 </>
@@ -387,11 +525,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
 
           <div className={styles.section}>
             <div className={styles.sectionTitle}>不包含的内容</div>
-            <Form.Item
-              name="nonGoals"
-              label="不包含的内容"
-              rules={[{ required: true, message: '请输入不包含的内容' }]}
-            >
+            <Form.Item name="nonGoals" label="不包含的内容" rules={[{ required: true, message: '请输入不包含的内容' }]}>
               <Input.TextArea
                 rows={3}
                 placeholder="每行一个不包含的内容"

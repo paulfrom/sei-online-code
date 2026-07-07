@@ -26,6 +26,8 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -157,6 +159,14 @@ public class SpecAgentService {
         try {
             return objectMapper.readValue(extracted, type);
         } catch (Exception e) {
+            String repaired = repairTruncatedJson(extracted);
+            if (!repaired.equals(extracted)) {
+                try {
+                    return objectMapper.readValue(repaired, type);
+                } catch (Exception retry) {
+                    e.addSuppressed(retry);
+                }
+            }
             throw new RuntimeException("parse " + type.getSimpleName() + " failed, rawHead="
                     + (json == null ? "null" : json.substring(0, Math.min(json.length(), 200))), e);
         }
@@ -187,6 +197,76 @@ public class SpecAgentService {
             return t.substring(start, end + 1);
         }
         return t;
+    }
+
+    /**
+     * 仅修复“JSON 主体完整，但尾部缺少若干闭合符”的截断场景。
+     * 不猜测缺失字段值；若末尾停在字符串/冒号等不完整 token，则保持原样交由上层失败。
+     */
+    private static String repairTruncatedJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return raw;
+        }
+        String trimmed = raw.trim();
+        Deque<Character> closers = new ArrayDeque<>();
+        boolean inString = false;
+        boolean escaping = false;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (escaping) {
+                escaping = false;
+                continue;
+            }
+            if (c == '\\' && inString) {
+                escaping = true;
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (c == '{') {
+                closers.push('}');
+            } else if (c == '[') {
+                closers.push(']');
+            } else if ((c == '}' || c == ']') && !closers.isEmpty() && closers.peek() == c) {
+                closers.pop();
+            }
+        }
+        if (inString || closers.isEmpty()) {
+            return trimmed;
+        }
+        int end = trimmed.length() - 1;
+        while (end >= 0 && Character.isWhitespace(trimmed.charAt(end))) {
+            end--;
+        }
+        if (end < 0) {
+            return trimmed;
+        }
+        char last = trimmed.charAt(end);
+        if (last == ':' || last == '{' || last == '[') {
+            return trimmed;
+        }
+        StringBuilder repaired = new StringBuilder(trimmed.substring(0, end + 1));
+        while (repaired.length() > 0) {
+            char tail = repaired.charAt(repaired.length() - 1);
+            if (Character.isWhitespace(tail)) {
+                repaired.deleteCharAt(repaired.length() - 1);
+                continue;
+            }
+            if (tail == ',') {
+                repaired.deleteCharAt(repaired.length() - 1);
+                continue;
+            }
+            break;
+        }
+        while (!closers.isEmpty()) {
+            repaired.append(closers.pop());
+        }
+        return repaired.toString();
     }
 
     private Path materializeSkills(Agent agent) {

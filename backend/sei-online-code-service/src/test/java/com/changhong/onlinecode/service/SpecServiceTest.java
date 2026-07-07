@@ -144,6 +144,54 @@ class SpecServiceTest {
     }
 
     @Test
+    void confirmSpec_spawnsAllFeatureDesignsWhenSpecHasNoModuleIdButPlanUsesModules() {
+        // 准备：兼容旧详细设计入口，Spec 未绑定 moduleId，但概要设计已按 modules 存储
+        SpecService service = spy(specService);
+        Spec spec = new Spec();
+        spec.setId("spec1");
+        spec.setProjectId("project1");
+        spec.setVersion(1);
+        spec.setState(SpecState.SPEC_REVIEW);
+        doReturn(spec).when(service).findOne("spec1");
+        doReturn(OperateResultWithData.operationSuccessWithData(spec)).when(service).save(spec);
+
+        PlanFeature inventoryFeature = new PlanFeature();
+        inventoryFeature.setFeatureId("feat-inventory");
+        inventoryFeature.setTitle("库存查询");
+        PlanModule inventoryModule = new PlanModule();
+        inventoryModule.setModuleId("mod-inventory");
+        inventoryModule.setTitle("库存模块");
+        inventoryModule.setFeatures(List.of(inventoryFeature));
+
+        PlanFeature orderFeature = new PlanFeature();
+        orderFeature.setFeatureId("feat-order");
+        orderFeature.setTitle("订单查询");
+        PlanModule orderModule = new PlanModule();
+        orderModule.setModuleId("mod-order");
+        orderModule.setTitle("订单模块");
+        orderModule.setFeatures(List.of(orderFeature));
+
+        PlanContent content = new PlanContent();
+        content.setModules(List.of(inventoryModule, orderModule));
+        PlanDto confirmedPlan = new PlanDto();
+        confirmedPlan.setProjectId("project1");
+        confirmedPlan.setStatus(PlanStatus.CONFIRMED);
+        confirmedPlan.setContent(content);
+        when(planService.findLatest("project1")).thenReturn(confirmedPlan);
+
+        // 执行
+        OperateResultWithData<Spec> result = service.confirmSpec("spec1");
+
+        // 验证
+        assertTrue(result.successful());
+        ArgumentCaptor<List<PlanFeature>> featuresCaptor = ArgumentCaptor.forClass(List.class);
+        verify(planAgentService).spawnFeatureDesigns(eq("project1"), featuresCaptor.capture());
+        assertEquals(List.of("feat-inventory", "feat-order"), featuresCaptor.getValue().stream()
+                .map(PlanFeature::getFeatureId)
+                .toList());
+    }
+
+    @Test
     void confirmSpec_rejectsWhenSpecNotExists() {
         // 准备
         SpecService service = spy(specService);

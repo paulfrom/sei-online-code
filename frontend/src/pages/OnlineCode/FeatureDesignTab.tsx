@@ -255,6 +255,8 @@ const FeatureDesignTab: React.FC<FeatureDesignTabProps> = ({ projectId }) => {
     },
     {
       title: '操作',
+      dataIndex: 'id',
+      key: 'actions',
       width: 280,
       fixed: 'right',
       render: (_, record) => (
