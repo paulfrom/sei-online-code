@@ -21,4 +21,12 @@ public interface RequirementDao extends BaseEntityDao<Requirement> {
      * @return 需求列表
      */
     List<Requirement> findByProjectId(String projectId);
+
+    /**
+     * 按状态查询需求。
+     *
+     * @param status 状态
+     * @return 需求列表
+     */
+    List<Requirement> findByStatus(com.changhong.onlinecode.dto.enums.RequirementStatus status);
 }

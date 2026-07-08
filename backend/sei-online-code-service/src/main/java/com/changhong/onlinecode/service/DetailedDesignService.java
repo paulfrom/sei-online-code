@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -178,6 +179,43 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
             features = List.of(new FeatureRef("default", "默认模块", "default", "默认功能"));
         }
         for (FeatureRef f : features) {
+            DetailedDesign design = new DetailedDesign();
+            design.setProjectId(overviewDesign.getProjectId());
+            design.setRequirementId(overviewDesign.getRequirementId());
+            design.setOverviewDesignId(overviewDesign.getId());
+            design.setModuleId(f.moduleId);
+            design.setModuleTitle(f.moduleTitle);
+            design.setFeatureId(f.featureId);
+            design.setFeatureTitle(f.featureTitle);
+            design.setStatus(DetailedDesignStatus.GENERATING);
+            design.setVersion(1);
+            design.setContent("{\"placeholder\":true}");
+            design.setLastFailedAt(new Date());
+            dao.save(design);
+            String designId = design.getId();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null));
+        }
+    }
+
+    /**
+     * 仅补全概览设计下缺失的详细设计。用于补偿器，不覆盖/不修改已有设计。
+     *
+     * @param overviewDesign 已确认的概览设计
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void createMissingFromOverviewDesign(com.changhong.onlinecode.entity.OverviewDesign overviewDesign) {
+        List<FeatureRef> expected = parseFeatures(overviewDesign.getContent());
+        if (expected.isEmpty()) {
+            expected = List.of(new FeatureRef("default", "默认模块", "default", "默认功能"));
+        }
+        List<DetailedDesign> existing = dao.findByOverviewDesignId(overviewDesign.getId());
+        Set<String> existingFeatureIds = existing.stream()
+                .map(DetailedDesign::getFeatureId)
+                .collect(Collectors.toSet());
+        for (FeatureRef f : expected) {
+            if (existingFeatureIds.contains(f.featureId)) {
+                continue;
+            }
             DetailedDesign design = new DetailedDesign();
             design.setProjectId(overviewDesign.getProjectId());
             design.setRequirementId(overviewDesign.getRequirementId());

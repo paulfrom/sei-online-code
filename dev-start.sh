@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 本地一键启动前端 + 后端（不启用 Nacos，使用本地 PostgreSQL + Redis）。
-# 用法：./dev-start.sh   （Ctrl+C 一并停止前后端）
+# 用法：./dev-start.sh [-f|--force]
+#   -f, --force   端口被占用时自动释放（kill 占用进程），不询问
+#   Ctrl+C        一并停止前后端
 #
 # 前置依赖（本脚本只检查、不自动创建）：
 #   - PostgreSQL 容器 pg17           监听 5433，已导入 db/migration V1–V5
@@ -15,6 +17,15 @@ LOCAL_CFG_DIR="$BACKEND_DIR/sei-online-code-service/local-config"
 LOCAL_CFG_FILE="$LOCAL_CFG_DIR/application-local.yaml"
 BACKEND_PORT=8091
 FRONTEND_PORT=8000
+FORCE_RELEASE=false
+
+# --- 参数解析 ---
+for arg in "$@"; do
+  case "$arg" in
+    -f|--force) FORCE_RELEASE=true ;;
+    *) err "未知参数: $arg"; exit 1 ;;
+  esac
+done
 
 log() { printf '\033[36m[dev-start]\033[0m %s\n' "$*"; }
 err() { printf '\033[31m[dev-start]\033[0m %s\n' "$*" >&2; }
@@ -89,12 +100,84 @@ YAML
   exit 1
 fi
 
-# --- 端口占用检查 ---
-port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-for p in "$BACKEND_PORT" "$FRONTEND_PORT"; do
-  if port_busy "$p"; then
-    err "端口 $p 已被占用。请释放后重试（后端=$BACKEND_PORT，前端=$FRONTEND_PORT）。"
-    exit 1
+# --- 端口占用检测 ---
+# 使用 ss（优先）或 lsof（备选）检测端口占用。
+# 返回值：0=被占用, 1=空闲。
+check_port() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnpH "sport = :$port" 2>/dev/null | grep -q ":$port" && return 0 || return 1
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -i :"$port" -sTCP:LISTEN 2>/dev/null | grep -q . && return 0 || return 1
+  else
+    # fallback: bash /dev/tcp（可能不可用）
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && return 0 || return 1
+  fi
+}
+
+# 获取占用指定端口的进程信息（PID + 命令）。
+# 输出格式："PID COMMAND"；无占用则输出空。
+port_pid_info() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnpH "sport = :$port" 2>/dev/null | awk -v p="$port" '$1 ~ /LISTEN/ {split($NF,a,":"); if(a[2]==p) {g(/.*pid=/, "", $6); split($6,a2,","); print a2[1], $7}}'
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -i :"$port" -sTCP:LISTEN -o 2>/dev/null | awk 'NR>1{print $2, $1}'
+  fi
+}
+
+# --- 端口冲突处理 ---
+release_port() {
+  local port="$1"
+  local label="$2"
+  local pid cmd
+  if command -v lsof >/dev/null 2>&1; then
+    pid=$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null)
+  elif command -v ss >/dev/null 2>&1; then
+    pid=$(ss -tlnpH "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
+  fi
+  if [ -z "${pid:-}" ]; then
+    err "端口 $port 已被占用，但无法定位占用进程，请手动释放。"
+    return 1
+  fi
+  cmd="$([ -r /proc/$pid/comm ] && cat /proc/$pid/comm 2>/dev/null || echo "PID:$pid")"
+  if [ "$FORCE_RELEASE" = true ]; then
+    log "端口 $port（$label）被进程 $pid（$cmd）占用，正在强制释放（--force）..."
+    kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+    sleep 1
+  else
+    err "端口 $port（$label）已被进程 $pid（$cmd）占用。"
+    printf '\033[33m[dev-start]\033[0m 是否终止该进程释放端口？[y/N] ' >&2
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES)
+        kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+        sleep 1
+        if check_port "$port"; then
+          err "释放端口 $port 失败，请手动处理。"
+          return 1
+        fi
+        log "端口 $port 已释放。"
+        ;;
+      *)
+        err "请手动释放端口 $port 后重试。"
+        return 1
+        ;;
+    esac
+  fi
+  # 确认释放成功
+  if check_port "$port"; then
+    err "端口 $port 释放失败，请手动处理。"
+    return 1
+  fi
+  log "端口 $port（$label）已释放。"
+}
+
+for entry in "$BACKEND_PORT:后端" "$FRONTEND_PORT:前端"; do
+  port="${entry%%:*}"
+  label="${entry#*:}"
+  if check_port "$port"; then
+    release_port "$port" "$label" || exit 1
   fi
 done
 

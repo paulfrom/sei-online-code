@@ -1,19 +1,25 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dao.FeatureDesignDao;
-import com.changhong.onlinecode.dao.PlanDao;
-import com.changhong.onlinecode.dao.SpecDao;
-import com.changhong.onlinecode.dto.enums.FailureCode;
-import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
-import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
-import com.changhong.onlinecode.dto.enums.PlanStatus;
-import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dao.CodingTaskDao;
+import com.changhong.onlinecode.dao.DetailedDesignDao;
+import com.changhong.onlinecode.dao.OverviewDesignDao;
+import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dto.CodingTaskDto;
+import com.changhong.onlinecode.dto.DetailedDesignDto;
+import com.changhong.onlinecode.dto.OverviewDesignDto;
+import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.dto.plan.PlanContent;
-import com.changhong.onlinecode.dto.plan.PlanModule;
-import com.changhong.onlinecode.entity.FeatureDesign;
-import com.changhong.onlinecode.entity.Plan;
-import com.changhong.onlinecode.entity.Spec;
+import com.changhong.onlinecode.entity.CodingTask;
+import com.changhong.onlinecode.entity.DetailedDesign;
+import com.changhong.onlinecode.entity.OverviewDesign;
+import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.sei.core.dto.ResultData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,125 +33,221 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 新流程补偿服务单元测试。
+ */
 class CompensationServiceTest {
 
-    private PlanDao planDao;
-    private SpecDao specDao;
-    private FeatureDesignDao featureDesignDao;
-    private PlanService planService;
-    private SpecService specService;
-    private PlanAgentService planAgentService;
-    private SpecAgentService specAgentService;
-    private FeatureDesignBuildService featureDesignBuildService;
+    private RequirementDao requirementDao;
+    private OverviewDesignDao overviewDesignDao;
+    private DetailedDesignDao detailedDesignDao;
+    private CodingTaskDao codingTaskDao;
+    private RunDao runDao;
+
+    private RequirementAgentService requirementAgentService;
+    private OverviewDesignService overviewDesignService;
+    private DetailedDesignService detailedDesignService;
+    private CodingTaskService codingTaskService;
+
     private FailureInfoSupport failureInfoSupport;
     private CompensationLogService compensationLogService;
     private CompensationService compensationService;
 
     @BeforeEach
     void setUp() throws Exception {
-        planDao = mock(PlanDao.class);
-        specDao = mock(SpecDao.class);
-        featureDesignDao = mock(FeatureDesignDao.class);
-        planService = mock(PlanService.class);
-        specService = mock(SpecService.class);
-        planAgentService = mock(PlanAgentService.class);
-        specAgentService = mock(SpecAgentService.class);
-        featureDesignBuildService = mock(FeatureDesignBuildService.class);
+        requirementDao = mock(RequirementDao.class);
+        overviewDesignDao = mock(OverviewDesignDao.class);
+        detailedDesignDao = mock(DetailedDesignDao.class);
+        codingTaskDao = mock(CodingTaskDao.class);
+        runDao = mock(RunDao.class);
+
+        requirementAgentService = mock(RequirementAgentService.class);
+        overviewDesignService = mock(OverviewDesignService.class);
+        detailedDesignService = mock(DetailedDesignService.class);
+        codingTaskService = mock(CodingTaskService.class);
+
         failureInfoSupport = spy(new FailureInfoSupport());
         compensationLogService = mock(CompensationLogService.class);
-        compensationService = new CompensationService(planDao, specDao, featureDesignDao,
-                planService, specService, planAgentService, specAgentService, featureDesignBuildService,
+
+        compensationService = new CompensationService(
+                requirementDao, overviewDesignDao, detailedDesignDao, codingTaskDao, runDao,
+                requirementAgentService, overviewDesignService, detailedDesignService, codingTaskService,
                 failureInfoSupport, compensationLogService);
-        setField(compensationService, "autoBuildEnabled", true);
-        setField(compensationService, "buildTimeoutMinutes", 30L);
+        setField(compensationService, "autoRunEnabled", true);
+        setField(compensationService, "runTimeoutMinutes", 30L);
     }
 
     @Test
-    void compensateFailedPlans_retriesEligiblePlan() {
-        Plan plan = new Plan();
-        plan.setId("plan1");
-        plan.setProjectId("project1");
-        plan.setStatus(PlanStatus.FAILED);
-        plan.setFailureSummary("json parse failed");
-        plan.setRetryCount(0);
-        plan.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
-        when(planDao.findByStatusAndIsLatestTrue(PlanStatus.FAILED)).thenReturn(List.of(plan));
+    void compensateFailedRequirements_retriesEligibleRequirement() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("proj1");
+        requirement.setStatus(RequirementStatus.FAILED);
+        requirement.setFailureSummary("json parse failed");
+        requirement.setRetryCount(0);
+        requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of(requirement));
 
-        compensationService.compensateFailedPlans();
+        compensationService.compensateFailedRequirements(new Date());
 
-        ArgumentCaptor<Plan> captor = ArgumentCaptor.forClass(Plan.class);
-        verify(planDao).save(captor.capture());
-        assertEquals(PlanStatus.GENERATING, captor.getValue().getStatus());
+        ArgumentCaptor<Requirement> captor = ArgumentCaptor.forClass(Requirement.class);
+        verify(requirementDao).save(captor.capture());
+        assertEquals(RequirementStatus.PRD_GENERATING, captor.getValue().getStatus());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(planAgentService).spawnPlanning(eq("project1"), anyString(), eq(TriggerSource.SCHEDULED_COMPENSATION));
+        verify(requirementAgentService).spawnPrd(eq("req1"), anyString());
     }
 
     @Test
-    void compensateMissingSpecs_createsOnlyMissingModuleSpec() {
-        PlanModule existingModule = new PlanModule();
-        existingModule.setModuleId("mod-existing");
-        existingModule.setTitle("已存在模块");
-        PlanModule missingModule = new PlanModule();
-        missingModule.setModuleId("mod-missing");
-        missingModule.setTitle("缺失模块");
+    void compensateFailedRequirements_skipsWhenNotRetryable() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setStatus(RequirementStatus.FAILED);
+        requirement.setRetryCount(3);
+        requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of(requirement));
 
-        Plan plan = new Plan();
-        plan.setId("plan1");
-        plan.setProjectId("project1");
-        plan.setStatus(PlanStatus.CONFIRMED);
-        plan.setContent(new PlanContent());
+        compensationService.compensateFailedRequirements(new Date());
 
-        Spec existing = new Spec();
-        existing.setId("spec1");
-        existing.setProjectId("project1");
-        existing.setVersion(1);
-        existing.setModuleId("mod-existing");
-        existing.setModuleTitle("已存在模块");
-
-        when(planDao.findByStatusAndIsLatestTrue(PlanStatus.CONFIRMED)).thenReturn(List.of(plan));
-        when(planService.modulesOrFallback(plan.getContent())).thenReturn(List.of(existingModule, missingModule));
-        when(specDao.findByProjectId("project1")).thenReturn(List.of(existing));
-        when(specDao.save(any(Spec.class))).thenAnswer(inv -> {
-            Spec spec = inv.getArgument(0);
-            spec.setId("spec-new");
-            return spec;
-        });
-
-        compensationService.compensateMissingSpecs();
-
-        ArgumentCaptor<Spec> captor = ArgumentCaptor.forClass(Spec.class);
-        verify(specDao).save(captor.capture());
-        assertEquals("mod-missing", captor.getValue().getModuleId());
-        assertEquals(SpecState.GENERATING, captor.getValue().getState());
-        verify(specAgentService).spawnRequirement(eq("project1"), eq(null), eq("spec-new"),
-                eq(TriggerSource.CHAIN_COMPENSATION));
+        verify(requirementDao, never()).save(any(Requirement.class));
+        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString());
     }
 
     @Test
-    void timeoutBuildingFeatureDesigns_marksTimedOutBuildFailed() {
-        FeatureDesign design = new FeatureDesign();
-        design.setId("fd1");
-        design.setProjectId("project1");
-        design.setFeatureId("feature1");
-        design.setStatus(FeatureDesignStatus.CONFIRMED);
-        design.setBuildStatus(FeatureDesignBuildStatus.BUILDING);
-        design.setLastEditedDate(new Date(System.currentTimeMillis() - 31L * 60_000L));
-        when(featureDesignDao.findByBuildStatusAndIsLatestTrue(FeatureDesignBuildStatus.BUILDING))
-                .thenReturn(List.of(design));
+    void compensateMissingOverviewDesigns_createsOverviewForConfirmedRequirement() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("proj1");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        when(requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED)).thenReturn(List.of(requirement));
+        when(overviewDesignDao.findByRequirementId("req1")).thenReturn(null);
 
-        compensationService.timeoutBuildingFeatureDesigns();
+        compensationService.compensateMissingOverviewDesigns(new Date());
 
-        ArgumentCaptor<FeatureDesign> captor = ArgumentCaptor.forClass(FeatureDesign.class);
-        verify(featureDesignDao).save(captor.capture());
-        assertEquals(FeatureDesignBuildStatus.BUILD_FAILED, captor.getValue().getBuildStatus());
-        assertEquals(FailureCode.BUILD_TIMEOUT, captor.getValue().getFailureCode());
-        assertNotNull(captor.getValue().getNextRetryAt());
+        verify(overviewDesignService).createGeneratingOverview(requirement);
+    }
+
+    @Test
+    void compensateFailedOverviewDesigns_retriesEligibleOverview() {
+        OverviewDesign overview = new OverviewDesign();
+        overview.setId("ov1");
+        overview.setRequirementId("req1");
+        overview.setStatus(OverviewDesignStatus.FAILED);
+        overview.setFailureSummary("agent timeout");
+        overview.setRetryCount(0);
+        overview.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(overviewDesignDao.findByStatus(OverviewDesignStatus.FAILED)).thenReturn(List.of(overview));
+        when(overviewDesignService.regenerate(eq("ov1"), anyString()))
+                .thenReturn(ResultData.success(new OverviewDesignDto()));
+
+        compensationService.compensateFailedOverviewDesigns(new Date());
+
+        ArgumentCaptor<OverviewDesign> captor = ArgumentCaptor.forClass(OverviewDesign.class);
+        verify(overviewDesignDao).save(captor.capture());
+        assertEquals(1, captor.getValue().getRetryCount());
+        verify(overviewDesignService).regenerate(eq("ov1"), anyString());
+    }
+
+    @Test
+    void compensateMissingDetailedDesigns_createsAllWhenNoneExist() {
+        OverviewDesign overview = new OverviewDesign();
+        overview.setId("ov1");
+        overview.setRequirementId("req1");
+        overview.setStatus(OverviewDesignStatus.CONFIRMED);
+        when(overviewDesignDao.findByStatus(OverviewDesignStatus.CONFIRMED)).thenReturn(List.of(overview));
+        when(detailedDesignDao.findByOverviewDesignId("ov1")).thenReturn(List.of());
+
+        compensationService.compensateMissingDetailedDesigns(new Date());
+
+        verify(detailedDesignService).createFromOverviewDesign(overview);
+    }
+
+    @Test
+    void compensateFailedDetailedDesigns_retriesEligibleDesign() {
+        DetailedDesign design = new DetailedDesign();
+        design.setId("dd1");
+        design.setOverviewDesignId("ov1");
+        design.setStatus(DetailedDesignStatus.FAILED);
+        design.setFailureSummary("parse error");
+        design.setRetryCount(0);
+        design.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(detailedDesignDao.findByStatus(DetailedDesignStatus.FAILED)).thenReturn(List.of(design));
+        when(detailedDesignService.regenerate(eq("dd1"), anyString()))
+                .thenReturn(ResultData.success(new DetailedDesignDto()));
+
+        compensationService.compensateFailedDetailedDesigns(new Date());
+
+        ArgumentCaptor<DetailedDesign> captor = ArgumentCaptor.forClass(DetailedDesign.class);
+        verify(detailedDesignDao).save(captor.capture());
+        assertEquals(1, captor.getValue().getRetryCount());
+        verify(detailedDesignService).regenerate(eq("dd1"), anyString());
+    }
+
+    @Test
+    void compensateMissingCodingTasks_createsTaskForConfirmedDesign() {
+        DetailedDesign design = new DetailedDesign();
+        design.setId("dd1");
+        design.setProjectId("proj1");
+        design.setStatus(DetailedDesignStatus.CONFIRMED);
+        when(detailedDesignDao.findByStatus(DetailedDesignStatus.CONFIRMED)).thenReturn(List.of(design));
+        when(codingTaskDao.findByDetailedDesignId("dd1")).thenReturn(List.of());
+
+        compensationService.compensateMissingCodingTasks(new Date());
+
+        verify(codingTaskService).createFromDetailedDesign(design);
+    }
+
+    @Test
+    void compensateFailedCodingTasks_retriesEligibleTask() {
+        CodingTask task = new CodingTask();
+        task.setId("ct1");
+        task.setDetailedDesignId("dd1");
+        task.setStatus(CodingTaskStatus.FAILED);
+        task.setFailureSummary("run failed");
+        task.setRetryCount(0);
+        task.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(codingTaskDao.findByStatus(CodingTaskStatus.FAILED)).thenReturn(List.of(task));
+        when(codingTaskService.rerun(eq("ct1"), anyString()))
+                .thenReturn(ResultData.success(new CodingTaskDto()));
+
+        compensationService.compensateFailedCodingTasks(new Date());
+
+        ArgumentCaptor<CodingTask> captor = ArgumentCaptor.forClass(CodingTask.class);
+        verify(codingTaskDao).save(captor.capture());
+        assertEquals(1, captor.getValue().getRetryCount());
+        verify(codingTaskService).rerun(eq("ct1"), anyString());
+    }
+
+    @Test
+    void timeoutRunningRuns_marksTimedOutRunFailed() {
+        Run run = new Run();
+        run.setId("run1");
+        run.setCodingTaskId("ct1");
+        run.setState(RunState.RUNNING);
+        run.setStartedDate(new Date(System.currentTimeMillis() - 31L * 60_000L));
+        when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
+
+        CodingTask task = new CodingTask();
+        task.setId("ct1");
+        task.setStatus(CodingTaskStatus.RUNNING);
+        when(codingTaskDao.findOne("ct1")).thenReturn(task);
+
+        compensationService.timeoutRunningRuns(new Date());
+
+        ArgumentCaptor<Run> runCaptor = ArgumentCaptor.forClass(Run.class);
+        verify(runDao).save(runCaptor.capture());
+        assertEquals(RunState.FAILED, runCaptor.getValue().getState());
+        assertNotNull(runCaptor.getValue().getFinishedDate());
+
+        ArgumentCaptor<CodingTask> taskCaptor = ArgumentCaptor.forClass(CodingTask.class);
+        verify(codingTaskDao).save(taskCaptor.capture());
+        assertEquals(CodingTaskStatus.FAILED, taskCaptor.getValue().getStatus());
+        verify(failureInfoSupport).markCodingTaskFailure(eq(task), anyString(), anyString(), eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {

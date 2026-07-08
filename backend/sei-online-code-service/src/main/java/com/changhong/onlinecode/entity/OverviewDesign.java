@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
@@ -53,6 +54,19 @@ public class OverviewDesign extends BaseAuditableEntity {
 
     @Column(name = "last_failed_at")
     private Date lastFailedAt;
+
+    @Column(name = "last_retry_at")
+    private Date lastRetryAt;
+
+    @Column(name = "retry_count", nullable = false)
+    private Integer retryCount = 0;
+
+    @Column(name = "next_retry_at")
+    private Date nextRetryAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "last_trigger_source", length = 32)
+    private TriggerSource lastTriggerSource;
 
     public String getProjectId() {
         return projectId;
@@ -116,6 +130,38 @@ public class OverviewDesign extends BaseAuditableEntity {
 
     public void setLastFailedAt(Date lastFailedAt) {
         this.lastFailedAt = lastFailedAt;
+    }
+
+    public Date getLastRetryAt() {
+        return lastRetryAt;
+    }
+
+    public void setLastRetryAt(Date lastRetryAt) {
+        this.lastRetryAt = lastRetryAt;
+    }
+
+    public Integer getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(Integer retryCount) {
+        this.retryCount = retryCount;
+    }
+
+    public Date getNextRetryAt() {
+        return nextRetryAt;
+    }
+
+    public void setNextRetryAt(Date nextRetryAt) {
+        this.nextRetryAt = nextRetryAt;
+    }
+
+    public TriggerSource getLastTriggerSource() {
+        return lastTriggerSource;
+    }
+
+    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
+        this.lastTriggerSource = lastTriggerSource;
     }
 
     @Override

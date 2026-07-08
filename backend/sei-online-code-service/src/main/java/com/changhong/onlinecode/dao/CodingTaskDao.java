@@ -29,4 +29,12 @@ public interface CodingTaskDao extends BaseEntityDao<CodingTask> {
      * @return 编码任务列表
      */
     List<CodingTask> findByDetailedDesignId(String detailedDesignId);
+
+    /**
+     * 按状态查询编码任务。
+     *
+     * @param status 状态
+     * @return 编码任务列表
+     */
+    List<CodingTask> findByStatus(com.changhong.onlinecode.dto.enums.CodingTaskStatus status);
 }

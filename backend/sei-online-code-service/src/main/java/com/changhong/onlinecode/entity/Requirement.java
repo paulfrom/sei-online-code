@@ -1,6 +1,9 @@
 package com.changhong.onlinecode.entity;
 
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
@@ -48,6 +51,14 @@ public class Requirement extends BaseAuditableEntity {
     @Column(name = "prd_content", columnDefinition = "TEXT")
     private String prdContent;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failure_code", length = 64)
+    private FailureCode failureCode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failure_stage", length = 32)
+    private FailureStage failureStage;
+
     @Column(name = "failure_summary", columnDefinition = "TEXT")
     private String failureSummary;
 
@@ -65,6 +76,10 @@ public class Requirement extends BaseAuditableEntity {
 
     @Column(name = "next_retry_at")
     private Date nextRetryAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "last_trigger_source", length = 32)
+    private TriggerSource lastTriggerSource;
 
     public String getProjectId() {
         return projectId;
@@ -114,6 +129,22 @@ public class Requirement extends BaseAuditableEntity {
         this.prdContent = prdContent;
     }
 
+    public FailureCode getFailureCode() {
+        return failureCode;
+    }
+
+    public void setFailureCode(FailureCode failureCode) {
+        this.failureCode = failureCode;
+    }
+
+    public FailureStage getFailureStage() {
+        return failureStage;
+    }
+
+    public void setFailureStage(FailureStage failureStage) {
+        this.failureStage = failureStage;
+    }
+
     public String getFailureSummary() {
         return failureSummary;
     }
@@ -160,6 +191,14 @@ public class Requirement extends BaseAuditableEntity {
 
     public void setNextRetryAt(Date nextRetryAt) {
         this.nextRetryAt = nextRetryAt;
+    }
+
+    public TriggerSource getLastTriggerSource() {
+        return lastTriggerSource;
+    }
+
+    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
+        this.lastTriggerSource = lastTriggerSource;
     }
 
     @Override

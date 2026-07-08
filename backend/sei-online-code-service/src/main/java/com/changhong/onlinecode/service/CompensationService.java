@@ -1,265 +1,263 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dao.FeatureDesignDao;
-import com.changhong.onlinecode.dao.PlanDao;
-import com.changhong.onlinecode.dao.SpecDao;
-import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
-import com.changhong.onlinecode.dto.enums.FailureCode;
-import com.changhong.onlinecode.dto.enums.FailureStage;
-import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
-import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
-import com.changhong.onlinecode.dto.enums.PlanStatus;
-import com.changhong.onlinecode.dto.enums.SpecState;
+import com.changhong.onlinecode.dao.CodingTaskDao;
+import com.changhong.onlinecode.dao.DetailedDesignDao;
+import com.changhong.onlinecode.dao.OverviewDesignDao;
+import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.dto.plan.PlanFeature;
-import com.changhong.onlinecode.dto.plan.PlanModule;
-import com.changhong.onlinecode.entity.FeatureDesign;
-import com.changhong.onlinecode.entity.Plan;
-import com.changhong.onlinecode.entity.Spec;
-import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.onlinecode.entity.CodingTask;
+import com.changhong.onlinecode.entity.DetailedDesign;
+import com.changhong.onlinecode.entity.OverviewDesign;
+import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.sei.core.utils.TransactionUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
 import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * 编码前补偿服务。
+ * 新流程补偿服务。
+ *
+ * <p>覆盖 Project -> Requirement(PRD) -> OverviewDesign -> DetailedDesign -> CodingTask -> Run
+ * 全链路。职责：扫描失败/断链节点，做条件抢占后调用对应 agent 或服务，并记录补偿日志。</p>
+ *
+ * <p>补偿器不自动确认任何需要人工审阅的产物，不覆盖 DRAFT/REVIEW 等人工编辑态，
+ * 仅重试 FAILED 和补齐已确认上游的缺失下游。</p>
  */
 @Service
 public class CompensationService {
 
-    private final PlanDao planDao;
-    private final SpecDao specDao;
-    private final FeatureDesignDao featureDesignDao;
-    private final PlanService planService;
-    private final SpecService specService;
-    private final PlanAgentService planAgentService;
-    private final SpecAgentService specAgentService;
-    private final FeatureDesignBuildService featureDesignBuildService;
+    private final RequirementDao requirementDao;
+    private final OverviewDesignDao overviewDesignDao;
+    private final DetailedDesignDao detailedDesignDao;
+    private final CodingTaskDao codingTaskDao;
+    private final RunDao runDao;
+
+    private final RequirementAgentService requirementAgentService;
+    private final OverviewDesignService overviewDesignService;
+    private final DetailedDesignService detailedDesignService;
+    private final CodingTaskService codingTaskService;
+
     private final FailureInfoSupport failureInfoSupport;
     private final CompensationLogService compensationLogService;
 
-    @Value("${onlinecode.compensation.auto-build-enabled:true}")
-    private boolean autoBuildEnabled;
+    @Value("${onlinecode.compensation.auto-run-enabled:true}")
+    private boolean autoRunEnabled;
 
-    @Value("${onlinecode.compensation.build-timeout-minutes:30}")
-    private long buildTimeoutMinutes;
+    @Value("${onlinecode.compensation.run-timeout-minutes:30}")
+    private long runTimeoutMinutes;
 
-    public CompensationService(PlanDao planDao,
-                               SpecDao specDao,
-                               FeatureDesignDao featureDesignDao,
-                               PlanService planService,
-                               SpecService specService,
-                               PlanAgentService planAgentService,
-                               SpecAgentService specAgentService,
-                               FeatureDesignBuildService featureDesignBuildService,
+    public CompensationService(RequirementDao requirementDao,
+                               OverviewDesignDao overviewDesignDao,
+                               DetailedDesignDao detailedDesignDao,
+                               CodingTaskDao codingTaskDao,
+                               RunDao runDao,
+                               RequirementAgentService requirementAgentService,
+                               OverviewDesignService overviewDesignService,
+                               DetailedDesignService detailedDesignService,
+                               CodingTaskService codingTaskService,
                                FailureInfoSupport failureInfoSupport,
                                CompensationLogService compensationLogService) {
-        this.planDao = planDao;
-        this.specDao = specDao;
-        this.featureDesignDao = featureDesignDao;
-        this.planService = planService;
-        this.specService = specService;
-        this.planAgentService = planAgentService;
-        this.specAgentService = specAgentService;
-        this.featureDesignBuildService = featureDesignBuildService;
+        this.requirementDao = requirementDao;
+        this.overviewDesignDao = overviewDesignDao;
+        this.detailedDesignDao = detailedDesignDao;
+        this.codingTaskDao = codingTaskDao;
+        this.runDao = runDao;
+        this.requirementAgentService = requirementAgentService;
+        this.overviewDesignService = overviewDesignService;
+        this.detailedDesignService = detailedDesignService;
+        this.codingTaskService = codingTaskService;
         this.failureInfoSupport = failureInfoSupport;
         this.compensationLogService = compensationLogService;
     }
 
+    /**
+     * 执行一轮补偿扫描。按“先上游、后下游；先修复失败、后补齐缺失”的顺序执行，
+     * 避免下游在依赖缺失时重复重试。
+     */
     public void runCycle() {
-        compensateFailedPlans();
-        compensateMissingSpecs();
-        compensateFailedSpecs();
-        compensateMissingFeatureDesigns();
-        compensateFailedFeatureDesigns();
-        if (autoBuildEnabled) {
-            compensateMissingBuilds();
-            compensateFailedBuilds();
-            timeoutBuildingFeatureDesigns();
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateFailedPlans() {
         Date now = new Date();
-        for (Plan plan : planDao.findByStatusAndIsLatestTrue(PlanStatus.FAILED)) {
-            if (!failureInfoSupport.canRetry(plan, now)) {
-                continue;
-            }
-            failureInfoSupport.markRetrying(plan, TriggerSource.SCHEDULED_COMPENSATION, now);
-            plan.setStatus(PlanStatus.GENERATING);
-            planDao.save(plan);
-            compensationLogService.record("PLAN", plan.getId(), "RETRY_PLAN", true,
-                    "补偿重试概要设计", plan.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            planAgentService.spawnPlanning(plan.getProjectId(), retryHint(plan.getFailureSummary()),
-                    TriggerSource.SCHEDULED_COMPENSATION);
+        compensateFailedRequirements(now);
+        compensateMissingOverviewDesigns(now);
+        compensateFailedOverviewDesigns(now);
+        compensateMissingDetailedDesigns(now);
+        compensateFailedDetailedDesigns(now);
+        compensateMissingCodingTasks(now);
+        if (autoRunEnabled) {
+            compensateFailedCodingTasks(now);
+            timeoutRunningRuns(now);
         }
     }
 
+    /**
+     * 1. PRD 生成失败：满足重试窗口后重新发起 prd-agent。
+     */
     @Transactional(rollbackFor = Exception.class)
-    public void compensateMissingSpecs() {
-        for (Plan plan : planDao.findByStatusAndIsLatestTrue(PlanStatus.CONFIRMED)) {
-            List<PlanModule> modules = planService.modulesOrFallback(plan.getContent());
-            if (modules.isEmpty()) {
+    public void compensateFailedRequirements(Date now) {
+        for (Requirement requirement : requirementDao.findByStatus(RequirementStatus.FAILED)) {
+            if (!failureInfoSupport.canRetry(requirement, now)) {
                 continue;
             }
-            List<Spec> existingSpecs = specDao.findByProjectId(plan.getProjectId());
-            int nextVersion = nextSpecVersion(existingSpecs);
-            for (PlanModule module : modules) {
-                if (hasSpecForModule(existingSpecs, module)) {
-                    continue;
+            String requirementId = requirement.getId();
+            String summary = requirement.getFailureSummary();
+            failureInfoSupport.markRetrying(requirement, TriggerSource.SCHEDULED_COMPENSATION, now);
+            requirement.setStatus(RequirementStatus.PRD_GENERATING);
+            requirementDao.save(requirement);
+            compensationLogService.record("REQUIREMENT", requirementId, "RETRY_PRD", true,
+                    "补偿重试 PRD", summary, TriggerSource.SCHEDULED_COMPENSATION);
+            String hint = retryHint(summary);
+            TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, hint));
+        }
+    }
+
+    /**
+     * 2. PRD 已确认但缺失概览设计：创建 GENERATING 概览设计并触发 overview-design-agent。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateMissingOverviewDesigns(Date now) {
+        for (Requirement requirement : requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED)) {
+            OverviewDesign overview = overviewDesignDao.findByRequirementId(requirement.getId());
+            if (overview != null) {
+                continue;
+            }
+            compensationLogService.record("REQUIREMENT", requirement.getId(), "FILL_MISSING_OVERVIEW", true,
+                    "补齐概览设计", null, TriggerSource.CHAIN_COMPENSATION);
+            overviewDesignService.createGeneratingOverview(requirement);
+        }
+    }
+
+    /**
+     * 3. 概览设计生成失败：满足重试窗口后重生成。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateFailedOverviewDesigns(Date now) {
+        for (OverviewDesign overview : overviewDesignDao.findByStatus(OverviewDesignStatus.FAILED)) {
+            if (!failureInfoSupport.canRetry(overview, now)) {
+                continue;
+            }
+            failureInfoSupport.markRetrying(overview, TriggerSource.SCHEDULED_COMPENSATION, now);
+            overviewDesignDao.save(overview);
+            compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "RETRY_OVERVIEW", true,
+                    "补偿重试概览设计", overview.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            overviewDesignService.regenerate(overview.getId(), retryHint(overview.getFailureSummary()));
+        }
+    }
+
+    /**
+     * 4. 概览设计已确认但缺失详细设计：按 content 中的 feature 列表补建详细设计。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateMissingDetailedDesigns(Date now) {
+        for (OverviewDesign overview : overviewDesignDao.findByStatus(OverviewDesignStatus.CONFIRMED)) {
+            List<DetailedDesign> existing = detailedDesignDao.findByOverviewDesignId(overview.getId());
+            if (existing == null || existing.isEmpty()) {
+                compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "FILL_DETAILED_DESIGNS", true,
+                        "补齐全部详细设计", null, TriggerSource.CHAIN_COMPENSATION);
+                detailedDesignService.createFromOverviewDesign(overview);
+                continue;
+            }
+            long confirmedCount = existing.stream()
+                    .filter(d -> d.getStatus() == DetailedDesignStatus.CONFIRMED)
+                    .count();
+            if (confirmedCount == existing.size()) {
+                // 全部已确认，不再补充；若上游已变应由人工触发重生成
+                continue;
+            }
+            compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "FILL_MISSING_DETAILED_DESIGNS", true,
+                    "补齐缺失详细设计", null, TriggerSource.CHAIN_COMPENSATION);
+            detailedDesignService.createMissingFromOverviewDesign(overview);
+        }
+    }
+
+    /**
+     * 5. 详细设计生成失败：满足重试窗口后重生成。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateFailedDetailedDesigns(Date now) {
+        for (DetailedDesign design : detailedDesignDao.findByStatus(DetailedDesignStatus.FAILED)) {
+            if (!failureInfoSupport.canRetry(design, now)) {
+                continue;
+            }
+            failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
+            detailedDesignDao.save(design);
+            compensationLogService.record("DETAILED_DESIGN", design.getId(), "RETRY_DETAILED", true,
+                    "补偿重试详细设计", design.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            detailedDesignService.regenerate(design.getId(), retryHint(design.getFailureSummary()));
+        }
+    }
+
+    /**
+     * 6. 详细设计已确认但缺失编码任务：创建 CodingTask。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateMissingCodingTasks(Date now) {
+        for (DetailedDesign design : detailedDesignDao.findByStatus(DetailedDesignStatus.CONFIRMED)) {
+            List<CodingTask> tasks = codingTaskDao.findByDetailedDesignId(design.getId());
+            if (tasks != null && !tasks.isEmpty()) {
+                continue;
+            }
+            compensationLogService.record("DETAILED_DESIGN", design.getId(), "FILL_MISSING_CODING_TASK", true,
+                    "补齐编码任务", null, TriggerSource.CHAIN_COMPENSATION);
+            codingTaskService.createFromDetailedDesign(design);
+        }
+    }
+
+    /**
+     * 7. 编码任务失败：满足重试窗口后重跑。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void compensateFailedCodingTasks(Date now) {
+        for (CodingTask task : codingTaskDao.findByStatus(CodingTaskStatus.FAILED)) {
+            if (!failureInfoSupport.canRetry(task, now)) {
+                continue;
+            }
+            failureInfoSupport.markRetrying(task, TriggerSource.SCHEDULED_COMPENSATION, now);
+            codingTaskDao.save(task);
+            compensationLogService.record("CODING_TASK", task.getId(), "RETRY_CODING_TASK", true,
+                    "补偿重试编码任务", task.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            codingTaskService.rerun(task.getId(), retryHint(task.getFailureSummary()));
+        }
+    }
+
+    /**
+     * 8. 运行中超时收口：将超时的 Run 标记为 FAILED，并同步更新关联 CodingTask。
+     * 不在同一轮直接重跑，由下一轮 {@link #compensateFailedCodingTasks} 处理。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void timeoutRunningRuns(Date now) {
+        Date cutoff = new Date(now.getTime() - runTimeoutMinutes * 60_000L);
+        for (Run run : runDao.findByState(RunState.RUNNING)) {
+            Date started = run.getStartedDate();
+            if (started == null || !started.before(cutoff)) {
+                continue;
+            }
+            run.setState(RunState.FAILED);
+            run.setFinishedDate(now);
+            run.setFailureSummary("编码执行超时");
+            run.setFailureReason("RUNNING 超过超时时间未收口");
+            runDao.save(run);
+
+            if (run.getCodingTaskId() != null) {
+                CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
+                if (task != null) {
+                    task.setStatus(CodingTaskStatus.FAILED);
+                    failureInfoSupport.markCodingTaskFailure(task, "编码执行超时",
+                            "RUNNING 超过超时时间未收口", TriggerSource.SCHEDULED_COMPENSATION, now);
+                    codingTaskDao.save(task);
                 }
-                Spec spec = new Spec();
-                spec.setProjectId(plan.getProjectId());
-                spec.setVersion(nextVersion++);
-                spec.setState(SpecState.GENERATING);
-                spec.setModuleId(module.getModuleId());
-                spec.setModuleTitle(module.getTitle());
-                spec.setModuleSummary(module.getSummary());
-                spec.setLastTriggerSource(TriggerSource.CHAIN_COMPENSATION);
-                failureInfoSupport.clearSpecFailure(spec);
-                Spec saved = specDao.save(spec);
-                compensationLogService.record("PLAN", plan.getId(), "FILL_MISSING_SPEC", true,
-                        "补齐详细设计", null, TriggerSource.CHAIN_COMPENSATION);
-                specAgentService.spawnRequirement(plan.getProjectId(), null, saved.getId(),
-                        TriggerSource.CHAIN_COMPENSATION);
             }
+            compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN", true,
+                    "运行超时收口", "timeout", TriggerSource.SCHEDULED_COMPENSATION);
         }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateFailedSpecs() {
-        Date now = new Date();
-        for (Spec spec : specDao.findByStateOrderByCreatedDateAsc(SpecState.FAILED)) {
-            if (!failureInfoSupport.canRetry(spec, now)) {
-                continue;
-            }
-            failureInfoSupport.markRetrying(spec, TriggerSource.SCHEDULED_COMPENSATION, now);
-            spec.setState(SpecState.GENERATING);
-            specDao.save(spec);
-            compensationLogService.record("SPEC", spec.getId(), "RETRY_SPEC", true,
-                    "补偿重试详细设计", spec.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            specAgentService.spawnRequirement(spec.getProjectId(), retryHint(spec.getFailureSummary()), spec.getId(),
-                    TriggerSource.SCHEDULED_COMPENSATION);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateMissingFeatureDesigns() {
-        List<Spec> confirmedSpecs = specDao.findByStateOrderByCreatedDateAsc(SpecState.CONFIRMED);
-        for (Spec spec : confirmedSpecs) {
-            List<PlanFeature> expected = specService.featuresForModule(spec);
-            if (expected.isEmpty()) {
-                continue;
-            }
-            Set<String> existingFeatureIds = featureDesignDao.findLatestByProjectId(spec.getProjectId()).stream()
-                    .map(FeatureDesign::getFeatureId)
-                    .collect(Collectors.toSet());
-            List<PlanFeature> missing = expected.stream()
-                    .filter(feature -> !existingFeatureIds.contains(feature.getFeatureId()))
-                    .collect(Collectors.toList());
-            if (missing.isEmpty()) {
-                continue;
-            }
-            compensationLogService.record("SPEC", spec.getId(), "FILL_MISSING_FEATURE_DESIGN", true,
-                    "补齐功能设计", "missing=" + missing.size(), TriggerSource.CHAIN_COMPENSATION);
-            planAgentService.spawnFeatureDesigns(spec.getProjectId(), missing, TriggerSource.CHAIN_COMPENSATION);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateFailedFeatureDesigns() {
-        Date now = new Date();
-        for (FeatureDesign design : featureDesignDao.findByStatusAndIsLatestTrue(FeatureDesignStatus.FAILED)) {
-            if (!failureInfoSupport.canRetry(design, now) || !hasConfirmedSpecForFeature(design)) {
-                continue;
-            }
-            failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
-            design.setStatus(FeatureDesignStatus.GENERATING);
-            featureDesignDao.save(design);
-            compensationLogService.record("FEATURE_DESIGN", design.getId(), "RETRY_FEATURE_DESIGN", true,
-                    "补偿重试功能设计", design.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            planAgentService.spawnFeatureDesign(design.getProjectId(), design.getFeatureId(),
-                    retryHint(design.getFailureSummary()), TriggerSource.SCHEDULED_COMPENSATION);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateMissingBuilds() {
-        for (FeatureDesign design : featureDesignDao.findByStatusAndIsLatestTrue(FeatureDesignStatus.CONFIRMED)) {
-            if (design.getBuildStatus() != FeatureDesignBuildStatus.IDLE) {
-                continue;
-            }
-            OperateResultWithData<FeatureDesignBuildResultDto> result =
-                    featureDesignBuildService.build(design.getId(), TriggerSource.CHAIN_COMPENSATION);
-            compensationLogService.record("FEATURE_DESIGN", design.getId(), "AUTO_BUILD_MISSING", result.successful(),
-                    result.successful() ? "自动补齐编码执行" : result.getMessage(),
-                    result.successful() ? null : design.getFailureSummary(),
-                    TriggerSource.CHAIN_COMPENSATION);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void compensateFailedBuilds() {
-        Date now = new Date();
-        for (FeatureDesign design : featureDesignDao.findByBuildStatusAndIsLatestTrue(FeatureDesignBuildStatus.BUILD_FAILED)) {
-            if (design.getStatus() != FeatureDesignStatus.CONFIRMED || !failureInfoSupport.canRetry(design, now)) {
-                continue;
-            }
-            failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
-            featureDesignDao.save(design);
-            OperateResultWithData<FeatureDesignBuildResultDto> result =
-                    featureDesignBuildService.build(design.getId(), TriggerSource.SCHEDULED_COMPENSATION);
-            compensationLogService.record("FEATURE_DESIGN", design.getId(), "RETRY_BUILD", result.successful(),
-                    result.successful() ? "补偿重试编码执行" : result.getMessage(),
-                    result.successful() ? null : design.getFailureSummary(),
-                    TriggerSource.SCHEDULED_COMPENSATION);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void timeoutBuildingFeatureDesigns() {
-        Date cutoff = new Date(System.currentTimeMillis() - buildTimeoutMinutes * 60_000L);
-        for (FeatureDesign design : featureDesignDao.findByBuildStatusAndIsLatestTrue(FeatureDesignBuildStatus.BUILDING)) {
-            Date edited = design.getLastEditedDate() != null ? design.getLastEditedDate() : design.getCreatedDate();
-            if (edited == null || !edited.before(cutoff)) {
-                continue;
-            }
-            design.setBuildStatus(FeatureDesignBuildStatus.BUILD_FAILED);
-            failureInfoSupport.markFeatureDesignFailure(design, FailureCode.BUILD_TIMEOUT, FailureStage.BUILD,
-                    "编码执行超时", "BUILDING 超过超时时间未收口", TriggerSource.SCHEDULED_COMPENSATION, new Date());
-            featureDesignDao.save(design);
-            compensationLogService.record("FEATURE_DESIGN", design.getId(), "TIMEOUT_BUILD", true,
-                    "构建超时收口", "timeout", TriggerSource.SCHEDULED_COMPENSATION);
-        }
-    }
-
-    private boolean hasConfirmedSpecForFeature(FeatureDesign design) {
-        return specDao.findByProjectId(design.getProjectId()).stream()
-                .filter(spec -> spec.getState() == SpecState.CONFIRMED)
-                .map(specService::featuresForModule)
-                .flatMap(List::stream)
-                .anyMatch(feature -> Objects.equals(feature.getFeatureId(), design.getFeatureId()));
-    }
-
-    private boolean hasSpecForModule(List<Spec> specs, PlanModule module) {
-        return specs.stream().anyMatch(spec ->
-                Objects.equals(spec.getModuleId(), module.getModuleId())
-                        && Objects.equals(spec.getModuleTitle(), module.getTitle()));
-    }
-
-    private int nextSpecVersion(List<Spec> specs) {
-        return specs.stream()
-                .map(Spec::getVersion)
-                .filter(Objects::nonNull)
-                .max(Integer::compareTo)
-                .orElse(0) + 1;
     }
 
     private String retryHint(String summary) {

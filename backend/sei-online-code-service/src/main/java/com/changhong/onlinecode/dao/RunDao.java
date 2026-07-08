@@ -29,4 +29,12 @@ public interface RunDao extends BaseEntityDao<Run> {
      * @return Run 列表
      */
     List<Run> findByCodingTaskId(String codingTaskId);
+
+    /**
+     * 按运行状态查询运行记录。
+     *
+     * @param state 运行状态
+     * @return Run 列表
+     */
+    List<Run> findByState(com.changhong.onlinecode.dto.enums.RunState state);
 }

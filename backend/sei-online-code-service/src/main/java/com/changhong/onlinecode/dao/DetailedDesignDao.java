@@ -21,4 +21,12 @@ public interface DetailedDesignDao extends BaseEntityDao<DetailedDesign> {
      * @return 详细设计列表
      */
     List<DetailedDesign> findByOverviewDesignId(String overviewDesignId);
+
+    /**
+     * 按状态查询详细设计。
+     *
+     * @param status 状态
+     * @return 详细设计列表
+     */
+    List<DetailedDesign> findByStatus(com.changhong.onlinecode.dto.enums.DetailedDesignStatus status);
 }

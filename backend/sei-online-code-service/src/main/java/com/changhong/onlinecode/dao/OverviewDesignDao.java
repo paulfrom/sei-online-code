@@ -4,6 +4,8 @@ import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 /**
  * OverviewDesign DAO。
  *
@@ -19,4 +21,12 @@ public interface OverviewDesignDao extends BaseEntityDao<OverviewDesign> {
      * @return 概览设计
      */
     OverviewDesign findByRequirementId(String requirementId);
+
+    /**
+     * 按状态查询概览设计。
+     *
+     * @param status 状态
+     * @return 概览设计列表
+     */
+    List<OverviewDesign> findByStatus(com.changhong.onlinecode.dto.enums.OverviewDesignStatus status);
 }

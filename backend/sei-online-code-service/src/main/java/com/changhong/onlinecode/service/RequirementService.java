@@ -57,8 +57,9 @@ public class RequirementService extends BaseEntityService<Requirement> {
         }
         boolean isNew = entity.getId() == null;
         OperateResultWithData<Requirement> result = super.save(entity);
-        if (result.successful() && isNew) {
-            triggerPrdSpawnAfterCommit(entity.getId(), null);
+        Requirement saved = result.getData();
+        if (result.successful() && isNew && saved != null) {
+            triggerPrdSpawnAfterCommit(saved.getId(), null);
         }
         return result;
     }
