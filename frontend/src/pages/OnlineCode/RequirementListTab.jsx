@@ -12,7 +12,7 @@ import {
   message,
 } from '@ead/suid';
 import { PlusOutlined } from '@ead/suid-icons';
-import { findRequirementsByPage, saveRequirement } from '@/services/requirement';
+import { REQUIREMENT_FIND_BY_PAGE_URL, saveRequirement } from '@/services/requirement';
 
 const RequirementListTab = ({ projectId }) => {
   const tableRef = useRef(null);
@@ -54,17 +54,27 @@ const RequirementListTab = ({ projectId }) => {
     }
   };
 
+  // 与 CodingTaskTab 一致：按 projectId 过滤，避免查出其它项目的需求
+  const buildSearch = (pageSearch) => ({
+    ...pageSearch,
+    filters: [
+      ...(pageSearch.filters || []),
+      { fieldName: 'projectId', value: projectId, operator: 'EQ' },
+    ],
+  });
+
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16, height: '100%', boxSizing: 'border-box' }}>
       <ExtTable
         ref={tableRef}
         rowKey="id"
         columns={columns}
         store={{
-          url: findRequirementsByPage,
+          url: REQUIREMENT_FIND_BY_PAGE_URL,
           type: 'POST',
         }}
         remotePaging
+        beforeLoad={buildSearch}
         toolbar={{
           left: (
             <Button

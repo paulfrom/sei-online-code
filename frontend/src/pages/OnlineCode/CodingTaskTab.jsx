@@ -8,7 +8,7 @@ import {
   Select,
   message,
 } from '@ead/suid';
-import { findCodingTasksByPage, runCodingTask, rerunCodingTask } from '@/services/codingTask';
+import { CODING_TASK_FIND_BY_PAGE_URL, runCodingTask, rerunCodingTask } from '@/services/codingTask';
 import { findRunsByCodingTask } from '@/services/run';
 
 const STATUS_OPTIONS = [
@@ -90,7 +90,15 @@ const CodingTaskTab = ({ projectId }) => {
   });
 
   return (
-    <div style={{ padding: 16 }}>
+    <div
+      style={{
+        padding: 16,
+        height: '100%',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <div style={{ marginBottom: 16 }}>
         <Select
           placeholder="状态筛选"
@@ -101,18 +109,20 @@ const CodingTaskTab = ({ projectId }) => {
           allowClear
         />
       </div>
-      <ExtTable
-        ref={tableRef}
-        rowKey="id"
-        columns={columns}
-        store={{
-          url: findCodingTasksByPage,
-          type: 'POST',
-        }}
-        remotePaging
-        searchProperties={['title']}
-        beforeLoad={buildSearch}
-      />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ExtTable
+          ref={tableRef}
+          rowKey="id"
+          columns={columns}
+          store={{
+            url: CODING_TASK_FIND_BY_PAGE_URL,
+            type: 'POST',
+          }}
+          remotePaging
+          searchProperties={['title']}
+          beforeLoad={buildSearch}
+        />
+      </div>
     </div>
   );
 };

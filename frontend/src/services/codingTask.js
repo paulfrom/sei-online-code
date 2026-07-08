@@ -6,6 +6,9 @@ import { PROJECT_SERVER_PATH } from '@/utils/constants';
 
 const API = `${PROJECT_SERVER_PATH}`;
 
+/** Store URL for the coding-task list ExtTable remotePaging. */
+export const CODING_TASK_FIND_BY_PAGE_URL = `${API}/coding-task/findByPage`;
+
 export async function findOneCodingTask(id) {
   return request({ url: `${API}/coding-task/findOne`, method: 'GET', params: { id } });
 }

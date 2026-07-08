@@ -7,6 +7,7 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.utils.TransactionUtil;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,7 +58,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
         boolean isNew = entity.getId() == null;
         OperateResultWithData<Requirement> result = super.save(entity);
         if (result.successful() && isNew) {
-            requirementAgentService.spawnPrd(entity.getId(), null);
+            triggerPrdSpawnAfterCommit(entity.getId(), null);
         }
         return result;
     }
@@ -84,9 +85,22 @@ public class RequirementService extends BaseEntityService<Requirement> {
         requirement.setLastRetryAt(new Date());
         OperateResultWithData<Requirement> result = super.save(requirement);
         if (result.successful()) {
-            requirementAgentService.spawnPrd(id, prompt);
+            triggerPrdSpawnAfterCommit(id, prompt);
         }
         return result;
+    }
+
+    /**
+     * 在当前事务提交后触发 PRD 生成。{@code spawnPrd} 为 {@code @Async}，若在事务提交前执行，
+     * 异步线程读不到未提交的需求行（{@code findOne} 返回 null）→ agent 静默跳过、状态卡在
+     * PRD_GENERATING。故用 {@link TransactionUtil#afterCommit(Runnable)} 延后到提交后再触发
+     * （sei-core 惯例，见 eadp-backend skill references/service.md）。
+     *
+     * @param requirementId 需求 ID
+     * @param prompt        可选提示词
+     */
+    void triggerPrdSpawnAfterCommit(String requirementId, String prompt) {
+        TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, prompt));
     }
 
     /**

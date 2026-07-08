@@ -8,6 +8,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.utils.TransactionUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -95,7 +96,8 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         design.setLastFailedAt(null);
         OperateResultWithData<DetailedDesign> result = super.save(design);
         if (result.successful()) {
-            detailedDesignAgentService.spawnDetailedDesign(design.getId(), prompt);
+            String designId = design.getId();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, prompt));
         }
         return ResultData.success(convertToDto(design));
     }
@@ -189,7 +191,8 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
             design.setContent("{\"placeholder\":true}");
             design.setLastFailedAt(new Date());
             dao.save(design);
-            detailedDesignAgentService.spawnDetailedDesign(design.getId(), null);
+            String designId = design.getId();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null));
         }
     }
 

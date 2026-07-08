@@ -6,6 +6,9 @@ import { PROJECT_SERVER_PATH } from '@/utils/constants';
 
 const API = `${PROJECT_SERVER_PATH}`;
 
+/** Store URL for the requirement list ExtTable remotePaging. */
+export const REQUIREMENT_FIND_BY_PAGE_URL = `${API}/requirement/findByPage`;
+
 export async function saveRequirement(params) {
   return request({ url: `${API}/requirement/save`, method: 'POST', data: params });
 }

@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { history, useSearchParams } from 'umi';
+import { createStyles } from '@ead/antd-style';
 import { Tabs, message } from '@ead/suid';
 import { findOneProject } from '@/services/onlineCode';
 import type { ProjectDto } from '@/services/onlineCode';
@@ -11,12 +12,24 @@ import RequirementListTab from './RequirementListTab';
 import CodingTaskTab from './CodingTaskTab';
 import ProjectSettingsTab from './ProjectSettingsTab';
 
+// ExtTable 的根元素为 height:100%，依赖祖先链传递确定高度。
+// .ead-tabs-content / .ead-tabs-tabpane 默认 height:auto 会断链 → 表格 body 高度 0。
+// 这里把 Tabs 内容区也撑满，让高度能传到 ExtTable。
+const useStyles = createStyles(() => ({
+  tabs: {
+    height: '100%',
+    '& .ead-tabs-content': { height: '100%' },
+    '& .ead-tabs-tabpane': { height: '100%' },
+  },
+}));
+
 const ProjectDetail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('id') ?? '';
   const requestedTab = searchParams.get('tab') ?? 'plan';
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const { styles } = useStyles();
 
   useEffect(() => {
     let alive = true;
@@ -82,6 +95,7 @@ const ProjectDetail: React.FC = () => {
         <Tabs
           items={tabItems}
           activeKey={activeTab}
+          className={styles.tabs}
           onChange={(tab) => history.replace(`/online-code/project?id=${projectId}&tab=${tab}`)}
         />
       </div>

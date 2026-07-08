@@ -9,6 +9,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.utils.TransactionUtil;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,7 +59,8 @@ public class OverviewDesignService extends BaseEntityService<OverviewDesign> {
         overview.setStatus(OverviewDesignStatus.GENERATING);
         overview.setVersion(1);
         dao.save(overview);
-        overviewDesignAgentService.spawnOverviewDesign(overview.getId(), null);
+        String overviewId = overview.getId();
+        TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, null));
     }
 
     /**
@@ -96,7 +98,8 @@ public class OverviewDesignService extends BaseEntityService<OverviewDesign> {
         overview.setVersion(overview.getVersion() + 1);
         OperateResultWithData<OverviewDesign> result = super.save(overview);
         if (result.successful()) {
-            overviewDesignAgentService.spawnOverviewDesign(overview.getId(), prompt);
+            String overviewId = overview.getId();
+            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, prompt));
         }
         return ResultData.success(convertToDto(overview));
     }
