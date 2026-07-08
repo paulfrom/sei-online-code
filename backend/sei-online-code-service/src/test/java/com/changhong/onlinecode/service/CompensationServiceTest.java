@@ -28,6 +28,7 @@ import java.lang.reflect.Field;
 import java.util.Date;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
@@ -248,6 +249,22 @@ class CompensationServiceTest {
         verify(codingTaskDao).save(taskCaptor.capture());
         assertEquals(CodingTaskStatus.FAILED, taskCaptor.getValue().getStatus());
         verify(failureInfoSupport).markCodingTaskFailure(eq(task), anyString(), anyString(), eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
+    }
+
+    /**
+     * 验证单阶段失败不影响后续阶段执行。
+     */
+    @Test
+    void runCycle_continuesAfterPhaseFailure() {
+        when(requirementDao.findByStatus(RequirementStatus.FAILED))
+                .thenThrow(new RuntimeException("simulated phase failure"));
+
+        assertDoesNotThrow(() -> compensationService.runCycle());
+
+        // 后续阶段仍应被触发
+        verify(overviewDesignDao).findByStatus(OverviewDesignStatus.FAILED);
+        verify(detailedDesignDao).findByStatus(DetailedDesignStatus.FAILED);
+        verify(codingTaskDao).findByStatus(CodingTaskStatus.FAILED);
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {
