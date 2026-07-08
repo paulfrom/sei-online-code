@@ -4,6 +4,7 @@ import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -12,6 +13,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "项目 DTO")
 public class ProjectDto extends BaseEntityDto {
 
@@ -46,76 +48,4 @@ public class ProjectDto extends BaseEntityDto {
 
     @Schema(description = "最后编辑时间")
     private Date lastEditedDate;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDesign() {
-        return design;
-    }
-
-    public void setDesign(String design) {
-        this.design = design;
-    }
-
-    public String getState() {
-        return state;
-    }
-
-    public void setState(String state) {
-        this.state = state;
-    }
-
-    public String getCurrentSpecId() {
-        return currentSpecId;
-    }
-
-    public void setCurrentSpecId(String currentSpecId) {
-        this.currentSpecId = currentSpecId;
-    }
-
-    public String getGitUrl() {
-        return gitUrl;
-    }
-
-    public void setGitUrl(String gitUrl) {
-        this.gitUrl = gitUrl;
-    }
-
-    public String getWorkspacePath() {
-        return workspacePath;
-    }
-
-    public void setWorkspacePath(String workspacePath) {
-        this.workspacePath = workspacePath;
-    }
-
-    public Boolean getAutoRunCodingTask() {
-        return autoRunCodingTask;
-    }
-
-    public void setAutoRunCodingTask(Boolean autoRunCodingTask) {
-        this.autoRunCodingTask = autoRunCodingTask;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public Date getLastEditedDate() {
-        return lastEditedDate;
-    }
-
-    public void setLastEditedDate(Date lastEditedDate) {
-        this.lastEditedDate = lastEditedDate;
-    }
 }

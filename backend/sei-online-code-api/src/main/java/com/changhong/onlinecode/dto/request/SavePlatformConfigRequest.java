@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -16,6 +17,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "保存平台配置请求")
 public class SavePlatformConfigRequest implements Serializable {
 
@@ -28,20 +30,4 @@ public class SavePlatformConfigRequest implements Serializable {
 
     @Schema(description = "模板 GitLab 仓库地址；空即走脚手架生成路径", example = "")
     private String templateGitlabUrl;
-
-    public String getWorkspaceRoot() {
-        return workspaceRoot;
-    }
-
-    public void setWorkspaceRoot(String workspaceRoot) {
-        this.workspaceRoot = workspaceRoot;
-    }
-
-    public String getTemplateGitlabUrl() {
-        return templateGitlabUrl;
-    }
-
-    public void setTemplateGitlabUrl(String templateGitlabUrl) {
-        this.templateGitlabUrl = templateGitlabUrl;
-    }
 }

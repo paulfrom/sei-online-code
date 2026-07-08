@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -9,6 +10,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "项目编码前聚合状态")
 public class ProjectStateDto implements Serializable {
 
@@ -21,14 +23,6 @@ public class ProjectStateDto implements Serializable {
     }
 
     public ProjectStateDto(String state) {
-        this.state = state;
-    }
-
-    public String getState() {
-        return state;
-    }
-
-    public void setState(String state) {
         this.state = state;
     }
 }

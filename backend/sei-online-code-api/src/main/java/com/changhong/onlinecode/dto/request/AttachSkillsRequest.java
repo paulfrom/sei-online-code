@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "附加 agent 技能请求")
 public class AttachSkillsRequest implements Serializable {
 
@@ -24,20 +26,4 @@ public class AttachSkillsRequest implements Serializable {
 
     @Schema(description = "待绑定的技能 id 列表（整体替换）", example = "[\"SKIL0001\"]")
     private List<String> skillIds;
-
-    public String getAgentId() {
-        return agentId;
-    }
-
-    public void setAgentId(String agentId) {
-        this.agentId = agentId;
-    }
-
-    public List<String> getSkillIds() {
-        return skillIds;
-    }
-
-    public void setSkillIds(List<String> skillIds) {
-        this.skillIds = skillIds;
-    }
 }

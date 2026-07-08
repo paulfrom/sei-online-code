@@ -3,6 +3,7 @@ package com.changhong.onlinecode.dto;
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -11,6 +12,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "详细设计 DTO")
 public class DetailedDesignDto extends BaseEntityDto {
 
@@ -54,108 +56,4 @@ public class DetailedDesignDto extends BaseEntityDto {
 
     @Schema(description = "最后编辑时间")
     private Date lastEditedDate;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getRequirementId() {
-        return requirementId;
-    }
-
-    public void setRequirementId(String requirementId) {
-        this.requirementId = requirementId;
-    }
-
-    public String getOverviewDesignId() {
-        return overviewDesignId;
-    }
-
-    public void setOverviewDesignId(String overviewDesignId) {
-        this.overviewDesignId = overviewDesignId;
-    }
-
-    public String getModuleId() {
-        return moduleId;
-    }
-
-    public void setModuleId(String moduleId) {
-        this.moduleId = moduleId;
-    }
-
-    public String getModuleTitle() {
-        return moduleTitle;
-    }
-
-    public void setModuleTitle(String moduleTitle) {
-        this.moduleTitle = moduleTitle;
-    }
-
-    public String getFeatureId() {
-        return featureId;
-    }
-
-    public void setFeatureId(String featureId) {
-        this.featureId = featureId;
-    }
-
-    public String getFeatureTitle() {
-        return featureTitle;
-    }
-
-    public void setFeatureTitle(String featureTitle) {
-        this.featureTitle = featureTitle;
-    }
-
-    public DetailedDesignStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(DetailedDesignStatus status) {
-        this.status = status;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public Date getLastEditedDate() {
-        return lastEditedDate;
-    }
-
-    public void setLastEditedDate(Date lastEditedDate) {
-        this.lastEditedDate = lastEditedDate;
-    }
 }

@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto;
 
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Agent DTO")
 public class AgentDto extends BaseEntityDto {
 
@@ -42,76 +44,4 @@ public class AgentDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public String getInstructions() {
-        return instructions;
-    }
-
-    public void setInstructions(String instructions) {
-        this.instructions = instructions;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public String getCliTool() {
-        return cliTool;
-    }
-
-    public void setCliTool(String cliTool) {
-        this.cliTool = cliTool;
-    }
-
-    public String getMcpConfig() {
-        return mcpConfig;
-    }
-
-    public void setMcpConfig(String mcpConfig) {
-        this.mcpConfig = mcpConfig;
-    }
-
-    public Boolean getBuiltin() {
-        return builtin;
-    }
-
-    public void setBuiltin(Boolean builtin) {
-        this.builtin = builtin;
-    }
-
-    public List<String> getSkillIds() {
-        return skillIds;
-    }
-
-    public void setSkillIds(List<String> skillIds) {
-        this.skillIds = skillIds;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
 }

@@ -3,6 +3,7 @@ package com.changhong.onlinecode.dto;
 import com.changhong.onlinecode.dto.enums.TaskState;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 import java.util.List;
@@ -12,6 +13,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Task DTO")
 public class TaskDto extends BaseEntityDto {
 
@@ -44,76 +46,4 @@ public class TaskDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
-
-    public String getIterationId() {
-        return iterationId;
-    }
-
-    public void setIterationId(String iterationId) {
-        this.iterationId = iterationId;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public List<String> getFileScope() {
-        return fileScope;
-    }
-
-    public void setFileScope(List<String> fileScope) {
-        this.fileScope = fileScope;
-    }
-
-    public String getAssignedAgent() {
-        return assignedAgent;
-    }
-
-    public void setAssignedAgent(String assignedAgent) {
-        this.assignedAgent = assignedAgent;
-    }
-
-    public TaskState getState() {
-        return state;
-    }
-
-    public void setState(TaskState state) {
-        this.state = state;
-    }
-
-    public String getWorktreeBranch() {
-        return worktreeBranch;
-    }
-
-    public void setWorktreeBranch(String worktreeBranch) {
-        this.worktreeBranch = worktreeBranch;
-    }
-
-    public Integer getSeq() {
-        return seq;
-    }
-
-    public void setSeq(Integer seq) {
-        this.seq = seq;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
 }

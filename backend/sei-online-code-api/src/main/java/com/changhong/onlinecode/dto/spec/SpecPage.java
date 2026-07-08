@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.spec;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -9,6 +10,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Spec 页面定义")
 public class SpecPage implements Serializable {
 
@@ -25,36 +27,4 @@ public class SpecPage implements Serializable {
 
     @Schema(description = "页面描述")
     private String description;
-
-    public String getKey() {
-        return key;
-    }
-
-    public void setKey(String key) {
-        this.key = key;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getRoute() {
-        return route;
-    }
-
-    public void setRoute(String route) {
-        this.route = route;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
 }

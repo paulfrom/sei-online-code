@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -12,6 +13,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "需求 DTO")
 public class RequirementDto extends BaseEntityDto {
 
@@ -45,76 +47,4 @@ public class RequirementDto extends BaseEntityDto {
 
     @Schema(description = "最后编辑时间")
     private Date lastEditedDate;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public RequirementStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(RequirementStatus status) {
-        this.status = status;
-    }
-
-    public Integer getPrdVersion() {
-        return prdVersion;
-    }
-
-    public void setPrdVersion(Integer prdVersion) {
-        this.prdVersion = prdVersion;
-    }
-
-    public String getPrdContent() {
-        return prdContent;
-    }
-
-    public void setPrdContent(String prdContent) {
-        this.prdContent = prdContent;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public Date getLastEditedDate() {
-        return lastEditedDate;
-    }
-
-    public void setLastEditedDate(Date lastEditedDate) {
-        this.lastEditedDate = lastEditedDate;
-    }
 }

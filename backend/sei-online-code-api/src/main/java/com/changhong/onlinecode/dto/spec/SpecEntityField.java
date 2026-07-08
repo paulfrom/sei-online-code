@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.spec;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -9,6 +10,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Spec 实体字段定义")
 public class SpecEntityField implements Serializable {
 
@@ -22,28 +24,4 @@ public class SpecEntityField implements Serializable {
 
     @Schema(description = "字段描述")
     private String description;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
 }

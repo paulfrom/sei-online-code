@@ -10,6 +10,7 @@ import com.changhong.onlinecode.dto.spec.SpecEntity;
 import com.changhong.onlinecode.dto.spec.SpecPage;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Spec DTO")
 public class SpecDto extends BaseEntityDto {
 
@@ -86,172 +88,4 @@ public class SpecDto extends BaseEntityDto {
 
     @Schema(description = "最近触发来源")
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public SpecState getState() {
-        return state;
-    }
-
-    public void setState(SpecState state) {
-        this.state = state;
-    }
-
-    public String getModuleId() {
-        return moduleId;
-    }
-
-    public void setModuleId(String moduleId) {
-        this.moduleId = moduleId;
-    }
-
-    public String getModuleTitle() {
-        return moduleTitle;
-    }
-
-    public void setModuleTitle(String moduleTitle) {
-        this.moduleTitle = moduleTitle;
-    }
-
-    public String getModuleSummary() {
-        return moduleSummary;
-    }
-
-    public void setModuleSummary(String moduleSummary) {
-        this.moduleSummary = moduleSummary;
-    }
-
-    public List<SpecPage> getPages() {
-        return pages;
-    }
-
-    public void setPages(List<SpecPage> pages) {
-        this.pages = pages;
-    }
-
-    public List<SpecComponent> getComponents() {
-        return components;
-    }
-
-    public void setComponents(List<SpecComponent> components) {
-        this.components = components;
-    }
-
-    public List<SpecEntity> getEntities() {
-        return entities;
-    }
-
-    public void setEntities(List<SpecEntity> entities) {
-        this.entities = entities;
-    }
-
-    public List<SpecApiContract> getApiContract() {
-        return apiContract;
-    }
-
-    public void setApiContract(List<SpecApiContract> apiContract) {
-        this.apiContract = apiContract;
-    }
-
-    public String getModifyHint() {
-        return modifyHint;
-    }
-
-    public void setModifyHint(String modifyHint) {
-        this.modifyHint = modifyHint;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public FailureCode getFailureCode() {
-        return failureCode;
-    }
-
-    public void setFailureCode(FailureCode failureCode) {
-        this.failureCode = failureCode;
-    }
-
-    public FailureStage getFailureStage() {
-        return failureStage;
-    }
-
-    public void setFailureStage(FailureStage failureStage) {
-        this.failureStage = failureStage;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 }

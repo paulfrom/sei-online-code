@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.plan.PlanContent;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -12,6 +13,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "编辑规划书请求")
 public class EditPlanRequest implements Serializable {
 
@@ -21,12 +23,4 @@ public class EditPlanRequest implements Serializable {
     @Valid
     @Schema(description = "规划内容")
     private PlanContent content;
-
-    public PlanContent getContent() {
-        return content;
-    }
-
-    public void setContent(PlanContent content) {
-        this.content = content;
-    }
 }

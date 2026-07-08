@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.skill;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -17,6 +18,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "技能配置")
 public class SkillConfig implements Serializable {
 
@@ -29,14 +31,6 @@ public class SkillConfig implements Serializable {
     }
 
     public SkillConfig(String origin) {
-        this.origin = origin;
-    }
-
-    public String getOrigin() {
-        return origin;
-    }
-
-    public void setOrigin(String origin) {
         this.origin = origin;
     }
 }

@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.spec;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Spec 内容聚合")
 public class SpecContent implements Serializable {
 
@@ -29,36 +31,4 @@ public class SpecContent implements Serializable {
 
     @Schema(description = "API 契约列表")
     private List<SpecApiContract> apiContract;
-
-    public List<SpecPage> getPages() {
-        return pages;
-    }
-
-    public void setPages(List<SpecPage> pages) {
-        this.pages = pages;
-    }
-
-    public List<SpecComponent> getComponents() {
-        return components;
-    }
-
-    public void setComponents(List<SpecComponent> components) {
-        this.components = components;
-    }
-
-    public List<SpecEntity> getEntities() {
-        return entities;
-    }
-
-    public void setEntities(List<SpecEntity> entities) {
-        this.entities = entities;
-    }
-
-    public List<SpecApiContract> getApiContract() {
-        return apiContract;
-    }
-
-    public void setApiContract(List<SpecApiContract> apiContract) {
-        this.apiContract = apiContract;
-    }
 }

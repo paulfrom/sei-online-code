@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -10,6 +11,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "确认 Spec 请求")
 public class ConfirmSpecRequest implements Serializable {
 
@@ -18,12 +20,4 @@ public class ConfirmSpecRequest implements Serializable {
     @NotBlank(message = "specId 不能为空")
     @Schema(description = "Spec id")
     private String specId;
-
-    public String getSpecId() {
-        return specId;
-    }
-
-    public void setSpecId(String specId) {
-        this.specId = specId;
-    }
 }

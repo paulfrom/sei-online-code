@@ -3,6 +3,7 @@ package com.changhong.onlinecode.dto;
 import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -11,6 +12,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "概览设计 DTO")
 public class OverviewDesignDto extends BaseEntityDto {
 
@@ -39,68 +41,4 @@ public class OverviewDesignDto extends BaseEntityDto {
 
     @Schema(description = "最后编辑时间")
     private Date lastEditedDate;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getRequirementId() {
-        return requirementId;
-    }
-
-    public void setRequirementId(String requirementId) {
-        this.requirementId = requirementId;
-    }
-
-    public OverviewDesignStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(OverviewDesignStatus status) {
-        this.status = status;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public Date getLastEditedDate() {
-        return lastEditedDate;
-    }
-
-    public void setLastEditedDate(Date lastEditedDate) {
-        this.lastEditedDate = lastEditedDate;
-    }
 }

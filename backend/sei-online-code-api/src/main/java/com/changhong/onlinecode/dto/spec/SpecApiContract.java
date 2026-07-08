@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.spec;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -9,6 +10,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Spec API 契约条目")
 public class SpecApiContract implements Serializable {
 
@@ -28,44 +30,4 @@ public class SpecApiContract implements Serializable {
 
     @Schema(description = "契约描述")
     private String description;
-
-    public String getMethod() {
-        return method;
-    }
-
-    public void setMethod(String method) {
-        this.method = method;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
-
-    public String getRequestShape() {
-        return requestShape;
-    }
-
-    public void setRequestShape(String requestShape) {
-        this.requestShape = requestShape;
-    }
-
-    public String getResponseShape() {
-        return responseShape;
-    }
-
-    public void setResponseShape(String responseShape) {
-        this.responseShape = responseShape;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
 }

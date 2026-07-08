@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.skill.SkillConfig;
 import com.changhong.onlinecode.dto.skill.SkillFileDto;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -16,6 +17,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Skill DTO")
 public class SkillDto extends BaseEntityDto {
 
@@ -41,60 +43,4 @@ public class SkillDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public SkillConfig getConfig() {
-        return config;
-    }
-
-    public void setConfig(SkillConfig config) {
-        this.config = config;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getComputedHash() {
-        return computedHash;
-    }
-
-    public void setComputedHash(String computedHash) {
-        this.computedHash = computedHash;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public List<SkillFileDto> getFiles() {
-        return files;
-    }
-
-    public void setFiles(List<SkillFileDto> files) {
-        this.files = files;
-    }
 }

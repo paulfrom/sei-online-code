@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -12,6 +13,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "Run DTO")
 public class RunDto extends BaseEntityDto {
 
@@ -56,108 +58,4 @@ public class RunDto extends BaseEntityDto {
 
     @Schema(description = "结束时间；终态前为 null")
     private Date finishedDate;
-
-    public String getTaskId() {
-        return taskId;
-    }
-
-    public void setTaskId(String taskId) {
-        this.taskId = taskId;
-    }
-
-    public String getCodingTaskId() {
-        return codingTaskId;
-    }
-
-    public void setCodingTaskId(String codingTaskId) {
-        this.codingTaskId = codingTaskId;
-    }
-
-    public Integer getRunNo() {
-        return runNo;
-    }
-
-    public void setRunNo(Integer runNo) {
-        this.runNo = runNo;
-    }
-
-    public TriggerSource getTriggerSource() {
-        return triggerSource;
-    }
-
-    public void setTriggerSource(TriggerSource triggerSource) {
-        this.triggerSource = triggerSource;
-    }
-
-    public String getUserPrompt() {
-        return userPrompt;
-    }
-
-    public void setUserPrompt(String userPrompt) {
-        this.userPrompt = userPrompt;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureReason() {
-        return failureReason;
-    }
-
-    public void setFailureReason(String failureReason) {
-        this.failureReason = failureReason;
-    }
-
-    public String getIterationId() {
-        return iterationId;
-    }
-
-    public void setIterationId(String iterationId) {
-        this.iterationId = iterationId;
-    }
-
-    public RunState getState() {
-        return state;
-    }
-
-    public void setState(RunState state) {
-        this.state = state;
-    }
-
-    public String getWorktreePath() {
-        return worktreePath;
-    }
-
-    public void setWorktreePath(String worktreePath) {
-        this.worktreePath = worktreePath;
-    }
-
-    public Integer getExitCode() {
-        return exitCode;
-    }
-
-    public void setExitCode(Integer exitCode) {
-        this.exitCode = exitCode;
-    }
-
-    public Date getStartedDate() {
-        return startedDate;
-    }
-
-    public void setStartedDate(Date startedDate) {
-        this.startedDate = startedDate;
-    }
-
-    public Date getFinishedDate() {
-        return finishedDate;
-    }
-
-    public void setFinishedDate(Date finishedDate) {
-        this.finishedDate = finishedDate;
-    }
 }

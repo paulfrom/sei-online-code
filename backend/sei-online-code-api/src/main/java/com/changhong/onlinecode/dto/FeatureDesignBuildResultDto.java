@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -11,6 +12,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "功能设计编码执行结果")
 public class FeatureDesignBuildResultDto implements Serializable {
 
@@ -18,12 +20,4 @@ public class FeatureDesignBuildResultDto implements Serializable {
 
     @Schema(description = "本次编码运行的 run id")
     private String runId;
-
-    public String getRunId() {
-        return runId;
-    }
-
-    public void setRunId(String runId) {
-        this.runId = runId;
-    }
 }

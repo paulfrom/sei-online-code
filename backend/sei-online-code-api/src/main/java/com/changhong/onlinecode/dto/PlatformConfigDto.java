@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto;
 
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -10,6 +11,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "平台配置 DTO（单例）")
 public class PlatformConfigDto extends BaseEntityDto {
 
@@ -23,28 +25,4 @@ public class PlatformConfigDto extends BaseEntityDto {
 
     @Schema(description = "创建时间")
     private Date createdDate;
-
-    public String getWorkspaceRoot() {
-        return workspaceRoot;
-    }
-
-    public void setWorkspaceRoot(String workspaceRoot) {
-        this.workspaceRoot = workspaceRoot;
-    }
-
-    public String getTemplateGitlabUrl() {
-        return templateGitlabUrl;
-    }
-
-    public void setTemplateGitlabUrl(String templateGitlabUrl) {
-        this.templateGitlabUrl = templateGitlabUrl;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
 }

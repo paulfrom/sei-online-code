@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto.featuredesign;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "功能设计内容")
 public class FeatureDesignContent implements Serializable {
 
@@ -32,44 +34,4 @@ public class FeatureDesignContent implements Serializable {
 
     @Schema(description = "编码时触及的文件边界", example = "[\"src/pages/stock/list.tsx\", \"src/mocks/stock.ts\"]")
     private List<String> fileScope;
-
-    public String getFeatureId() {
-        return featureId;
-    }
-
-    public void setFeatureId(String featureId) {
-        this.featureId = featureId;
-    }
-
-    public String getGoal() {
-        return goal;
-    }
-
-    public void setGoal(String goal) {
-        this.goal = goal;
-    }
-
-    public JsonNode getDesign() {
-        return design;
-    }
-
-    public void setDesign(JsonNode design) {
-        this.design = design;
-    }
-
-    public List<String> getAcceptance() {
-        return acceptance;
-    }
-
-    public void setAcceptance(List<String> acceptance) {
-        this.acceptance = acceptance;
-    }
-
-    public List<String> getFileScope() {
-        return fileScope;
-    }
-
-    public void setFileScope(List<String> fileScope) {
-        this.fileScope = fileScope;
-    }
 }

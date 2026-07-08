@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.plan;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "规划书内容")
 public class PlanContent implements Serializable {
 
@@ -29,44 +31,4 @@ public class PlanContent implements Serializable {
 
     @Schema(description = "本期不做项", example = "[\"支付功能\", \"多租户支持\"]")
     private List<String> nonGoals;
-
-    public String getSummary() {
-        return summary;
-    }
-
-    public void setSummary(String summary) {
-        this.summary = summary;
-    }
-
-    public List<String> getTechAssumptions() {
-        return techAssumptions;
-    }
-
-    public void setTechAssumptions(List<String> techAssumptions) {
-        this.techAssumptions = techAssumptions;
-    }
-
-    public List<PlanFeature> getFeatures() {
-        return features;
-    }
-
-    public void setFeatures(List<PlanFeature> features) {
-        this.features = features;
-    }
-
-    public List<PlanModule> getModules() {
-        return modules;
-    }
-
-    public void setModules(List<PlanModule> modules) {
-        this.modules = modules;
-    }
-
-    public List<String> getNonGoals() {
-        return nonGoals;
-    }
-
-    public void setNonGoals(List<String> nonGoals) {
-        this.nonGoals = nonGoals;
-    }
 }

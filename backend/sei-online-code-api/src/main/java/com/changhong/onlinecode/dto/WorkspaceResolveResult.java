@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -13,6 +14,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "工作区解析结果")
 public class WorkspaceResolveResult implements Serializable {
 
@@ -33,30 +35,6 @@ public class WorkspaceResolveResult implements Serializable {
     public WorkspaceResolveResult(String path, boolean provisioned, WorkspaceSource source) {
         this.path = path;
         this.provisioned = provisioned;
-        this.source = source;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
-
-    public boolean isProvisioned() {
-        return provisioned;
-    }
-
-    public void setProvisioned(boolean provisioned) {
-        this.provisioned = provisioned;
-    }
-
-    public WorkspaceSource getSource() {
-        return source;
-    }
-
-    public void setSource(WorkspaceSource source) {
         this.source = source;
     }
 }

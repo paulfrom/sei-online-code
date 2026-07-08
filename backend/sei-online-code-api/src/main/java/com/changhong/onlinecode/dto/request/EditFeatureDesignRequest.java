@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 
 import java.io.Serializable;
 
@@ -12,6 +13,7 @@ import java.io.Serializable;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "编辑功能设计请求")
 public class EditFeatureDesignRequest implements Serializable {
 
@@ -21,12 +23,4 @@ public class EditFeatureDesignRequest implements Serializable {
     @Valid
     @Schema(description = "功能设计内容")
     private FeatureDesignContent content;
-
-    public FeatureDesignContent getContent() {
-        return content;
-    }
-
-    public void setContent(FeatureDesignContent content) {
-        this.content = content;
-    }
 }

@@ -7,6 +7,7 @@ import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.plan.PlanContent;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
 
 import java.util.Date;
 
@@ -15,6 +16,7 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "规划书 DTO")
 public class PlanDto extends BaseEntityDto {
 
@@ -70,140 +72,4 @@ public class PlanDto extends BaseEntityDto {
 
     @Schema(description = "最近触发来源")
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public PlanStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(PlanStatus status) {
-        this.status = status;
-    }
-
-    public PlanContent getContent() {
-        return content;
-    }
-
-    public void setContent(PlanContent content) {
-        this.content = content;
-    }
-
-    public String getModifyHint() {
-        return modifyHint;
-    }
-
-    public void setModifyHint(String modifyHint) {
-        this.modifyHint = modifyHint;
-    }
-
-    public Boolean getIsLatest() {
-        return isLatest;
-    }
-
-    public void setIsLatest(Boolean isLatest) {
-        this.isLatest = isLatest;
-    }
-
-    public Date getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(Date createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    public Date getLastEditedDate() {
-        return lastEditedDate;
-    }
-
-    public void setLastEditedDate(Date lastEditedDate) {
-        this.lastEditedDate = lastEditedDate;
-    }
-
-    public FailureCode getFailureCode() {
-        return failureCode;
-    }
-
-    public void setFailureCode(FailureCode failureCode) {
-        this.failureCode = failureCode;
-    }
-
-    public FailureStage getFailureStage() {
-        return failureStage;
-    }
-
-    public void setFailureStage(FailureStage failureStage) {
-        this.failureStage = failureStage;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 }

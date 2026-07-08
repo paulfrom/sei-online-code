@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
 @Schema(description = "导入技能请求")
 public class ImportSkillRequest implements Serializable {
 
@@ -40,44 +42,4 @@ public class ImportSkillRequest implements Serializable {
     @Schema(description = "辅助文件列表（可选，缺省空）")
     @Valid
     private List<SkillFileDto> files;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public SkillConfig getConfig() {
-        return config;
-    }
-
-    public void setConfig(SkillConfig config) {
-        this.config = config;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public List<SkillFileDto> getFiles() {
-        return files;
-    }
-
-    public void setFiles(List<SkillFileDto> files) {
-        this.files = files;
-    }
 }
