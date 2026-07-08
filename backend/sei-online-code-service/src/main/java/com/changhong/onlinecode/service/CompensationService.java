@@ -17,6 +17,8 @@ import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.utils.TransactionUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,8 @@ import java.util.List;
  */
 @Service
 public class CompensationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CompensationService.class);
 
     private final RequirementDao requirementDao;
     private final OverviewDesignDao overviewDesignDao;
@@ -83,18 +87,39 @@ public class CompensationService {
     /**
      * 执行一轮补偿扫描。按“先上游、后下游；先修复失败、后补齐缺失”的顺序执行，
      * 避免下游在依赖缺失时重复重试。
+     *
+     * <p>每个补偿阶段独立捕获异常，防止单阶段失败影响后续阶段。</p>
      */
     public void runCycle() {
+        long start = System.currentTimeMillis();
         Date now = new Date();
-        compensateFailedRequirements(now);
-        compensateMissingOverviewDesigns(now);
-        compensateFailedOverviewDesigns(now);
-        compensateMissingDetailedDesigns(now);
-        compensateFailedDetailedDesigns(now);
-        compensateMissingCodingTasks(now);
+        LOGGER.info("补偿扫描开始，时间={}", now);
+        runPhase("补偿失败需求", () -> compensateFailedRequirements(now));
+        runPhase("补齐缺失概览设计", () -> compensateMissingOverviewDesigns(now));
+        runPhase("补偿失败概览设计", () -> compensateFailedOverviewDesigns(now));
+        runPhase("补齐缺失详细设计", () -> compensateMissingDetailedDesigns(now));
+        runPhase("补偿失败详细设计", () -> compensateFailedDetailedDesigns(now));
+        runPhase("补齐缺失编码任务", () -> compensateMissingCodingTasks(now));
         if (autoRunEnabled) {
-            compensateFailedCodingTasks(now);
-            timeoutRunningRuns(now);
+            runPhase("补偿失败编码任务", () -> compensateFailedCodingTasks(now));
+            runPhase("超时运行收口", () -> timeoutRunningRuns(now));
+        } else {
+            LOGGER.debug("自动运行已关闭，跳过编码任务补偿与运行超时收口");
+        }
+        LOGGER.info("补偿扫描结束，耗时={}ms", System.currentTimeMillis() - start);
+    }
+
+    private void runPhase(String phaseName, Runnable action) {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("补偿阶段 [{}] 开始", phaseName);
+        }
+        try {
+            action.run();
+        } catch (Exception e) {
+            LOGGER.error("补偿阶段 [{}] 执行异常", phaseName, e);
+        }
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("补偿阶段 [{}] 结束", phaseName);
         }
     }
 
@@ -103,8 +128,20 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateFailedRequirements(Date now) {
-        for (Requirement requirement : requirementDao.findByStatus(RequirementStatus.FAILED)) {
+        List<Requirement> candidates = requirementDao.findByStatus(RequirementStatus.FAILED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有失败的需求需要补偿");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个失败需求，准备按重试窗口补偿", candidates.size());
+        int skipped = 0;
+        int retried = 0;
+        for (Requirement requirement : candidates) {
             if (!failureInfoSupport.canRetry(requirement, now)) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("需求 {} 尚未到达重试窗口，跳过", requirement.getId());
+                }
+                skipped++;
                 continue;
             }
             String requirementId = requirement.getId();
@@ -114,9 +151,12 @@ public class CompensationService {
             requirementDao.save(requirement);
             compensationLogService.record("REQUIREMENT", requirementId, "RETRY_PRD", true,
                     "补偿重试 PRD", summary, TriggerSource.SCHEDULED_COMPENSATION);
+            LOGGER.info("需求 {} 进入 PRD 补偿重试，当前重试次数={}", requirementId, requirement.getRetryCount());
             String hint = retryHint(summary);
             TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, hint));
+            retried++;
         }
+        LOGGER.info("失败需求补偿完成，跳过={}，重试={}", skipped, retried);
     }
 
     /**
@@ -124,15 +164,27 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateMissingOverviewDesigns(Date now) {
-        for (Requirement requirement : requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED)) {
+        List<Requirement> candidates = requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有已确认 PRD 的需求需要补齐概览设计");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个已确认 PRD 需求，准备补齐概览设计", candidates.size());
+        int filled = 0;
+        int existed = 0;
+        for (Requirement requirement : candidates) {
             OverviewDesign overview = overviewDesignDao.findByRequirementId(requirement.getId());
             if (overview != null) {
+                existed++;
                 continue;
             }
             compensationLogService.record("REQUIREMENT", requirement.getId(), "FILL_MISSING_OVERVIEW", true,
                     "补齐概览设计", null, TriggerSource.CHAIN_COMPENSATION);
+            LOGGER.info("需求 {} 缺失概览设计，触发补齐", requirement.getId());
             overviewDesignService.createGeneratingOverview(requirement);
+            filled++;
         }
+        LOGGER.info("概览设计补齐完成，已存在={}，新补齐={}", existed, filled);
     }
 
     /**
@@ -140,16 +192,31 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateFailedOverviewDesigns(Date now) {
-        for (OverviewDesign overview : overviewDesignDao.findByStatus(OverviewDesignStatus.FAILED)) {
+        List<OverviewDesign> candidates = overviewDesignDao.findByStatus(OverviewDesignStatus.FAILED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有失败的概览设计需要补偿");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个失败概览设计，准备按重试窗口补偿", candidates.size());
+        int skipped = 0;
+        int retried = 0;
+        for (OverviewDesign overview : candidates) {
             if (!failureInfoSupport.canRetry(overview, now)) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("概览设计 {} 尚未到达重试窗口，跳过", overview.getId());
+                }
+                skipped++;
                 continue;
             }
             failureInfoSupport.markRetrying(overview, TriggerSource.SCHEDULED_COMPENSATION, now);
             overviewDesignDao.save(overview);
             compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "RETRY_OVERVIEW", true,
                     "补偿重试概览设计", overview.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            LOGGER.info("概览设计 {} 进入补偿重试，当前重试次数={}", overview.getId(), overview.getRetryCount());
             overviewDesignService.regenerate(overview.getId(), retryHint(overview.getFailureSummary()));
+            retried++;
         }
+        LOGGER.info("失败概览设计补偿完成，跳过={}，重试={}", skipped, retried);
     }
 
     /**
@@ -157,12 +224,23 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateMissingDetailedDesigns(Date now) {
-        for (OverviewDesign overview : overviewDesignDao.findByStatus(OverviewDesignStatus.CONFIRMED)) {
+        List<OverviewDesign> candidates = overviewDesignDao.findByStatus(OverviewDesignStatus.CONFIRMED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有已确认概览设计需要补齐详细设计");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个已确认概览设计，准备补齐详细设计", candidates.size());
+        int allCreated = 0;
+        int partialCreated = 0;
+        int skipped = 0;
+        for (OverviewDesign overview : candidates) {
             List<DetailedDesign> existing = detailedDesignDao.findByOverviewDesignId(overview.getId());
             if (existing == null || existing.isEmpty()) {
                 compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "FILL_DETAILED_DESIGNS", true,
                         "补齐全部详细设计", null, TriggerSource.CHAIN_COMPENSATION);
+                LOGGER.info("概览设计 {} 没有详细设计，补齐全部", overview.getId());
                 detailedDesignService.createFromOverviewDesign(overview);
+                allCreated++;
                 continue;
             }
             long confirmedCount = existing.stream()
@@ -170,12 +248,16 @@ public class CompensationService {
                     .count();
             if (confirmedCount == existing.size()) {
                 // 全部已确认，不再补充；若上游已变应由人工触发重生成
+                skipped++;
                 continue;
             }
             compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "FILL_MISSING_DETAILED_DESIGNS", true,
                     "补齐缺失详细设计", null, TriggerSource.CHAIN_COMPENSATION);
+            LOGGER.info("概览设计 {} 部分详细设计未确认，补齐缺失", overview.getId());
             detailedDesignService.createMissingFromOverviewDesign(overview);
+            partialCreated++;
         }
+        LOGGER.info("详细设计补齐完成，已跳过={}，全量补齐={}，部分补齐={}", skipped, allCreated, partialCreated);
     }
 
     /**
@@ -183,16 +265,31 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateFailedDetailedDesigns(Date now) {
-        for (DetailedDesign design : detailedDesignDao.findByStatus(DetailedDesignStatus.FAILED)) {
+        List<DetailedDesign> candidates = detailedDesignDao.findByStatus(DetailedDesignStatus.FAILED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有失败的详细设计需要补偿");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个失败详细设计，准备按重试窗口补偿", candidates.size());
+        int skipped = 0;
+        int retried = 0;
+        for (DetailedDesign design : candidates) {
             if (!failureInfoSupport.canRetry(design, now)) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("详细设计 {} 尚未到达重试窗口，跳过", design.getId());
+                }
+                skipped++;
                 continue;
             }
             failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
             detailedDesignDao.save(design);
             compensationLogService.record("DETAILED_DESIGN", design.getId(), "RETRY_DETAILED", true,
                     "补偿重试详细设计", design.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            LOGGER.info("详细设计 {} 进入补偿重试，当前重试次数={}", design.getId(), design.getRetryCount());
             detailedDesignService.regenerate(design.getId(), retryHint(design.getFailureSummary()));
+            retried++;
         }
+        LOGGER.info("失败详细设计补偿完成，跳过={}，重试={}", skipped, retried);
     }
 
     /**
@@ -200,15 +297,27 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateMissingCodingTasks(Date now) {
-        for (DetailedDesign design : detailedDesignDao.findByStatus(DetailedDesignStatus.CONFIRMED)) {
+        List<DetailedDesign> candidates = detailedDesignDao.findByStatus(DetailedDesignStatus.CONFIRMED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有已确认详细设计需要补齐编码任务");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个已确认详细设计，准备补齐编码任务", candidates.size());
+        int filled = 0;
+        int existed = 0;
+        for (DetailedDesign design : candidates) {
             List<CodingTask> tasks = codingTaskDao.findByDetailedDesignId(design.getId());
             if (tasks != null && !tasks.isEmpty()) {
+                existed++;
                 continue;
             }
             compensationLogService.record("DETAILED_DESIGN", design.getId(), "FILL_MISSING_CODING_TASK", true,
                     "补齐编码任务", null, TriggerSource.CHAIN_COMPENSATION);
+            LOGGER.info("详细设计 {} 缺失编码任务，触发补齐", design.getId());
             codingTaskService.createFromDetailedDesign(design);
+            filled++;
         }
+        LOGGER.info("编码任务补齐完成，已存在={}，新补齐={}", existed, filled);
     }
 
     /**
@@ -216,16 +325,31 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateFailedCodingTasks(Date now) {
-        for (CodingTask task : codingTaskDao.findByStatus(CodingTaskStatus.FAILED)) {
+        List<CodingTask> candidates = codingTaskDao.findByStatus(CodingTaskStatus.FAILED);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有失败的编码任务需要补偿");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个失败编码任务，准备按重试窗口补偿", candidates.size());
+        int skipped = 0;
+        int retried = 0;
+        for (CodingTask task : candidates) {
             if (!failureInfoSupport.canRetry(task, now)) {
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("编码任务 {} 尚未到达重试窗口，跳过", task.getId());
+                }
+                skipped++;
                 continue;
             }
             failureInfoSupport.markRetrying(task, TriggerSource.SCHEDULED_COMPENSATION, now);
             codingTaskDao.save(task);
             compensationLogService.record("CODING_TASK", task.getId(), "RETRY_CODING_TASK", true,
                     "补偿重试编码任务", task.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
+            LOGGER.info("编码任务 {} 进入补偿重试，当前重试次数={}", task.getId(), task.getRetryCount());
             codingTaskService.rerun(task.getId(), retryHint(task.getFailureSummary()));
+            retried++;
         }
+        LOGGER.info("失败编码任务补偿完成，跳过={}，重试={}", skipped, retried);
     }
 
     /**
@@ -235,9 +359,18 @@ public class CompensationService {
     @Transactional(rollbackFor = Exception.class)
     public void timeoutRunningRuns(Date now) {
         Date cutoff = new Date(now.getTime() - runTimeoutMinutes * 60_000L);
-        for (Run run : runDao.findByState(RunState.RUNNING)) {
+        List<Run> candidates = runDao.findByState(RunState.RUNNING);
+        if (candidates.isEmpty()) {
+            LOGGER.debug("没有运行中的 Run 需要超时检查");
+            return;
+        }
+        LOGGER.info("扫描到 {} 个运行中 Run，准备按截止时间 {} 检查超时", candidates.size(), cutoff);
+        int timeoutCount = 0;
+        int safeCount = 0;
+        for (Run run : candidates) {
             Date started = run.getStartedDate();
             if (started == null || !started.before(cutoff)) {
+                safeCount++;
                 continue;
             }
             run.setState(RunState.FAILED);
@@ -253,11 +386,16 @@ public class CompensationService {
                     failureInfoSupport.markCodingTaskFailure(task, "编码执行超时",
                             "RUNNING 超过超时时间未收口", TriggerSource.SCHEDULED_COMPENSATION, now);
                     codingTaskDao.save(task);
+                    LOGGER.info("Run {} 超时，关联编码任务 {} 标记为 FAILED", run.getId(), task.getId());
+                } else {
+                    LOGGER.warn("Run {} 超时，但未找到关联编码任务 {}", run.getCodingTaskId());
                 }
             }
             compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN", true,
                     "运行超时收口", "timeout", TriggerSource.SCHEDULED_COMPENSATION);
+            timeoutCount++;
         }
+        LOGGER.info("运行中超时收口完成，安全={}，超时={}", safeCount, timeoutCount);
     }
 
     private String retryHint(String summary) {
