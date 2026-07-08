@@ -8,6 +8,7 @@ import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.OverviewDesignDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.onlinecode.entity.Requirement;
@@ -46,6 +47,7 @@ public class OverviewDesignAgentService {
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final FailureInfoSupport failureInfoSupport;
 
     public OverviewDesignAgentService(OverviewDesignDao overviewDesignDao,
                                       RequirementDao requirementDao,
@@ -53,7 +55,8 @@ public class OverviewDesignAgentService {
                                       SkillService skillService,
                                       CliRunnerRegistry cliRunnerRegistry,
                                       SkillMaterializer skillMaterializer,
-                                      BuiltInSkillRegistry builtInSkillRegistry) {
+                                      BuiltInSkillRegistry builtInSkillRegistry,
+                                      FailureInfoSupport failureInfoSupport) {
         this.overviewDesignDao = overviewDesignDao;
         this.requirementDao = requirementDao;
         this.agentService = agentService;
@@ -61,6 +64,7 @@ public class OverviewDesignAgentService {
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -110,16 +114,15 @@ public class OverviewDesignAgentService {
                 .thenAccept(content -> {
                     overview.setContent(content);
                     overview.setStatus(OverviewDesignStatus.DRAFT);
-                    overview.setLastFailedAt(new Date());
+                    failureInfoSupport.clearOverviewDesignFailure(overview);
                     overviewDesignDao.save(overview);
                     LOGGER.info("overview-design-agent: overview {} 生成完成", overviewDesignId);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("overview-design-agent: overview {} 生成失败", overviewDesignId, e);
                     overview.setStatus(OverviewDesignStatus.FAILED);
-                    overview.setFailureSummary("概览设计生成失败");
-                    overview.setFailureDetail(rootMessage(e));
-                    overview.setLastFailedAt(new Date());
+                    failureInfoSupport.markOverviewDesignFailure(overview,
+                            "概览设计生成失败", rootMessage(e), TriggerSource.AUTO, new Date());
                     overviewDesignDao.save(overview);
                     return null;
                 });

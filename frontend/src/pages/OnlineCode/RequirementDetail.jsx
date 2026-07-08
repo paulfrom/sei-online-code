@@ -3,11 +3,11 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'umi';
-import { Button, Card, Form, Input, message, Steps, theme } from '@ead/suid';
+import { Button, Card, message, Steps, theme } from '@ead/suid';
 import { findOneRequirement, regeneratePrd, editPrd, confirmPrd } from '@/services/requirement';
-import { findOneOverviewDesign, confirmOverviewDesign } from '@/services/overviewDesign';
-import { findDetailedDesignsByOverview, batchConfirmDetailedDesign } from '@/services/detailedDesign';
-import { findCodingTasksByPage, runCodingTask } from '@/services/codingTask';
+import { findOneOverviewDesign, confirmOverviewDesign, editOverviewDesign, regenerateOverviewDesign } from '@/services/overviewDesign';
+import { findDetailedDesignsByOverview, batchConfirmDetailedDesign, confirmDetailedDesign } from '@/services/detailedDesign';
+import { findCodingTasksByPage, runCodingTask, rerunCodingTask } from '@/services/codingTask';
 import { findRunsByCodingTask } from '@/services/run';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 
@@ -110,6 +110,54 @@ const RequirementDetail = () => {
     }
   };
 
+  const handleEditOverview = async () => {
+    if (!overview) return;
+    const content = window.prompt('请输入概览设计内容');
+    if (content === null) return;
+    const res = await editOverviewDesign(overview.id, content);
+    if (res.success) {
+      message.success('概览设计已更新');
+      loadAll();
+    } else {
+      message.error(res.message ?? '更新失败');
+    }
+  };
+
+  const handleRegenerateOverview = async () => {
+    if (!overview) return;
+    const prompt = window.prompt('请输入重生成提示词');
+    if (prompt === null) return;
+    const res = await regenerateOverviewDesign(overview.id, prompt);
+    if (res.success) {
+      message.success('概览设计重生成已启动');
+      loadAll();
+    } else {
+      message.error(res.message ?? '重生成失败');
+    }
+  };
+
+  const handleConfirmDetailedDesign = async (id) => {
+    const res = await confirmDetailedDesign(id);
+    if (res.success) {
+      message.success('详细设计已确认');
+      loadAll();
+    } else {
+      message.error(res.message ?? '确认失败');
+    }
+  };
+
+  const handleRerunTask = async (task) => {
+    const prompt = window.prompt('请输入重跑提示词（必填）');
+    if (!prompt) return;
+    const res = await rerunCodingTask(task.id, prompt);
+    if (res.success) {
+      message.success('重跑已启动');
+      loadAll();
+    } else {
+      message.error(res.message ?? '重跑失败');
+    }
+  };
+
   const handleBatchConfirmDetailedDesigns = async () => {
     const reviewIds = detailedDesigns
       .filter((d) => d.status === 'REVIEW')
@@ -195,8 +243,10 @@ const RequirementDetail = () => {
             <pre style={{ maxHeight: 300, overflow: 'auto', background: token.colorFillTertiary, padding: 12 }}>
               {overview.content || '暂无内容'}
             </pre>
+            <Button onClick={handleEditOverview}>编辑</Button>
+            <Button onClick={handleRegenerateOverview} style={{ marginLeft: 8 }}>重生成</Button>
             {overview.status === 'DRAFT' && (
-              <Button type="primary" onClick={handleConfirmOverview}>确认</Button>
+              <Button type="primary" onClick={handleConfirmOverview} style={{ marginLeft: 8 }}>确认</Button>
             )}
           </>
         ) : (
@@ -212,7 +262,7 @@ const RequirementDetail = () => {
           <div key={d.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, padding: '8px 0' }}>
             <strong>{d.featureTitle || d.featureId}</strong> - {d.status}
             {d.status === 'REVIEW' && (
-              <Button type="link" size="small">确认</Button>
+              <Button type="link" size="small" onClick={() => handleConfirmDetailedDesign(d.id)}>确认</Button>
             )}
           </div>
         ))}
@@ -225,7 +275,15 @@ const RequirementDetail = () => {
             {t.status === 'PENDING' && (
               <Button type="link" size="small" onClick={() => handleRunTask(t)}>运行</Button>
             )}
+            {(t.status === 'FAILED' || t.status === 'SUCCEEDED' || t.status === 'CANCELLED') && (
+              <Button type="link" size="small" onClick={() => handleRerunTask(t)}>重跑</Button>
+            )}
             <Button type="link" size="small" onClick={() => loadRuns(t.id)}>查看运行历史</Button>
+            {t.failureSummary && (
+              <div style={{ color: token.colorError, marginTop: 4 }}>
+                失败摘要：{t.failureSummary}
+              </div>
+            )}
           </div>
         ))}
       </Card>
@@ -233,8 +291,12 @@ const RequirementDetail = () => {
       <Card title="运行历史">
         {runs.map((r) => (
           <div key={r.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, padding: '8px 0' }}>
-            Run #{r.runNo} - {r.state}
-            {r.failureReason && <pre>{r.failureReason}</pre>}
+            <div>Run #{r.runNo} - {r.state} {r.triggerSource && `(${r.triggerSource})`}</div>
+            <div style={{ color: token.colorTextSecondary, fontSize: 12 }}>
+              开始：{r.startedDate ? new Date(r.startedDate).toLocaleString() : '-'}；
+              结束：{r.finishedDate ? new Date(r.finishedDate).toLocaleString() : '-'}
+            </div>
+            {r.failureReason && <pre style={{ background: token.colorFillTertiary, padding: 8 }}>{r.failureReason}</pre>}
           </div>
         ))}
       </Card>

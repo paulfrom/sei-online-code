@@ -21,7 +21,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -49,11 +52,15 @@ public class CompensationService {
 
     private final RequirementAgentService requirementAgentService;
     private final OverviewDesignService overviewDesignService;
+    private final OverviewDesignAgentService overviewDesignAgentService;
     private final DetailedDesignService detailedDesignService;
+    private final DetailedDesignAgentService detailedDesignAgentService;
     private final CodingTaskService codingTaskService;
+    private final CodingTaskExecutionService codingTaskExecutionService;
 
     private final FailureInfoSupport failureInfoSupport;
     private final CompensationLogService compensationLogService;
+    private final TransactionTemplate transactionTemplate;
 
     @Value("${onlinecode.compensation.auto-run-enabled:true}")
     private boolean autoRunEnabled;
@@ -71,10 +78,14 @@ public class CompensationService {
                                RunDao runDao,
                                RequirementAgentService requirementAgentService,
                                OverviewDesignService overviewDesignService,
+                               OverviewDesignAgentService overviewDesignAgentService,
                                DetailedDesignService detailedDesignService,
+                               DetailedDesignAgentService detailedDesignAgentService,
                                CodingTaskService codingTaskService,
+                               CodingTaskExecutionService codingTaskExecutionService,
                                FailureInfoSupport failureInfoSupport,
-                               CompensationLogService compensationLogService) {
+                               CompensationLogService compensationLogService,
+                               PlatformTransactionManager transactionManager) {
         this.requirementDao = requirementDao;
         this.overviewDesignDao = overviewDesignDao;
         this.detailedDesignDao = detailedDesignDao;
@@ -82,10 +93,15 @@ public class CompensationService {
         this.runDao = runDao;
         this.requirementAgentService = requirementAgentService;
         this.overviewDesignService = overviewDesignService;
+        this.overviewDesignAgentService = overviewDesignAgentService;
         this.detailedDesignService = detailedDesignService;
+        this.detailedDesignAgentService = detailedDesignAgentService;
         this.codingTaskService = codingTaskService;
+        this.codingTaskExecutionService = codingTaskExecutionService;
         this.failureInfoSupport = failureInfoSupport;
         this.compensationLogService = compensationLogService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -118,7 +134,7 @@ public class CompensationService {
             LOGGER.debug("补偿阶段 [{}] 开始", phaseName);
         }
         try {
-            action.run();
+            transactionTemplate.executeWithoutResult(status -> action.run());
         } catch (Exception e) {
             LOGGER.error("补偿阶段 [{}] 执行异常", phaseName, e);
         }
@@ -157,8 +173,14 @@ public class CompensationService {
             }
             String requirementId = requirement.getId();
             String summary = requirement.getFailureSummary();
-            failureInfoSupport.markRetrying(requirement, TriggerSource.SCHEDULED_COMPENSATION, now);
+            if (requirementDao.updateStatusIfMatch(requirementId, requirement.getStatus(),
+                    RequirementStatus.PRD_GENERATING) == 0) {
+                LOGGER.info("需求 {} 抢占补偿失败，跳过本轮", requirementId);
+                skipped++;
+                continue;
+            }
             requirement.setStatus(RequirementStatus.PRD_GENERATING);
+            failureInfoSupport.markRetrying(requirement, TriggerSource.SCHEDULED_COMPENSATION, now);
             requirementDao.save(requirement);
             if (wasStuckGenerating) {
                 stuckRetried++;
@@ -222,12 +244,21 @@ public class CompensationService {
                 skipped++;
                 continue;
             }
+            if (overviewDesignDao.updateStatusIfMatch(overview.getId(), OverviewDesignStatus.FAILED,
+                    OverviewDesignStatus.GENERATING) == 0) {
+                LOGGER.info("概览设计 {} 抢占补偿失败，跳过本轮", overview.getId());
+                skipped++;
+                continue;
+            }
+            overview.setStatus(OverviewDesignStatus.GENERATING);
             failureInfoSupport.markRetrying(overview, TriggerSource.SCHEDULED_COMPENSATION, now);
+            overview.setVersion(overview.getVersion() + 1);
             overviewDesignDao.save(overview);
             compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "RETRY_OVERVIEW", true,
                     "补偿重试概览设计", overview.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("概览设计 {} 进入补偿重试，当前重试次数={}", overview.getId(), overview.getRetryCount());
-            overviewDesignService.regenerate(overview.getId(), retryHint(overview.getFailureSummary()));
+            String prompt = retryHint(overview.getFailureSummary());
+            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overview.getId(), prompt));
             retried++;
         }
         LOGGER.info("失败概览设计补偿完成，跳过={}，重试={}", skipped, retried);
@@ -295,12 +326,21 @@ public class CompensationService {
                 skipped++;
                 continue;
             }
+            if (detailedDesignDao.updateStatusIfMatch(design.getId(), DetailedDesignStatus.FAILED,
+                    DetailedDesignStatus.GENERATING) == 0) {
+                LOGGER.info("详细设计 {} 抢占补偿失败，跳过本轮", design.getId());
+                skipped++;
+                continue;
+            }
+            design.setStatus(DetailedDesignStatus.GENERATING);
             failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
+            design.setVersion(design.getVersion() + 1);
             detailedDesignDao.save(design);
             compensationLogService.record("DETAILED_DESIGN", design.getId(), "RETRY_DETAILED", true,
                     "补偿重试详细设计", design.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("详细设计 {} 进入补偿重试，当前重试次数={}", design.getId(), design.getRetryCount());
-            detailedDesignService.regenerate(design.getId(), retryHint(design.getFailureSummary()));
+            String prompt = retryHint(design.getFailureSummary());
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(design.getId(), prompt));
             retried++;
         }
         LOGGER.info("失败详细设计补偿完成，跳过={}，重试={}", skipped, retried);
@@ -355,12 +395,19 @@ public class CompensationService {
                 skipped++;
                 continue;
             }
+            if (codingTaskDao.updateStatusIfMatch(task.getId(), CodingTaskStatus.FAILED, CodingTaskStatus.PENDING) == 0) {
+                LOGGER.info("编码任务 {} 抢占补偿失败，跳过本轮", task.getId());
+                skipped++;
+                continue;
+            }
+            task.setStatus(CodingTaskStatus.PENDING);
             failureInfoSupport.markRetrying(task, TriggerSource.SCHEDULED_COMPENSATION, now);
             codingTaskDao.save(task);
             compensationLogService.record("CODING_TASK", task.getId(), "RETRY_CODING_TASK", true,
                     "补偿重试编码任务", task.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("编码任务 {} 进入补偿重试，当前重试次数={}", task.getId(), task.getRetryCount());
-            codingTaskService.rerun(task.getId(), retryHint(task.getFailureSummary()));
+            String prompt = retryHint(task.getFailureSummary());
+            TransactionUtil.afterCommit(() -> codingTaskExecutionService.execute(task.getId(), prompt));
             retried++;
         }
         LOGGER.info("失败编码任务补偿完成，跳过={}，重试={}", skipped, retried);
@@ -387,6 +434,10 @@ public class CompensationService {
                 safeCount++;
                 continue;
             }
+            if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.FAILED) == 0) {
+                safeCount++;
+                continue;
+            }
             run.setState(RunState.FAILED);
             run.setFinishedDate(now);
             run.setFailureSummary("编码执行超时");
@@ -396,6 +447,12 @@ public class CompensationService {
             if (run.getCodingTaskId() != null) {
                 CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
                 if (task != null) {
+                    if (task.getStatus() != CodingTaskStatus.RUNNING
+                            && task.getStatus() != CodingTaskStatus.PENDING) {
+                        LOGGER.info("Run {} 超时，但关联编码任务 {} 已非活动态 {}", run.getId(), task.getId(), task.getStatus());
+                        safeCount++;
+                        continue;
+                    }
                     task.setStatus(CodingTaskStatus.FAILED);
                     failureInfoSupport.markCodingTaskFailure(task, "编码执行超时",
                             "RUNNING 超过超时时间未收口", TriggerSource.SCHEDULED_COMPENSATION, now);

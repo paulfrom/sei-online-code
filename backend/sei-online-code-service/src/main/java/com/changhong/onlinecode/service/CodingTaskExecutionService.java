@@ -49,6 +49,7 @@ public class CodingTaskExecutionService {
     private final WorkspaceManager workspaceManager;
     private final AgentService agentService;
     private final CliRunnerRegistry cliRunnerRegistry;
+    private final FailureInfoSupport failureInfoSupport;
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
@@ -57,7 +58,8 @@ public class CodingTaskExecutionService {
                                       DetailedDesignService detailedDesignService,
                                       WorkspaceManager workspaceManager,
                                       AgentService agentService,
-                                      CliRunnerRegistry cliRunnerRegistry) {
+                                      CliRunnerRegistry cliRunnerRegistry,
+                                      FailureInfoSupport failureInfoSupport) {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
         this.requirementService = requirementService;
@@ -66,6 +68,7 @@ public class CodingTaskExecutionService {
         this.workspaceManager = workspaceManager;
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -139,17 +142,35 @@ public class CodingTaskExecutionService {
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {
-        run.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
-        run.setFinishedDate(new Date());
-        if (!success) {
-            run.setFailureReason(failureReason);
-            task.setFailureSummary(failureReason);
-            task.setFailureDetail(failureReason);
-            task.setLastFailedAt(new Date());
+        Date now = new Date();
+        Run persistedRun = runDao.findOne(run.getId());
+        CodingTask persistedTask = codingTaskDao.findOne(task.getId());
+        if (persistedRun == null || persistedTask == null) {
+            LOGGER.warn("finishRun skipped because run/task disappeared. runId={}, taskId={}",
+                    run.getId(), task.getId());
+            return;
         }
-        task.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
-        runDao.save(run);
-        codingTaskDao.save(task);
+        if (persistedRun.getState() != RunState.RUNNING || persistedTask.getStatus() != CodingTaskStatus.RUNNING) {
+            LOGGER.info("finishRun skipped because run/task already settled. runId={}, runState={}, taskId={}, taskStatus={}",
+                    persistedRun.getId(), persistedRun.getState(), persistedTask.getId(), persistedTask.getStatus());
+            return;
+        }
+
+        persistedRun.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
+        persistedRun.setFinishedDate(now);
+        if (success) {
+            persistedRun.setFailureSummary(null);
+            persistedRun.setFailureReason(null);
+            failureInfoSupport.clearCodingTaskFailure(persistedTask);
+        } else {
+            persistedRun.setFailureSummary("编码执行失败");
+            persistedRun.setFailureReason(failureReason);
+            failureInfoSupport.markCodingTaskFailure(persistedTask, "编码执行失败",
+                    failureReason, persistedRun.getTriggerSource(), now);
+        }
+        persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
+        runDao.save(persistedRun);
+        codingTaskDao.save(persistedTask);
     }
 
     private String buildExecutionPrompt(CodingTask task, String userPrompt) {

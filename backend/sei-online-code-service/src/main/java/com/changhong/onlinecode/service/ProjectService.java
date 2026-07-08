@@ -57,11 +57,13 @@ public class ProjectService extends BaseEntityService<Project> {
         if (Objects.isNull(entity.getAutoRunCodingTask())) {
             entity.setAutoRunCodingTask(Boolean.FALSE);
         }
-        if (Objects.isNull(entity.getWorkspacePath()) || entity.getWorkspacePath().isBlank()) {
+        OperateResultWithData<Project> result = super.save(entity);
+        if (result.successful() && (Objects.isNull(entity.getWorkspacePath()) || entity.getWorkspacePath().isBlank())) {
             String root = configService.resolveWorkspaceRoot(configService.get());
             entity.setWorkspacePath(root + File.separator + entity.getId());
+            result = super.save(entity);
         }
-        return super.save(entity);
+        return result;
     }
 
     /**

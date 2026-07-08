@@ -35,7 +35,7 @@ public class Run extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
 
-    @Column(name = "task_id", nullable = false, length = 36)
+    @Column(name = "task_id", length = 36)
     private String taskId;
 
     @Column(name = "coding_task_id", length = 36)
@@ -57,7 +57,7 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
 
-    @Column(name = "iteration_id", nullable = false, length = 36)
+    @Column(name = "iteration_id", length = 36)
     private String iterationId;
 
     @Enumerated(EnumType.STRING)
@@ -79,6 +79,7 @@ public class Run extends BaseAuditableEntity {
     @Override
     @Transient
     public String getDisplay() {
-        return taskId + " [" + state + "]";
+        String id = codingTaskId != null ? codingTaskId : taskId;
+        return (id != null ? id : runNo != null ? "run#" + runNo : getId()) + " [" + state + "]";
     }
 }

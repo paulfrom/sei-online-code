@@ -6,6 +6,7 @@ package com.changhong.onlinecode.dto.enums;
 public enum FailureStage {
     PLAN,
     SPEC,
+    PRD_GENERATION,
     FEATURE_DESIGN,
     BUILD
 }

@@ -100,11 +100,8 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         if (Objects.isNull(task)) {
             return ResultData.fail("编码任务不存在: " + id);
         }
-        if (task.getStatus() == CodingTaskStatus.RUNNING) {
-            return ResultData.fail("任务正在执行中");
-        }
-        if (task.getStatus() == CodingTaskStatus.STALE) {
-            return ResultData.fail("任务已过期");
+        if (task.getStatus() != CodingTaskStatus.PENDING) {
+            return ResultData.fail("仅待执行任务可运行");
         }
         return executionService.execute(id, userPrompt);
     }
@@ -127,6 +124,12 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         }
         if (task.getStatus() == CodingTaskStatus.RUNNING) {
             return ResultData.fail("任务正在执行中");
+        }
+        if (task.getStatus() == CodingTaskStatus.PENDING) {
+            return ResultData.fail("请先运行任务");
+        }
+        if (task.getStatus() == CodingTaskStatus.STALE) {
+            return ResultData.fail("任务已过期，无法重跑");
         }
         return executionService.execute(id, rerunPrompt);
     }

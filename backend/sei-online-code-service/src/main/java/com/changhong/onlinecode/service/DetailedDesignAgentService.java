@@ -9,6 +9,7 @@ import com.changhong.onlinecode.dao.DetailedDesignDao;
 import com.changhong.onlinecode.dao.OverviewDesignDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.DetailedDesign;
 import com.changhong.onlinecode.entity.OverviewDesign;
@@ -49,6 +50,7 @@ public class DetailedDesignAgentService {
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final FailureInfoSupport failureInfoSupport;
 
     public DetailedDesignAgentService(DetailedDesignDao detailedDesignDao,
                                       OverviewDesignDao overviewDesignDao,
@@ -57,7 +59,8 @@ public class DetailedDesignAgentService {
                                       SkillService skillService,
                                       CliRunnerRegistry cliRunnerRegistry,
                                       SkillMaterializer skillMaterializer,
-                                      BuiltInSkillRegistry builtInSkillRegistry) {
+                                      BuiltInSkillRegistry builtInSkillRegistry,
+                                      FailureInfoSupport failureInfoSupport) {
         this.detailedDesignDao = detailedDesignDao;
         this.overviewDesignDao = overviewDesignDao;
         this.requirementDao = requirementDao;
@@ -66,6 +69,7 @@ public class DetailedDesignAgentService {
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -116,16 +120,15 @@ public class DetailedDesignAgentService {
                 .thenAccept(content -> {
                     design.setContent(content);
                     design.setStatus(DetailedDesignStatus.REVIEW);
-                    design.setLastFailedAt(new Date());
+                    failureInfoSupport.clearDetailedDesignFailure(design);
                     detailedDesignDao.save(design);
                     LOGGER.info("detailed-design-agent: design {} 生成完成", detailedDesignId);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("detailed-design-agent: design {} 生成失败", detailedDesignId, e);
                     design.setStatus(DetailedDesignStatus.FAILED);
-                    design.setFailureSummary("详细设计生成失败");
-                    design.setFailureDetail(rootMessage(e));
-                    design.setLastFailedAt(new Date());
+                    failureInfoSupport.markDetailedDesignFailure(design,
+                            "详细设计生成失败", rootMessage(e), TriggerSource.AUTO, new Date());
                     detailedDesignDao.save(design);
                     return null;
                 });

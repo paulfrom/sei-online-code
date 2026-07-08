@@ -5,6 +5,7 @@ import React, { useRef, useState } from 'react';
 import {
   Button,
   ExtTable,
+  Modal,
   Select,
   message,
 } from '@ead/suid';
@@ -24,6 +25,9 @@ const STATUS_OPTIONS = [
 const CodingTaskTab = ({ projectId }) => {
   const tableRef = useRef(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [runHistoryVisible, setRunHistoryVisible] = useState(false);
+  const [runHistory, setRunHistory] = useState([]);
+  const [runHistoryTitle, setRunHistoryTitle] = useState('运行历史');
 
   const handleRun = async (record) => {
     const res = await runCodingTask(record.id, null);
@@ -50,11 +54,26 @@ const CodingTaskTab = ({ projectId }) => {
   const handleViewRuns = async (record) => {
     const res = await findRunsByCodingTask(record.id);
     if (res.success && res.data) {
-      // eslint-disable-next-line no-console
-      console.log('runs', res.data);
+      setRunHistory(res.data);
+      setRunHistoryTitle(`运行历史 - ${record.title || record.id}`);
+      setRunHistoryVisible(true);
       message.info(`该任务已有 ${res.data.length} 次运行记录`);
     }
   };
+
+  const handleCloseRunHistory = () => {
+    setRunHistoryVisible(false);
+    setRunHistory([]);
+  };
+
+  const runHistoryColumns = [
+    { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
+    { title: '状态', dataIndex: 'state', width: 120 },
+    { title: '触发来源', dataIndex: 'triggerSource', width: 120 },
+    { title: '失败原因', dataIndex: 'failureReason', expandUnusedSpace: true },
+    { title: '开始时间', dataIndex: 'startedDate', width: 170, dataType: 'datetime' },
+    { title: '结束时间', dataIndex: 'finishedDate', width: 170, dataType: 'datetime' },
+  ];
 
   const columns = [
     {
@@ -123,6 +142,21 @@ const CodingTaskTab = ({ projectId }) => {
           beforeLoad={buildSearch}
         />
       </div>
+      <Modal
+        title={runHistoryTitle}
+        open={runHistoryVisible}
+        onCancel={handleCloseRunHistory}
+        footer={<Button onClick={handleCloseRunHistory}>关闭</Button>}
+        width={960}
+      >
+        <ExtTable
+          rowKey="id"
+          columns={runHistoryColumns}
+          dataSource={runHistory}
+          remotePaging={false}
+          showSearch={false}
+        />
+      </Modal>
     </div>
   );
 };

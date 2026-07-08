@@ -51,7 +51,7 @@ class ProjectServiceTest {
         projectService = new ProjectService(projectDao, planService, configService, lifecycleService);
     }
 
-    @Disabled("super.save 依赖 BaseEntityService.validateUniqueCode 与 ApplicationContextHolder；需要 @SpringBootTest 才能完整落库验证")
+    @Disabled("新建项目需在 super.save 后获取 id，依赖 Spring 容器与数据库；本地无 Docker 时由集成测试覆盖")
     @Test
     void save_newProject_generatesWorkspacePathAndDoesNotSpawnPlan() {
         // 准备
@@ -82,7 +82,7 @@ class ProjectServiceTest {
         verify(planService, never()).regenerate(anyString(), any());
     }
 
-    @Disabled("super.save 依赖 BaseEntityService.validateUniqueCode；需要 @SpringBootTest 才能完整落库验证")
+    @Disabled("super.save → BaseService.validateUniqueCode 需 Spring 容器与数据库；本地无 Docker 时由集成测试覆盖")
     @Test
     void save_preservesProvidedWorkspacePath() {
         // 准备

@@ -120,17 +120,16 @@ public class RequirementAgentService {
                 .thenAccept(content -> {
                     requirement.setPrdContent(content);
                     requirement.setStatus(RequirementStatus.PRD_REVIEW);
-                    requirement.setLastRetryAt(new Date());
-                    requirement.setRetryCount(Objects.requireNonNullElse(requirement.getRetryCount(), 0) + 1);
+                    failureInfoSupport.clearRequirementFailure(requirement);
                     requirementDao.save(requirement);
                     LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}", requirementId, requirement.getPrdVersion());
                 })
                 .exceptionally(e -> {
                     LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
                     requirement.setStatus(RequirementStatus.FAILED);
-                    requirement.setFailureSummary("PRD 生成失败");
-                    requirement.setFailureDetail(rootMessage(e));
-                    requirement.setLastFailedAt(new Date());
+                    failureInfoSupport.markRequirementFailure(requirement, FailureCode.AGENT_EXECUTION_FAILED,
+                            FailureStage.PRD_GENERATION, "PRD 生成失败", rootMessage(e),
+                            TriggerSource.AUTO, new Date());
                     requirementDao.save(requirement);
                     return null;
                 });

@@ -23,6 +23,9 @@ import com.changhong.sei.core.dto.ResultData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.lang.reflect.Field;
 import java.util.Date;
@@ -53,11 +56,15 @@ class CompensationServiceTest {
 
     private RequirementAgentService requirementAgentService;
     private OverviewDesignService overviewDesignService;
+    private OverviewDesignAgentService overviewDesignAgentService;
     private DetailedDesignService detailedDesignService;
+    private DetailedDesignAgentService detailedDesignAgentService;
     private CodingTaskService codingTaskService;
+    private CodingTaskExecutionService codingTaskExecutionService;
 
     private FailureInfoSupport failureInfoSupport;
     private CompensationLogService compensationLogService;
+    private PlatformTransactionManager transactionManager;
     private CompensationService compensationService;
 
     @BeforeEach
@@ -70,16 +77,22 @@ class CompensationServiceTest {
 
         requirementAgentService = mock(RequirementAgentService.class);
         overviewDesignService = mock(OverviewDesignService.class);
+        overviewDesignAgentService = mock(OverviewDesignAgentService.class);
         detailedDesignService = mock(DetailedDesignService.class);
+        detailedDesignAgentService = mock(DetailedDesignAgentService.class);
         codingTaskService = mock(CodingTaskService.class);
+        codingTaskExecutionService = mock(CodingTaskExecutionService.class);
 
         failureInfoSupport = spy(new FailureInfoSupport());
         compensationLogService = mock(CompensationLogService.class);
+        transactionManager = mock(PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         compensationService = new CompensationService(
                 requirementDao, overviewDesignDao, detailedDesignDao, codingTaskDao, runDao,
-                requirementAgentService, overviewDesignService, detailedDesignService, codingTaskService,
-                failureInfoSupport, compensationLogService);
+                requirementAgentService, overviewDesignService, overviewDesignAgentService,
+                detailedDesignService, detailedDesignAgentService, codingTaskService, codingTaskExecutionService,
+                failureInfoSupport, compensationLogService, transactionManager);
         setField(compensationService, "autoRunEnabled", true);
         setField(compensationService, "runTimeoutMinutes", 30L);
         setField(compensationService, "prdGeneratingTimeoutMinutes", 30L);
@@ -95,8 +108,9 @@ class CompensationServiceTest {
         requirement.setRetryCount(0);
         requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of(requirement));
-
         when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of());
+        when(requirementDao.updateStatusIfMatch("req1", RequirementStatus.FAILED, RequirementStatus.PRD_GENERATING))
+                .thenReturn(1);
 
         compensationService.compensateFailedRequirements(new Date());
 
@@ -118,6 +132,8 @@ class CompensationServiceTest {
         requirement.setLastRetryAt(new Date(System.currentTimeMillis() - 31L * 60_000L));
         when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of());
         when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of(requirement));
+        when(requirementDao.updateStatusIfMatch("req2", RequirementStatus.PRD_GENERATING, RequirementStatus.PRD_GENERATING))
+                .thenReturn(1);
 
         compensationService.compensateFailedRequirements(new Date());
 
@@ -185,15 +201,15 @@ class CompensationServiceTest {
         overview.setRetryCount(0);
         overview.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(overviewDesignDao.findByStatus(OverviewDesignStatus.FAILED)).thenReturn(List.of(overview));
-        when(overviewDesignService.regenerate(eq("ov1"), anyString()))
-                .thenReturn(ResultData.success(new OverviewDesignDto()));
+        when(overviewDesignDao.updateStatusIfMatch("ov1", OverviewDesignStatus.FAILED, OverviewDesignStatus.GENERATING))
+                .thenReturn(1);
 
         compensationService.compensateFailedOverviewDesigns(new Date());
 
         ArgumentCaptor<OverviewDesign> captor = ArgumentCaptor.forClass(OverviewDesign.class);
         verify(overviewDesignDao).save(captor.capture());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(overviewDesignService).regenerate(eq("ov1"), anyString());
+        verify(overviewDesignAgentService).spawnOverviewDesign(eq("ov1"), anyString());
     }
 
     @Test
@@ -220,15 +236,15 @@ class CompensationServiceTest {
         design.setRetryCount(0);
         design.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(detailedDesignDao.findByStatus(DetailedDesignStatus.FAILED)).thenReturn(List.of(design));
-        when(detailedDesignService.regenerate(eq("dd1"), anyString()))
-                .thenReturn(ResultData.success(new DetailedDesignDto()));
+        when(detailedDesignDao.updateStatusIfMatch("dd1", DetailedDesignStatus.FAILED, DetailedDesignStatus.GENERATING))
+                .thenReturn(1);
 
         compensationService.compensateFailedDetailedDesigns(new Date());
 
         ArgumentCaptor<DetailedDesign> captor = ArgumentCaptor.forClass(DetailedDesign.class);
         verify(detailedDesignDao).save(captor.capture());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(detailedDesignService).regenerate(eq("dd1"), anyString());
+        verify(detailedDesignAgentService).spawnDetailedDesign(eq("dd1"), anyString());
     }
 
     @Test
@@ -255,7 +271,9 @@ class CompensationServiceTest {
         task.setRetryCount(0);
         task.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(codingTaskDao.findByStatus(CodingTaskStatus.FAILED)).thenReturn(List.of(task));
-        when(codingTaskService.rerun(eq("ct1"), anyString()))
+        when(codingTaskDao.updateStatusIfMatch("ct1", CodingTaskStatus.FAILED, CodingTaskStatus.PENDING))
+                .thenReturn(1);
+        when(codingTaskExecutionService.execute(eq("ct1"), anyString()))
                 .thenReturn(ResultData.success(new CodingTaskDto()));
 
         compensationService.compensateFailedCodingTasks(new Date());
@@ -263,7 +281,7 @@ class CompensationServiceTest {
         ArgumentCaptor<CodingTask> captor = ArgumentCaptor.forClass(CodingTask.class);
         verify(codingTaskDao).save(captor.capture());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(codingTaskService).rerun(eq("ct1"), anyString());
+        verify(codingTaskExecutionService).execute(eq("ct1"), anyString());
     }
 
     @Test
@@ -274,6 +292,7 @@ class CompensationServiceTest {
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date(System.currentTimeMillis() - 31L * 60_000L));
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
+        when(runDao.updateStateIfMatch("run1", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
 
         CodingTask task = new CodingTask();
         task.setId("ct1");
