@@ -81,6 +81,12 @@ const useStyles = createStyles(({ token, css }) => ({
     flex-wrap: wrap;
     gap: ${token.marginXS}px;
   `,
+  moduleCard: css`
+    margin-bottom: ${token.marginMD}px;
+    padding: ${token.paddingMD}px;
+    border: 1px solid ${token.colorBorderSecondary};
+    border-radius: ${token.borderRadius}px;
+  `,
 }));
 
 interface PlanTabProps {
@@ -394,12 +400,7 @@ const PlanTab: React.FC<PlanTabProps> = ({ projectId }) => {
                   {fields.map((field, index) => (
                     <div
                       key={field.key}
-                      style={{
-                        marginBottom: 16,
-                        padding: 16,
-                        border: '1px solid #f0f0f0',
-                        borderRadius: 6,
-                      }}
+                      className={styles.moduleCard}
                     >
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Form.Item

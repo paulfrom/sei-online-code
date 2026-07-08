@@ -36,6 +36,12 @@ const useStyles = createStyles(({ token, css }) => ({
     white-space: pre-wrap;
     word-break: break-all;
   `,
+  warningText: css`
+    color: ${token.colorWarning};
+  `,
+  mutedText: css`
+    color: ${token.colorTextTertiary};
+  `,
 }));
 
 interface BuildActionsProps {
@@ -222,7 +228,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
               text={`${buildStatusTextMap[status]}: ${count}`}
             />
           ))}
-          {isBuilding && <span style={{ color: '#faad14' }}>（刷新中...）</span>}
+          {isBuilding && <span className={styles.warningText}>（刷新中...）</span>}
         </Space>
 
         <Space>
@@ -258,7 +264,7 @@ const BuildActions: React.FC<BuildActionsProps> = ({ projectId }) => {
       >
         <div ref={logBodyRef} className={styles.logPanel}>
           {logs.length === 0 ? (
-            <span style={{ color: '#8c8c8c' }}>等待编码执行开始…</span>
+            <span className={styles.mutedText}>等待编码执行开始…</span>
           ) : (
             logs.map((line, index) => <div key={index}>{line}</div>)
           )}

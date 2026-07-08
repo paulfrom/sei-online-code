@@ -3,6 +3,7 @@ import dayjs from 'dayjs';
 import { ConfigProvider, theme, App } from '@ead/suid';
 import { useUserContext } from '@ead/suid-utils-react';
 import { constants } from '@/utils';
+import { designTokens } from '@/theme/tokens';
 
 require('dayjs/locale/zh-cn');
 
@@ -39,7 +40,13 @@ export function rootContainer(container: React.ReactNode) {
     }, [currentLocale]);
 
     return (
-      <ConfigProvider locale={locale} theme={{ token: { colorPrimary: primaryColor } }}>
+      <ConfigProvider
+        locale={locale}
+        theme={{
+          ...designTokens,
+          token: { ...designTokens.token, colorPrimary: primaryColor },
+        }}
+      >
         <App>{container}</App>
       </ConfigProvider>
     );

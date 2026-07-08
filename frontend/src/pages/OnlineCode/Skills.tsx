@@ -48,6 +48,12 @@ const useStyles = createStyles(({ token, css }) => ({
     font-size: ${token.fontSizeSM}px;
     color: ${token.colorTextSecondary};
   `,
+  subFormCard: css`
+    border: 1px solid ${token.colorBorderSecondary};
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: ${token.borderRadiusSM}px;
+  `,
 }));
 
 /** derive a source-type tag from the origin prefix (multica dim d: type encoded in origin) */
@@ -218,12 +224,7 @@ const Skills: React.FC = () => {
                   {fields.map(({ key, name: fieldName, ...restField }) => (
                     <div
                       key={key}
-                      style={{
-                        border: '1px solid #f0f0f0',
-                        padding: 12,
-                        marginBottom: 8,
-                        borderRadius: 4,
-                      }}
+                      className={styles.subFormCard}
                     >
                       <Form.Item
                         {...restField}

@@ -55,10 +55,10 @@ const Agents: React.FC = () => {
     const res = await findSkillsByPage({ pageInfo: { page: 1, rows: 200 } });
     const userOptions =
       res.success && res.data
-        ? res.data.rows.map((s: SkillDto) => ({ value: s.id, label: `${s.name} — ${s.description}` }))
+        ? res.data.rows.map((s: SkillDto) => ({ value: s.id, label: `${s.name} - ${s.description}` }))
         : [];
     // builtins are not oc_skill rows (multica dim g); merge so agents can bind builtin:<name>
-    const builtinOptions = BUILTIN_SKILLS.map((s) => ({ value: s.id, label: `${s.name} — ${s.description}` }));
+    const builtinOptions = BUILTIN_SKILLS.map((s) => ({ value: s.id, label: `${s.name} - ${s.description}` }));
     setSkillOptions([...userOptions, ...builtinOptions]);
   }, []);
 

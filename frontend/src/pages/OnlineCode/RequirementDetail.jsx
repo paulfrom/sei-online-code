@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'umi';
-import { Button, Card, Form, Input, message, Steps } from '@ead/suid';
+import { Button, Card, Form, Input, message, Steps, theme } from '@ead/suid';
 import { findOneRequirement, regeneratePrd, editPrd, confirmPrd } from '@/services/requirement';
 import { findOneOverviewDesign, confirmOverviewDesign } from '@/services/overviewDesign';
 import { findDetailedDesignsByOverview, batchConfirmDetailedDesign } from '@/services/detailedDesign';
@@ -20,6 +20,7 @@ const RequirementDetail = () => {
   const [detailedDesigns, setDetailedDesigns] = useState([]);
   const [codingTasks, setCodingTasks] = useState([]);
   const [runs, setRuns] = useState([]);
+  const { token } = theme.useToken();
 
   const loadAll = async () => {
     setLoading(true);
@@ -175,7 +176,7 @@ const RequirementDetail = () => {
 
       <Card title="PRD" style={{ marginBottom: 16 }}>
         <p>状态：{requirement.status}</p>
-        <pre style={{ maxHeight: 300, overflow: 'auto', background: '#f5f5f5', padding: 12 }}>
+        <pre style={{ maxHeight: 300, overflow: 'auto', background: token.colorFillTertiary, padding: 12 }}>
           {requirement.prdContent || '暂无内容'}
         </pre>
         {requirement.status === 'PRD_REVIEW' && (
@@ -191,7 +192,7 @@ const RequirementDetail = () => {
         {overview ? (
           <>
             <p>状态：{overview.status}</p>
-            <pre style={{ maxHeight: 300, overflow: 'auto', background: '#f5f5f5', padding: 12 }}>
+            <pre style={{ maxHeight: 300, overflow: 'auto', background: token.colorFillTertiary, padding: 12 }}>
               {overview.content || '暂无内容'}
             </pre>
             {overview.status === 'DRAFT' && (
@@ -208,8 +209,8 @@ const RequirementDetail = () => {
           批量确认
         </Button>
         {detailedDesigns.map((d) => (
-          <div key={d.id} style={{ borderBottom: '1px solid #eee', padding: '8px 0' }}>
-            <strong>{d.featureTitle || d.featureId}</strong> — {d.status}
+          <div key={d.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, padding: '8px 0' }}>
+            <strong>{d.featureTitle || d.featureId}</strong> - {d.status}
             {d.status === 'REVIEW' && (
               <Button type="link" size="small">确认</Button>
             )}
@@ -219,8 +220,8 @@ const RequirementDetail = () => {
 
       <Card title="编码任务" style={{ marginBottom: 16 }}>
         {codingTasks.map((t) => (
-          <div key={t.id} style={{ borderBottom: '1px solid #eee', padding: '8px 0' }}>
-            <strong>{t.title || t.id}</strong> — {t.status}
+          <div key={t.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, padding: '8px 0' }}>
+            <strong>{t.title || t.id}</strong> - {t.status}
             {t.status === 'PENDING' && (
               <Button type="link" size="small" onClick={() => handleRunTask(t)}>运行</Button>
             )}
@@ -231,8 +232,8 @@ const RequirementDetail = () => {
 
       <Card title="运行历史">
         {runs.map((r) => (
-          <div key={r.id} style={{ borderBottom: '1px solid #eee', padding: '8px 0' }}>
-            Run #{r.runNo} — {r.state}
+          <div key={r.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, padding: '8px 0' }}>
+            Run #{r.runNo} - {r.state}
             {r.failureReason && <pre>{r.failureReason}</pre>}
           </div>
         ))}
