@@ -7,6 +7,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 /**
  * 技能辅助文件实体（对齐 multica 维度 e，独立子表 oc_skill_file，兑现契约 Phase 3 §1.1
@@ -30,6 +32,8 @@ import jakarta.persistence.Table;
         @Index(name = "idx_skill_file_skill", columnList = "skill_id")
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class SkillFile extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -43,27 +47,4 @@ public class SkillFile extends BaseAuditableEntity {
     @Column(name = "content", columnDefinition = "TEXT")
     private String content;
 
-    public String getSkillId() {
-        return skillId;
     }
-
-    public void setSkillId(String skillId) {
-        this.skillId = skillId;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-}

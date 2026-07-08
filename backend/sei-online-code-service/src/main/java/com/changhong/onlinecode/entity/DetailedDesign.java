@@ -12,6 +12,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -20,6 +22,8 @@ import java.util.Date;
  *
  * @author sei-online-code
  */
+@Data
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "oc_detailed_design", indexes = {
         @Index(name = "idx_detailed_design_project", columnList = "project_id"),
@@ -84,142 +88,6 @@ public class DetailedDesign extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "last_trigger_source", length = 32)
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getRequirementId() {
-        return requirementId;
-    }
-
-    public void setRequirementId(String requirementId) {
-        this.requirementId = requirementId;
-    }
-
-    public String getOverviewDesignId() {
-        return overviewDesignId;
-    }
-
-    public void setOverviewDesignId(String overviewDesignId) {
-        this.overviewDesignId = overviewDesignId;
-    }
-
-    public String getModuleId() {
-        return moduleId;
-    }
-
-    public void setModuleId(String moduleId) {
-        this.moduleId = moduleId;
-    }
-
-    public String getModuleTitle() {
-        return moduleTitle;
-    }
-
-    public void setModuleTitle(String moduleTitle) {
-        this.moduleTitle = moduleTitle;
-    }
-
-    public String getFeatureId() {
-        return featureId;
-    }
-
-    public void setFeatureId(String featureId) {
-        this.featureId = featureId;
-    }
-
-    public String getFeatureTitle() {
-        return featureTitle;
-    }
-
-    public void setFeatureTitle(String featureTitle) {
-        this.featureTitle = featureTitle;
-    }
-
-    public DetailedDesignStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(DetailedDesignStatus status) {
-        this.status = status;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 
     @Override
     @Transient

@@ -3,6 +3,9 @@ package com.changhong.onlinecode.entity;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
@@ -22,6 +25,8 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "oc_coding_task", indexes = {
         @Index(name = "idx_coding_task_project", columnList = "project_id"),
@@ -81,126 +86,6 @@ public class CodingTask extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "last_trigger_source", length = 32)
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getRequirementId() {
-        return requirementId;
-    }
-
-    public void setRequirementId(String requirementId) {
-        this.requirementId = requirementId;
-    }
-
-    public String getDetailedDesignId() {
-        return detailedDesignId;
-    }
-
-    public void setDetailedDesignId(String detailedDesignId) {
-        this.detailedDesignId = detailedDesignId;
-    }
-
-    public Integer getDetailedDesignVersion() {
-        return detailedDesignVersion;
-    }
-
-    public void setDetailedDesignVersion(Integer detailedDesignVersion) {
-        this.detailedDesignVersion = detailedDesignVersion;
-    }
-
-    public CodingTaskStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(CodingTaskStatus status) {
-        this.status = status;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public List<String> getFileScope() {
-        return fileScope;
-    }
-
-    public void setFileScope(List<String> fileScope) {
-        this.fileScope = fileScope;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 
     @Override
     @Transient

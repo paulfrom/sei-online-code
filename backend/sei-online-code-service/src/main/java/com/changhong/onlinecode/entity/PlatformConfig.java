@@ -7,6 +7,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 /**
  * 平台配置实体（B31）。契约 Phase 5 §1.1 —— 全局单例配置行。
@@ -24,6 +26,8 @@ import jakarta.persistence.Transient;
 @Entity
 @Table(name = "oc_platform_config")
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class PlatformConfig extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -38,22 +42,6 @@ public class PlatformConfig extends BaseAuditableEntity {
     /** 模板 GitLab 仓库地址；空即走脚手架生成路径。无默认。 */
     @Column(name = "template_gitlab_url", length = 500)
     private String templateGitlabUrl;
-
-    public String getWorkspaceRoot() {
-        return workspaceRoot;
-    }
-
-    public void setWorkspaceRoot(String workspaceRoot) {
-        this.workspaceRoot = workspaceRoot;
-    }
-
-    public String getTemplateGitlabUrl() {
-        return templateGitlabUrl;
-    }
-
-    public void setTemplateGitlabUrl(String templateGitlabUrl) {
-        this.templateGitlabUrl = templateGitlabUrl;
-    }
 
     @Override
     @Transient

@@ -1,6 +1,9 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.sei.core.entity.BaseAuditableEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
@@ -25,6 +28,8 @@ import java.util.List;
  *
  * @author sei-online-code
  */
+@Data
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "oc_agent", indexes = {
         @Index(name = "uk_agent_name", columnList = "name", unique = true)
@@ -71,70 +76,6 @@ public class Agent extends BaseAuditableEntity {
      */
     @Transient
     private List<String> skillIds;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public String getInstructions() {
-        return instructions;
-    }
-
-    public void setInstructions(String instructions) {
-        this.instructions = instructions;
-    }
-
-    public String getModel() {
-        return model;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public String getCliTool() {
-        return cliTool;
-    }
-
-    public void setCliTool(String cliTool) {
-        this.cliTool = cliTool;
-    }
-
-    public String getMcpConfig() {
-        return mcpConfig;
-    }
-
-    public void setMcpConfig(String mcpConfig) {
-        this.mcpConfig = mcpConfig;
-    }
-
-    public Boolean getBuiltin() {
-        return builtin;
-    }
-
-    public void setBuiltin(Boolean builtin) {
-        this.builtin = builtin;
-    }
-
-    public List<String> getSkillIds() {
-        return skillIds;
-    }
-
-    public void setSkillIds(List<String> skillIds) {
-        this.skillIds = skillIds;
-    }
 
     @Override
     @Transient

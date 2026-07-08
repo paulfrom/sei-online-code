@@ -12,6 +12,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -27,6 +29,8 @@ import java.util.Date;
         @Index(name = "idx_run_coding_task", columnList = "coding_task_id")
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Run extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -71,110 +75,6 @@ public class Run extends BaseAuditableEntity {
 
     @Column(name = "finished_date")
     private Date finishedDate;
-
-    public String getTaskId() {
-        return taskId;
-    }
-
-    public void setTaskId(String taskId) {
-        this.taskId = taskId;
-    }
-
-    public String getCodingTaskId() {
-        return codingTaskId;
-    }
-
-    public void setCodingTaskId(String codingTaskId) {
-        this.codingTaskId = codingTaskId;
-    }
-
-    public Integer getRunNo() {
-        return runNo;
-    }
-
-    public void setRunNo(Integer runNo) {
-        this.runNo = runNo;
-    }
-
-    public TriggerSource getTriggerSource() {
-        return triggerSource;
-    }
-
-    public void setTriggerSource(TriggerSource triggerSource) {
-        this.triggerSource = triggerSource;
-    }
-
-    public String getUserPrompt() {
-        return userPrompt;
-    }
-
-    public void setUserPrompt(String userPrompt) {
-        this.userPrompt = userPrompt;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureReason() {
-        return failureReason;
-    }
-
-    public void setFailureReason(String failureReason) {
-        this.failureReason = failureReason;
-    }
-
-    public String getIterationId() {
-        return iterationId;
-    }
-
-    public void setIterationId(String iterationId) {
-        this.iterationId = iterationId;
-    }
-
-    public RunState getState() {
-        return state;
-    }
-
-    public void setState(RunState state) {
-        this.state = state;
-    }
-
-    public String getWorktreePath() {
-        return worktreePath;
-    }
-
-    public void setWorktreePath(String worktreePath) {
-        this.worktreePath = worktreePath;
-    }
-
-    public Integer getExitCode() {
-        return exitCode;
-    }
-
-    public void setExitCode(Integer exitCode) {
-        this.exitCode = exitCode;
-    }
-
-    public Date getStartedDate() {
-        return startedDate;
-    }
-
-    public void setStartedDate(Date startedDate) {
-        this.startedDate = startedDate;
-    }
-
-    public Date getFinishedDate() {
-        return finishedDate;
-    }
-
-    public void setFinishedDate(Date finishedDate) {
-        this.finishedDate = finishedDate;
-    }
 
     @Override
     @Transient

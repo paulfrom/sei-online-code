@@ -23,6 +23,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.List;
 import java.util.Date;
@@ -40,6 +42,8 @@ import java.util.Date;
         @Index(name = "idx_spec_state", columnList = "state")
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Spec extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -112,166 +116,6 @@ public class Spec extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "last_trigger_source", length = 32)
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public SpecState getState() {
-        return state;
-    }
-
-    public void setState(SpecState state) {
-        this.state = state;
-    }
-
-    public String getModuleId() {
-        return moduleId;
-    }
-
-    public void setModuleId(String moduleId) {
-        this.moduleId = moduleId;
-    }
-
-    public String getModuleTitle() {
-        return moduleTitle;
-    }
-
-    public void setModuleTitle(String moduleTitle) {
-        this.moduleTitle = moduleTitle;
-    }
-
-    public String getModuleSummary() {
-        return moduleSummary;
-    }
-
-    public void setModuleSummary(String moduleSummary) {
-        this.moduleSummary = moduleSummary;
-    }
-
-    public List<SpecPage> getPages() {
-        return pages;
-    }
-
-    public void setPages(List<SpecPage> pages) {
-        this.pages = pages;
-    }
-
-    public List<SpecComponent> getComponents() {
-        return components;
-    }
-
-    public void setComponents(List<SpecComponent> components) {
-        this.components = components;
-    }
-
-    public List<SpecEntity> getEntities() {
-        return entities;
-    }
-
-    public void setEntities(List<SpecEntity> entities) {
-        this.entities = entities;
-    }
-
-    public List<SpecApiContract> getApiContract() {
-        return apiContract;
-    }
-
-    public void setApiContract(List<SpecApiContract> apiContract) {
-        this.apiContract = apiContract;
-    }
-
-    public String getModifyHint() {
-        return modifyHint;
-    }
-
-    public void setModifyHint(String modifyHint) {
-        this.modifyHint = modifyHint;
-    }
-
-    public FailureCode getFailureCode() {
-        return failureCode;
-    }
-
-    public void setFailureCode(FailureCode failureCode) {
-        this.failureCode = failureCode;
-    }
-
-    public FailureStage getFailureStage() {
-        return failureStage;
-    }
-
-    public void setFailureStage(FailureStage failureStage) {
-        this.failureStage = failureStage;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 
     @Override
     @Transient

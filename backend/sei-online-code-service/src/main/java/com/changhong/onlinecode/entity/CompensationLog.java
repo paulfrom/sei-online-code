@@ -2,6 +2,9 @@ package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
@@ -15,6 +18,8 @@ import jakarta.persistence.Transient;
 /**
  * 补偿执行日志。
  */
+@Data
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "oc_compensation_log", indexes = {
         @Index(name = "idx_comp_log_entity", columnList = "entity_type,entity_id"),
@@ -46,62 +51,6 @@ public class CompensationLog extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "trigger_source", nullable = false, length = 32)
     private TriggerSource triggerSource;
-
-    public String getEntityType() {
-        return entityType;
-    }
-
-    public void setEntityType(String entityType) {
-        this.entityType = entityType;
-    }
-
-    public String getEntityId() {
-        return entityId;
-    }
-
-    public void setEntityId(String entityId) {
-        this.entityId = entityId;
-    }
-
-    public String getAction() {
-        return action;
-    }
-
-    public void setAction(String action) {
-        this.action = action;
-    }
-
-    public Boolean getSuccess() {
-        return success;
-    }
-
-    public void setSuccess(Boolean success) {
-        this.success = success;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
-    }
-
-    public String getDetail() {
-        return detail;
-    }
-
-    public void setDetail(String detail) {
-        this.detail = detail;
-    }
-
-    public TriggerSource getTriggerSource() {
-        return triggerSource;
-    }
-
-    public void setTriggerSource(TriggerSource triggerSource) {
-        this.triggerSource = triggerSource;
-    }
 
     @Override
     @Transient

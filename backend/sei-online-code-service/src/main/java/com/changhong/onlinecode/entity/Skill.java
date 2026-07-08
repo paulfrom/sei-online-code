@@ -12,6 +12,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +37,8 @@ import java.util.List;
         @Index(name = "uk_skill_name", columnList = "name", unique = true)
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Skill extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -58,46 +62,6 @@ public class Skill extends BaseAuditableEntity {
      */
     @Transient
     private List<SkillFile> files = new ArrayList<>();
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public SkillConfig getConfig() {
-        return config;
-    }
-
-    public void setConfig(SkillConfig config) {
-        this.config = config;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public List<SkillFile> getFiles() {
-        return files;
-    }
-
-    public void setFiles(List<SkillFile> files) {
-        this.files = files;
-    }
 
     /**
      * 内容锁（运行时计算，不落库）。按 §6 recipe 从 (v1|config.origin|name|description|content) 计算，

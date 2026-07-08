@@ -13,6 +13,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.List;
 
@@ -28,6 +30,8 @@ import java.util.List;
         @Index(name = "idx_task_iteration", columnList = "iteration_id")
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class Task extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -60,78 +64,6 @@ public class Task extends BaseAuditableEntity {
 
     @Column(name = "seq")
     private Integer seq;
-
-    public String getIterationId() {
-        return iterationId;
-    }
-
-    public void setIterationId(String iterationId) {
-        this.iterationId = iterationId;
-    }
-
-    public String getFeatureDesignId() {
-        return featureDesignId;
-    }
-
-    public void setFeatureDesignId(String featureDesignId) {
-        this.featureDesignId = featureDesignId;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public List<String> getFileScope() {
-        return fileScope;
-    }
-
-    public void setFileScope(List<String> fileScope) {
-        this.fileScope = fileScope;
-    }
-
-    public String getAssignedAgent() {
-        return assignedAgent;
-    }
-
-    public void setAssignedAgent(String assignedAgent) {
-        this.assignedAgent = assignedAgent;
-    }
-
-    public TaskState getState() {
-        return state;
-    }
-
-    public void setState(TaskState state) {
-        this.state = state;
-    }
-
-    public String getWorktreeBranch() {
-        return worktreeBranch;
-    }
-
-    public void setWorktreeBranch(String worktreeBranch) {
-        this.worktreeBranch = worktreeBranch;
-    }
-
-    public Integer getSeq() {
-        return seq;
-    }
-
-    public void setSeq(Integer seq) {
-        this.seq = seq;
-    }
 
     @Override
     @Transient

@@ -12,6 +12,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -26,6 +28,8 @@ import java.util.Date;
         @Index(name = "idx_overview_design_requirement", columnList = "requirement_id")
 })
 @Access(AccessType.FIELD)
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class OverviewDesign extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -67,102 +71,6 @@ public class OverviewDesign extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "last_trigger_source", length = 32)
     private TriggerSource lastTriggerSource;
-
-    public String getProjectId() {
-        return projectId;
-    }
-
-    public void setProjectId(String projectId) {
-        this.projectId = projectId;
-    }
-
-    public String getRequirementId() {
-        return requirementId;
-    }
-
-    public void setRequirementId(String requirementId) {
-        this.requirementId = requirementId;
-    }
-
-    public OverviewDesignStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(OverviewDesignStatus status) {
-        this.status = status;
-    }
-
-    public Integer getVersion() {
-        return version;
-    }
-
-    public void setVersion(Integer version) {
-        this.version = version;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getFailureSummary() {
-        return failureSummary;
-    }
-
-    public void setFailureSummary(String failureSummary) {
-        this.failureSummary = failureSummary;
-    }
-
-    public String getFailureDetail() {
-        return failureDetail;
-    }
-
-    public void setFailureDetail(String failureDetail) {
-        this.failureDetail = failureDetail;
-    }
-
-    public Date getLastFailedAt() {
-        return lastFailedAt;
-    }
-
-    public void setLastFailedAt(Date lastFailedAt) {
-        this.lastFailedAt = lastFailedAt;
-    }
-
-    public Date getLastRetryAt() {
-        return lastRetryAt;
-    }
-
-    public void setLastRetryAt(Date lastRetryAt) {
-        this.lastRetryAt = lastRetryAt;
-    }
-
-    public Integer getRetryCount() {
-        return retryCount;
-    }
-
-    public void setRetryCount(Integer retryCount) {
-        this.retryCount = retryCount;
-    }
-
-    public Date getNextRetryAt() {
-        return nextRetryAt;
-    }
-
-    public void setNextRetryAt(Date nextRetryAt) {
-        this.nextRetryAt = nextRetryAt;
-    }
-
-    public TriggerSource getLastTriggerSource() {
-        return lastTriggerSource;
-    }
-
-    public void setLastTriggerSource(TriggerSource lastTriggerSource) {
-        this.lastTriggerSource = lastTriggerSource;
-    }
 
     @Override
     @Transient

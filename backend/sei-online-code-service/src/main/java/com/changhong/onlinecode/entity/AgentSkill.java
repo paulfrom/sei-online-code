@@ -1,6 +1,9 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.sei.core.entity.BaseAuditableEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
 import jakarta.persistence.Column;
@@ -17,6 +20,8 @@ import jakarta.persistence.Table;
  *
  * @author sei-online-code
  */
+@Data
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "oc_agent_skill", indexes = {
         @Index(name = "uk_agent_skill", columnList = "agent_id, skill_id", unique = true),
@@ -32,20 +37,4 @@ public class AgentSkill extends BaseAuditableEntity {
 
     @Column(name = "skill_id", nullable = false, length = 36)
     private String skillId;
-
-    public String getAgentId() {
-        return agentId;
-    }
-
-    public void setAgentId(String agentId) {
-        this.agentId = agentId;
-    }
-
-    public String getSkillId() {
-        return skillId;
-    }
-
-    public void setSkillId(String skillId) {
-        this.skillId = skillId;
-    }
 }
