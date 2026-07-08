@@ -90,8 +90,8 @@ resolve(projectId):
 
 ## 5. Sub-agent obligations (dispatch basis — separate contexts)
 
-- **Backend (`eadp-backend`)**: `PlatformConfig` entity (singleton) + Flyway
-  `V5__platform_config.sql` (1 table + default-row seed); `PlatformConfigDto` +
+- **Backend (`eadp-backend`)**: `PlatformConfig` entity (singleton) + SQL migration
+  script `V5__platform_config.sql` (1 table + default-row seed); `PlatformConfigDto` +
   `ConfigApi`/`WorkspaceApi` (eps #31–33); `ConfigService` (upsert singleton,
   env-fallback workspaceRoot); `WorkspaceManager` (§3 resolution + safety
   predicate, unit-tested; clone/fs deferred); `ScaffoldGenerator` (§4 manifest,

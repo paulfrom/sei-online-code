@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
  *
  * <p>职责：CRUD（save 继承自 BaseEntityService）；内置 agent 删除守卫（builtin=true 拒绝删除）；
  * 绑定技能整体替换（ep #24，经 oc_agent_skill join 表）；按名称解析供运行编排选择
- * Task.assignedAgent。三个内置 agent 由 Flyway V3/V6 种子写入（契约 §4）。</p>
+ * Task.assignedAgent。三个内置 agent 由 db/migration/V3/V6 SQL 脚本种子写入（契约 §4）。</p>
  *
  * <p>skillIds 派生：{@link Agent#getSkillIds()} 为 @Transient，由本服务从 oc_agent_skill
  * populate；findOne/findByPage/save/findByName 均在返回前 populate，保证 AgentDto 内联

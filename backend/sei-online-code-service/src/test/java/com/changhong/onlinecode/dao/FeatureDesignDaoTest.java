@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * FeatureDesignDao 测试（互斥与级联失效）。
  *
  * <p>用 {@code jdbc:tc:postgresql:15} URL（见 application-test.yml）启动 Testcontainers PG，
- * Flyway 跑 V1–V6 建表；{@code @ActiveProfiles("test")} 加载 test 配置，
+ * 数据库表通过 db/migration/V1–V6 SQL 脚本初始化；{@code @ActiveProfiles("test")} 加载 test 配置，
  * {@code @AutoConfigureTestDatabase(replace=NONE)} 不替换为 H2。</p>
  *
  * @author sei-online-code

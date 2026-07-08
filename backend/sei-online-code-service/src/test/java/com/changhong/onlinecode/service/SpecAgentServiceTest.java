@@ -31,7 +31,7 @@ class SpecAgentServiceTest {
     private SpecDao specDao;
     private AgentService agentService;
     private SkillService skillService;
-    private ProjectService projectService;
+    private ProjectLifecycleService projectLifecycleService;
     private CliRunnerRegistry cliRunnerRegistry;
     private CliRunner runner;
     private SkillMaterializer skillMaterializer;
@@ -44,14 +44,14 @@ class SpecAgentServiceTest {
         specDao = mock(SpecDao.class);
         agentService = mock(AgentService.class);
         skillService = mock(SkillService.class);
-        projectService = mock(ProjectService.class);
+        projectLifecycleService = mock(ProjectLifecycleService.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
         runner = mock(CliRunner.class);
         when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
-        service = new SpecAgentService(specDao, agentService, skillService, projectService,
+        service = new SpecAgentService(specDao, agentService, skillService, projectLifecycleService,
                 cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport);
     }
 
@@ -63,7 +63,7 @@ class SpecAgentServiceTest {
         spec.setState(SpecState.GENERATING);
         when(specDao.findById("spec1")).thenReturn(Optional.of(spec));
         when(agentService.findByName("requirement-agent")).thenReturn(new Agent());
-        when(projectService.findOne("p1")).thenReturn(new Project());
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String truncated = """
                 {
                   "pages":[{"key":"inventory-list","title":"资产盘点","route":"/asset-operations/inventory","description":"盘点任务列表"}],
@@ -84,6 +84,6 @@ class SpecAgentServiceTest {
         assertEquals(1, saved.getPages().size());
         assertNotNull(saved.getEntities());
         assertEquals(1, saved.getEntities().size());
-        verify(projectService).transitionState("p1", LifecycleState.SPEC_REVIEW);
+        verify(projectLifecycleService).transitionState("p1", LifecycleState.SPEC_REVIEW);
     }
 }

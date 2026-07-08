@@ -440,10 +440,14 @@ package com.changhong.sei.core.dto.serach;  // 注意：serach（非 search）
 
 ### 10.2 oc_agent seed — 三个内置 agent
 
+`V7__agent_skill_join_table.sql` 已把 `oc_agent.skill_ids` JSON 列迁移为独立 join 表 `oc_agent_skill`，
+并删除 `oc_agent.skill_ids` 列。因此 `oc_agent` seed **不再包含 `skill_ids` 列**；
+绑定关系通过 `oc_agent_skill` 行表达。
+
 ```sql
 -- planning-agent（builtin=true，不可删）
 INSERT INTO oc_agent (
-    id, name, description, instructions, model, builtin, skill_ids, created_date
+    id, name, description, instructions, model, builtin, created_date
 ) VALUES (
     'AGENT_SEED_PLANNING_001',
     'planning-agent',
@@ -451,13 +455,12 @@ INSERT INTO oc_agent (
     'You produce a project Plan JSON from the project description. Use the project-planning skill.',
     '',
     TRUE,
-    '["builtin:project-planning"]',  -- V7 起改 oc_agent_skill join 行；V11 起值为 builtin:<name>
     CURRENT_TIMESTAMP
 );
 
 -- feature-design-agent（builtin=true，不可删）
 INSERT INTO oc_agent (
-    id, name, description, instructions, model, builtin, skill_ids, created_date
+    id, name, description, instructions, model, builtin, created_date
 ) VALUES (
     'AGENT_SEED_FEATURE_DESIGN_001',
     'feature-design-agent',
@@ -465,14 +468,13 @@ INSERT INTO oc_agent (
     'You produce one FeatureDesign JSON from the plan and a feature outline. Use the feature-design skill.',
     '',
     TRUE,
-    '["builtin:feature-design"]',
     CURRENT_TIMESTAMP
 );
 
--- dev-agent（D3：编码执行 agent，builtin=true，不可删；skill_ids=NULL）
+-- dev-agent（D3：编码执行 agent，builtin=true，不可删；无绑定 skill）
 -- 顺带修复 DispatchService 硬编码 "dev-agent" 的悬空引用
 INSERT INTO oc_agent (
-    id, name, description, instructions, model, builtin, skill_ids, created_date
+    id, name, description, instructions, model, builtin, created_date
 ) VALUES (
     'AGENT_SEED_DEV_AGENT_001',
     'dev-agent',
@@ -480,15 +482,20 @@ INSERT INTO oc_agent (
     'You implement code for one confirmed FeatureDesign. Write files within the fileScope. Do not produce design JSON.',
     '',
     TRUE,
-    NULL,  -- 无绑定 skill
     CURRENT_TIMESTAMP
 );
+
+-- 绑定 planning-agent / feature-design-agent 到 builtin synthetic skill（V11 起）
+INSERT INTO oc_agent_skill (id, agent_id, skill_id, created_date) VALUES
+('AGENT_SKILL_PLANNING_001',    'AGENT_SEED_PLANNING_001',       'builtin:project-planning', CURRENT_TIMESTAMP),
+('AGENT_SKILL_FEATDESIGN_001',  'AGENT_SEED_FEATURE_DESIGN_001', 'builtin:feature-design',   CURRENT_TIMESTAMP);
 ```
 
-> 注：`skill_ids` JSON 列在 V7 已迁移为 `oc_agent_skill` join 表（见 `V7__agent_skill_join_table.sql`）。
-> 上方 `skill_ids` 仅为种子意图说明；V11 起 join 行 `skill_id` 为 `builtin:<name>` synthetic id。
+> 注：V7 起 `skillIds[]` 通过 `oc_agent_skill` join 表实现；`Agent.skillIds` 字段为 `@Transient`，
+> 由 `AgentService` 从 join 表 populate。`oc_agent_skill.skill_id` 无 FK，以支持 `builtin:<name>`
+> synthetic id（见 `V11__skill_builtin_synthetic_id.sql`）。
 
-> **D9 提醒**：`skill_ids` 格式（JSON array 字符串 vs 其他）实现时读 `StringListConverter` 确认；审计列默认值对齐 V3。
+> **D9 提醒**：seed 列严格对齐 `V3__skill_agent.sql`；审计列默认值与 V3 一致。
 
 ---
 
@@ -588,7 +595,7 @@ export default PlanFeatureDesignModel;
 | **D6** | dva model（§11） |
 | **D7** | 聚合规则含 FAILED（§4.1） |
 | **D8** | oc_task 新增 feature_design_id 列（§8.3） |
-| **D9** | seed 列对齐 V3、skill_ids 格式提醒（§10） |
+| **D9** | seed 列对齐 V3、`oc_agent_skill` join 表绑定（§10） |
 | **D10** | DDL 注明 PG partial index（§8） |
 | **D11** | （D11 在后端实现层，本契约不涉及） |
 | **D12** | （D12 在后端实现层，本契约不涉及） |

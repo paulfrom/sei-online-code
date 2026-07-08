@@ -55,7 +55,7 @@ public class SpecAgentService {
     private final SpecDao specDao;
     private final AgentService agentService;
     private final SkillService skillService;
-    private final ProjectService projectService;
+    private final ProjectLifecycleService projectLifecycleService;
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
@@ -63,13 +63,13 @@ public class SpecAgentService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public SpecAgentService(SpecDao specDao, AgentService agentService, SkillService skillService,
-                            ProjectService projectService, CliRunnerRegistry cliRunnerRegistry,
+                            ProjectLifecycleService projectLifecycleService, CliRunnerRegistry cliRunnerRegistry,
                             SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry,
                             FailureInfoSupport failureInfoSupport) {
         this.specDao = specDao;
         this.agentService = agentService;
         this.skillService = skillService;
-        this.projectService = projectService;
+        this.projectLifecycleService = projectLifecycleService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
@@ -95,7 +95,7 @@ public class SpecAgentService {
         }
         spec.setLastTriggerSource(triggerSource);
         Agent agent = agentService.findByName("requirement-agent");
-        Project project = projectService.findOne(projectId);
+        Project project = projectLifecycleService.findById(projectId);
         String prompt = buildSpecPrompt(project, spec, modifyHint);
         Path workdir = materializeSkills(agent);
 
@@ -128,7 +128,7 @@ public class SpecAgentService {
                     specDao.save(spec);
                     // refineSpec 路径项目停在 SPEC_REFINING，此处推进到 SPEC_REVIEW；
                     // regenerate 路径项目已在 SPEC_REVIEW，自环合法（见 SpecService 注释）。
-                    projectService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
+                    projectLifecycleService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("spawnRequirement failed projectId={} specId={}", projectId, specId, e);
@@ -141,7 +141,7 @@ public class SpecAgentService {
                             triggerSource,
                             new java.util.Date());
                     specDao.save(spec);
-                    projectService.transitionState(projectId, LifecycleState.FAILED);
+                    projectLifecycleService.transitionState(projectId, LifecycleState.FAILED);
                     return null;
                 });
     }

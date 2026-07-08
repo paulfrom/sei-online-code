@@ -114,7 +114,7 @@ Run-level (new): `RUNNING → SUCCEEDED`; any → `FAILED`; abort → `CANCELLED
 
 ## 5. Sub-agent obligations
 
-- **Backend (`eadp-backend`)**: `Task`/`Run` entities + Flyway `V2__task_run.sql`;
+- **Backend (`eadp-backend`)**: `Task`/`Run` entities + SQL migration script `V2__task_run.sql`;
   `TaskDto`/`RunDto` + `TaskApi`/`RunApi`; Dispatch Agent service (Spec → disjoint
   tasks by fileScope); `WorktreeManager` (`git worktree add -b` / `remove --force`
   / `branch -D` / fast-forward merge, ref multica `execenv/git.go`); wire

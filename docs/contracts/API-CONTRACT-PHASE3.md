@@ -152,7 +152,7 @@ instead of `SkillService.findOne`.
 
 ## 5. Sub-agent obligations (dispatch basis — separate contexts)
 
-- **Backend (`eadp-backend`)**: `Skill`/`Agent` entities + Flyway
+- **Backend (`eadp-backend`)**: `Skill`/`Agent` entities + SQL migration script
   `V7__agent_skill_join_table.sql` (the `agent_skill` join table;
   `Agent.skillIds` is `@Transient`, mapped through the join table);
   `SkillDto`/`AgentDto` + `SkillApi`/`AgentApi`; `SkillService` (import +

@@ -24,13 +24,16 @@ public class ProjectService extends BaseEntityService<Project> {
     private final ProjectDao dao;
     private final PlanService planService;
     private final ConfigService configService;
+    private final ProjectLifecycleService lifecycleService;
 
     public ProjectService(ProjectDao dao,
                           PlanService planService,
-                          ConfigService configService) {
+                          ConfigService configService,
+                          ProjectLifecycleService lifecycleService) {
         this.dao = dao;
         this.planService = planService;
         this.configService = configService;
+        this.lifecycleService = lifecycleService;
     }
 
     @Override
@@ -70,16 +73,7 @@ public class ProjectService extends BaseEntityService<Project> {
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Project> transitionState(String projectId, LifecycleState target) {
-        Project project = dao.findOne(projectId);
-        if (Objects.isNull(project)) {
-            return OperateResultWithData.operationFailure("项目不存在: " + projectId);
-        }
-        if (!LifecycleTransitions.canTransition(project.getState(), target)) {
-            return OperateResultWithData.operationFailure(
-                    "非法状态流转: " + project.getState() + " → " + target);
-        }
-        project.setState(target);
-        return super.save(project);
+        return lifecycleService.transitionState(projectId, target);
     }
 
     /**

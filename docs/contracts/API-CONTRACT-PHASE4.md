@@ -88,7 +88,7 @@ any active state ─ error  → FAILED    ─ retry → DISPATCHING
 ## 5. Sub-agent obligations (dispatch basis — separate contexts)
 
 - **Backend (`eadp-backend`)**: extend `Iteration` (+`round`,
-  `parentIterationId`, `feedback`, `finishedDate`) + Flyway `V4__build_loop.sql`
+  `parentIterationId`, `feedback`, `finishedDate`) + SQL migration script `V4__build_loop.sql`
   (alter table + indexes); DTO fields; `IterationApi`/`SpecApi` eps #25–30;
   `BuildLoopService` — accept/optimize(new Spec version + iteration)/cancel
   (cascade)/retry; Spec version history (`findByProject`); `WorkspaceGcService`

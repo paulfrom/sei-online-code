@@ -44,7 +44,7 @@
 | Converter | `backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/converter/PlanContentConverter.java` | |
 | Converter | `backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/converter/FeatureDesignContentConverter.java` | |
 | Converter | `backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/converter/Spec*Converter.java` | |
-| Flyway | 旧表迁移文件 V1/V6 中不再需要的部分 | 历史文件不动，新增清理迁移 |
+| SQL migrations | 旧表迁移文件 V1/V6 中不再需要的部分 | 历史文件不动，新增清理迁移 |
 
 ## 前端可删除项
 
@@ -62,7 +62,7 @@
 
 ## 数据库下线迁移
 
-待确认无线上旧数据依赖后，新增 Flyway 迁移：
+待确认无线上旧数据依赖后，新增 SQL 迁移脚本：
 
 1. 删除旧表：`oc_plan`、`oc_spec`、`oc_feature_design`、`oc_task`（确认旧 `oc_run` 的 `task_id` 引用已迁移到 `coding_task_id`）。
 2. 删除 `oc_project` 中不再使用的列：`state`、`current_spec_id`。

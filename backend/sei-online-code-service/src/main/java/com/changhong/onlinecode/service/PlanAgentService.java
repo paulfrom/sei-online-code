@@ -57,7 +57,7 @@ public class PlanAgentService {
     private final FeatureDesignDao featureDesignDao;
     private final AgentService agentService;
     private final SkillService skillService;
-    private final ProjectService projectService;
+    private final ProjectLifecycleService projectLifecycleService;
     private final CliRunnerRegistry cliRunnerRegistry;
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
@@ -68,14 +68,14 @@ public class PlanAgentService {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
-                            SkillService skillService, ProjectService projectService, CliRunnerRegistry cliRunnerRegistry,
-                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry,
-                            FailureInfoSupport failureInfoSupport) {
+                            SkillService skillService, ProjectLifecycleService projectLifecycleService,
+                            CliRunnerRegistry cliRunnerRegistry, SkillMaterializer skillMaterializer,
+                            BuiltInSkillRegistry builtInSkillRegistry, FailureInfoSupport failureInfoSupport) {
         this.planDao = planDao;
         this.featureDesignDao = featureDesignDao;
         this.agentService = agentService;
         this.skillService = skillService;
-        this.projectService = projectService;
+        this.projectLifecycleService = projectLifecycleService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
@@ -97,7 +97,7 @@ public class PlanAgentService {
         }
         plan.setLastTriggerSource(triggerSource);
         Agent agent = agentService.findByName("planning-agent");
-        Project project = projectService.findOne(projectId);
+        Project project = projectLifecycleService.findById(projectId);
         String prompt = buildPlanningPrompt(project, modifyHint);
         Path workdir = materializeSkills(agent);
 

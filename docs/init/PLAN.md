@@ -19,7 +19,7 @@ end-to-end Build Loop first (walking skeleton), then thicken each layer.
 rapid-app-dev/
 ├── server/                 # Java + Spring Boot
 │   ├── domain/             # Project, Spec, Iteration, Agent, Skill, Task, Deployment
-│   ├── persistence/        # PostgreSQL (Flyway migrations + JDBC/JPA)
+│   ├── persistence/        # PostgreSQL (SQL migration scripts + JDBC/JPA)
 │   ├── execution/          # multica-borrowed machinery (reimplemented)
 │   │   ├── WorkspaceManager # clone-once, resolve dir
 │   │   ├── WorktreeManager  # git worktree add/merge/cleanup
@@ -34,7 +34,7 @@ rapid-app-dev/
 ```
 
 ## Phase 0 — Bootstrap (blocker: repo location)
-- Decide final repo location, init git, Spring Boot + Vite scaffolds, Postgres via docker-compose, Flyway baseline.
+- Decide final repo location, init git, Spring Boot + Vite scaffolds, Postgres via docker-compose; SQL migration scripts as schema baseline.
 
 ## Phase 1 — Walking skeleton (thinnest full loop, ONE built-in path)
 Goal: paste a Project Design → get a deployed preview, no parallelism, no custom agents yet.

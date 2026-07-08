@@ -139,6 +139,6 @@ Keep configuration and seed tables:
 - `oc_skill_file`
 - `oc_agent_skill`
 - `oc_platform_config`
-- `flyway_schema_history`
+- `flyway_schema_history`（历史遗留；本项目已不启用 Flyway）
 
-Migration files are not rewritten in this cleanup. Existing databases can be reset by clearing rows; new databases still need historical migrations to reach the current schema.
+SQL 迁移脚本不重新编写。Existing databases can be reset by clearing rows; new databases still need historical migrations to reach the current schema.

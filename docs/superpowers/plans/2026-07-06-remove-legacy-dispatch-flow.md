@@ -6,7 +6,7 @@
 
 **Architecture:** Spec confirmation will become a Spec/Plan concern instead of an Iteration concern. FeatureDesign builds keep using Task/Run internally as runtime records, but old public dispatch/preview screens and APIs disappear. Project state and frontend routing will be driven by Plan/FeatureDesign state.
 
-**Tech Stack:** Java Spring Boot + sei-core + Gradle backend; React + UmiJS + @ead/suid frontend; PostgreSQL/Flyway schema.
+**Tech Stack:** Java Spring Boot + sei-core + Gradle backend; React + UmiJS + @ead/suid frontend; PostgreSQL schema with SQL migration scripts.
 
 ---
 
@@ -179,5 +179,5 @@ Expected: no matches in live code or active contracts.
 - The plan preserves Task/Run because FeatureDesignBuildService still depends on them.
 - The plan removes user-facing Iteration/Dispatch/Preview flow.
 - The plan moves Spec confirmation before deleting IterationService.
-- The plan avoids rewriting old Flyway migrations; historical migrations remain needed for schema construction.
+- The plan avoids rewriting old SQL migration scripts; historical migrations remain needed for schema construction.
 

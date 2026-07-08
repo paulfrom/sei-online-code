@@ -41,7 +41,7 @@ class PlanAgentServiceTest {
     private FeatureDesignDao featureDesignDao;
     private AgentService agentService;
     private SkillService skillService;
-    private ProjectService projectService;
+    private ProjectLifecycleService projectLifecycleService;
     private CliRunnerRegistry cliRunnerRegistry;
     private CliRunner runner;
     private SkillMaterializer skillMaterializer;
@@ -55,7 +55,7 @@ class PlanAgentServiceTest {
         featureDesignDao = mock(FeatureDesignDao.class);
         agentService = mock(AgentService.class);
         skillService = mock(SkillService.class);
-        projectService = mock(ProjectService.class);
+        projectLifecycleService = mock(ProjectLifecycleService.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
         runner = mock(CliRunner.class);
         when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
@@ -63,7 +63,7 @@ class PlanAgentServiceTest {
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillService, projectService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry,
+                skillService, projectLifecycleService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry,
                 failureInfoSupport);
     }
 
@@ -76,7 +76,7 @@ class PlanAgentServiceTest {
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
-        when(projectService.findOne("p1")).thenReturn(new Project());
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
         when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(json));
@@ -96,7 +96,7 @@ class PlanAgentServiceTest {
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
-        when(projectService.findOne("p1")).thenReturn(new Project());
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         when(runner.execute(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("not json"));
 
@@ -116,7 +116,7 @@ class PlanAgentServiceTest {
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
-        when(projectService.findOne("p1")).thenReturn(new Project());
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String raw = "前提假设：单租户\n技术假设：Spring Boot\n"
                 + "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
         when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))

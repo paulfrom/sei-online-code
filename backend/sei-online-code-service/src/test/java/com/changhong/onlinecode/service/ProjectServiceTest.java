@@ -39,6 +39,7 @@ class ProjectServiceTest {
     private ProjectDao projectDao;
     private PlanService planService;
     private ConfigService configService;
+    private ProjectLifecycleService lifecycleService;
     private ProjectService projectService;
 
     @BeforeEach
@@ -46,7 +47,8 @@ class ProjectServiceTest {
         projectDao = mock(ProjectDao.class);
         planService = mock(PlanService.class);
         configService = mock(ConfigService.class);
-        projectService = new ProjectService(projectDao, planService, configService);
+        lifecycleService = mock(ProjectLifecycleService.class);
+        projectService = new ProjectService(projectDao, planService, configService, lifecycleService);
     }
 
     @Disabled("super.save 依赖 BaseEntityService.validateUniqueCode 与 ApplicationContextHolder；需要 @SpringBootTest 才能完整落库验证")

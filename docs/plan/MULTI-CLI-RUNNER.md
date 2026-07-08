@@ -72,7 +72,7 @@
 - **#7 AGENTS.md / CLAUDE.md brief（Codex + Claude parity）**：新 `AgentBriefWriter.writeBrief(workDir, cliTool, name, instructions, logger)`——marker 块（`<!-- BEGIN/END SEI-RUNTIME -->`）幂等注入，保留用户既有内容；codex→`AGENTS.md`、claude（含 null/blank 默认）→`CLAUDE.md`、未知→skip；brief 内容 = agent identity（`## Agent Identity` + name + instructions，对齐 multica）。**service 层 spawn 前调用**（对齐 multica daemon 职责，非 runner）：`PlanAgentService`×2、`DispatchService`、`FeatureDesignBuildService`。**不做 cleanup**（SEI workdir 为临时区/worktree，非用户本地仓库）。
 
 ### 验证状态（PR3）— 已通过
-- V13 迁移：已应用本地 pg17（`oc_agent.mcp_config TEXT` nullable 存在；本库不用 Flyway 跟踪表，同 V12 手动 apply）。
+- V13 迁移：已应用本地 pg17（`oc_agent.mcp_config TEXT` nullable 存在；本库不启用 Flyway，无 `flyway_schema_history` 跟踪表，同 V12 手动 apply）。
 - `compileTestJava`：绿。
 - 单测全过（0 skip / 0 fail）：`CodexSandboxConfigTest`（28 用例：PR2 12 + #5 linkSharedHome 6 + #6 MCP 10）/`CodexRunnerFakeExecutableTest`(5，+1 MCP 配置文件快照)/`CliRunnerRegistryTest`(6)/`PlanAgentServiceTest`(5)/`AgentBriefWriterTest`(新建 10)/`AgentServiceTest`。mock arity 同步：`PlanAgentServiceTest`(5-arg→6-arg)、`FeatureDesignBuildServiceTest`(7-arg→8-arg，`@Disabled` 但编译过)、`ClaudeRunnerRealClaudeTest`/`CodexRunnerRealCodexTest`(4-arg→5-arg null mcpConfig)。
 - 前端 `pnpm build`：通过。

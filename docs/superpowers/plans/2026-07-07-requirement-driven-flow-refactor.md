@@ -6,7 +6,7 @@
 
 **Architecture:** `Project` becomes a passive container with repository/workspace metadata and project-level execution settings. Each `Requirement` owns exactly one PRD and one overview design; the overview design emits feature-scoped detailed designs; each confirmed detailed design creates one coding task. The old `FeatureDesign` stage is removed from the user-visible workflow because it does not bind cleanly to detailed design and breaks the coding traceability chain.
 
-**Tech Stack:** Java + Spring Boot + sei-core + Gradle backend; React + UmiJS + @ead/suid frontend; PostgreSQL/Flyway; existing CLI runner and agent infrastructure.
+**Tech Stack:** Java + Spring Boot + sei-core + Gradle backend; React + UmiJS + @ead/suid frontend; PostgreSQL with SQL migration scripts; existing CLI runner and agent infrastructure.
 
 ---
 
@@ -88,7 +88,7 @@
   - DTOs, request DTOs, enums, entities, DAOs, services, controllers for the four new concepts
   - `RequirementAgentService`, `OverviewDesignAgentService`, `DetailedDesignAgentService`
   - `CodingTaskExecutionService`
-  - Flyway migration for project columns and new tables
+  - SQL migration scripts for project columns and new tables
 - Keep temporarily:
   - `Plan`, `Spec`, `FeatureDesign`, old `Task`, and their APIs, but remove them from new UI entry points.
 
@@ -137,7 +137,7 @@ rg "RequirementDto|OverviewDesignDto|DetailedDesignDto|CodingTaskDto|rerunPrompt
 ## Task 2: Backend Project Metadata
 
 - [ ] Add project fields `gitUrl`, `workspacePath`, `autoRunCodingTask`.
-- [ ] Add Flyway migration for the new columns.
+- [ ] Add SQL migration scripts for the new columns.
 - [ ] Update `ProjectDto` conversion in `ProjectController`.
 - [ ] Change `ProjectService.save` so new project creation no longer creates `Plan` or starts `planning-agent`.
 - [ ] Ensure default `workspacePath` is generated when omitted.
@@ -304,4 +304,4 @@ git diff --check
 - Check whether `Run` can be safely extended with `codingTaskId` while old `taskId` users still exist.
 - Check whether project-level `autoRunCodingTask` needs queueing/backpressure beyond the existing one-active-run-per-task guard.
 - Check whether old `Plan/Spec/FeatureDesign` code should be hidden only at UI level or also guarded at API level.
-- Check whether Flyway migration should use nullable columns first to avoid breaking existing data.
+- Check whether SQL migration scripts should use nullable columns first to avoid breaking existing data.
