@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -59,6 +60,9 @@ public class CompensationService {
 
     @Value("${onlinecode.compensation.run-timeout-minutes:30}")
     private long runTimeoutMinutes;
+
+    @Value("${onlinecode.compensation.prd-generating-timeout-minutes:30}")
+    private long prdGeneratingTimeoutMinutes;
 
     public CompensationService(RequirementDao requirementDao,
                                OverviewDesignDao overviewDesignDao,
@@ -124,19 +128,26 @@ public class CompensationService {
     }
 
     /**
-     * 1. PRD 生成失败：满足重试窗口后重新发起 prd-agent。
+     * 1. PRD 生成失败或长时间卡在 PRD_GENERATING：满足重试窗口后重新发起 prd-agent。
      */
     @Transactional(rollbackFor = Exception.class)
     public void compensateFailedRequirements(Date now) {
-        List<Requirement> candidates = requirementDao.findByStatus(RequirementStatus.FAILED);
+        List<Requirement> candidates = new ArrayList<>(requirementDao.findByStatus(RequirementStatus.FAILED));
+        for (Requirement requirement : requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)) {
+            if (isPrdGeneratingStuck(requirement, now)) {
+                candidates.add(requirement);
+            }
+        }
         if (candidates.isEmpty()) {
-            LOGGER.debug("没有失败的需求需要补偿");
+            LOGGER.debug("没有失败或卡住的 PRD 生成需求需要补偿");
             return;
         }
-        LOGGER.info("扫描到 {} 个失败需求，准备按重试窗口补偿", candidates.size());
+        LOGGER.info("扫描到 {} 个失败/卡住需求，准备按重试窗口补偿", candidates.size());
         int skipped = 0;
         int retried = 0;
+        int stuckRetried = 0;
         for (Requirement requirement : candidates) {
+            boolean wasStuckGenerating = requirement.getStatus() == RequirementStatus.PRD_GENERATING;
             if (!failureInfoSupport.canRetry(requirement, now)) {
                 if (LOGGER.isDebugEnabled()) {
                     LOGGER.debug("需求 {} 尚未到达重试窗口，跳过", requirement.getId());
@@ -149,6 +160,9 @@ public class CompensationService {
             failureInfoSupport.markRetrying(requirement, TriggerSource.SCHEDULED_COMPENSATION, now);
             requirement.setStatus(RequirementStatus.PRD_GENERATING);
             requirementDao.save(requirement);
+            if (wasStuckGenerating) {
+                stuckRetried++;
+            }
             compensationLogService.record("REQUIREMENT", requirementId, "RETRY_PRD", true,
                     "补偿重试 PRD", summary, TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("需求 {} 进入 PRD 补偿重试，当前重试次数={}", requirementId, requirement.getRetryCount());
@@ -156,7 +170,7 @@ public class CompensationService {
             TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, hint));
             retried++;
         }
-        LOGGER.info("失败需求补偿完成，跳过={}，重试={}", skipped, retried);
+        LOGGER.info("失败需求补偿完成，跳过={}，重试={}（其中卡住={}）", skipped, retried, stuckRetried);
     }
 
     /**
@@ -396,6 +410,18 @@ public class CompensationService {
             timeoutCount++;
         }
         LOGGER.info("运行中超时收口完成，安全={}，超时={}", safeCount, timeoutCount);
+    }
+
+    private boolean isPrdGeneratingStuck(Requirement requirement, Date now) {
+        Date reference = requirement.getLastRetryAt();
+        if (reference == null) {
+            reference = requirement.getCreatedDate();
+        }
+        if (reference == null) {
+            return false;
+        }
+        long timeoutMs = prdGeneratingTimeoutMinutes * 60_000L;
+        return now.getTime() - reference.getTime() >= timeoutMs;
     }
 
     private String retryHint(String summary) {

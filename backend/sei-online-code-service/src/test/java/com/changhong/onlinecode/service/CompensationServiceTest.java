@@ -82,6 +82,7 @@ class CompensationServiceTest {
                 failureInfoSupport, compensationLogService);
         setField(compensationService, "autoRunEnabled", true);
         setField(compensationService, "runTimeoutMinutes", 30L);
+        setField(compensationService, "prdGeneratingTimeoutMinutes", 30L);
     }
 
     @Test
@@ -95,6 +96,8 @@ class CompensationServiceTest {
         requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of(requirement));
 
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of());
+
         compensationService.compensateFailedRequirements(new Date());
 
         ArgumentCaptor<Requirement> captor = ArgumentCaptor.forClass(Requirement.class);
@@ -105,6 +108,44 @@ class CompensationServiceTest {
     }
 
     @Test
+    void compensateFailedRequirements_retriesStuckPrdGeneratingRequirement() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req2");
+        requirement.setProjectId("proj1");
+        requirement.setStatus(RequirementStatus.PRD_GENERATING);
+        requirement.setRetryCount(0);
+        requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        requirement.setLastRetryAt(new Date(System.currentTimeMillis() - 31L * 60_000L));
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of());
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of(requirement));
+
+        compensationService.compensateFailedRequirements(new Date());
+
+        ArgumentCaptor<Requirement> captor = ArgumentCaptor.forClass(Requirement.class);
+        verify(requirementDao).save(captor.capture());
+        assertEquals(RequirementStatus.PRD_GENERATING, captor.getValue().getStatus());
+        assertEquals(1, captor.getValue().getRetryCount());
+        verify(requirementAgentService).spawnPrd(eq("req2"), anyString());
+    }
+
+    @Test
+    void compensateFailedRequirements_skipsNotStuckPrdGeneratingRequirement() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req2");
+        requirement.setStatus(RequirementStatus.PRD_GENERATING);
+        requirement.setRetryCount(0);
+        requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
+        requirement.setLastRetryAt(new Date(System.currentTimeMillis() - 1000));
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of());
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of(requirement));
+
+        compensationService.compensateFailedRequirements(new Date());
+
+        verify(requirementDao, never()).save(any(Requirement.class));
+        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString());
+    }
+
+    @Test
     void compensateFailedRequirements_skipsWhenNotRetryable() {
         Requirement requirement = new Requirement();
         requirement.setId("req1");
@@ -112,6 +153,7 @@ class CompensationServiceTest {
         requirement.setRetryCount(3);
         requirement.setNextRetryAt(new Date(System.currentTimeMillis() - 1000));
         when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of(requirement));
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of());
 
         compensationService.compensateFailedRequirements(new Date());
 
