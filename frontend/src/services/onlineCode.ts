@@ -57,6 +57,9 @@ export interface ProjectDto {
   name: string;
   design: string;
   gitUrl?: string;
+  projectCode?: string;
+  projectVersion?: string;
+  packageName?: string;
   workspacePath?: string;
   autoRunCodingTask?: boolean;
   state: LifecycleState;
@@ -167,6 +170,9 @@ export async function saveProject(params: {
   name: string;
   design: string;
   gitUrl?: string;
+  projectCode?: string;
+  projectVersion?: string;
+  packageName?: string;
   workspacePath?: string;
   autoRunCodingTask?: boolean;
 }): Promise<ResultData<ProjectDto>> {

@@ -46,6 +46,15 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "git_url", length = 500)
     private String gitUrl;
 
+    @Column(name = "project_code", length = 200)
+    private String projectCode;
+
+    @Column(name = "project_version", length = 100)
+    private String projectVersion;
+
+    @Column(name = "package_name", length = 255)
+    private String packageName;
+
     @Column(name = "workspace_path", length = 500)
     private String workspacePath;
 

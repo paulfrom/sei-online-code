@@ -1,8 +1,8 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.PlanDto;
-import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
@@ -38,17 +38,17 @@ class ProjectServiceTest {
 
     private ProjectDao projectDao;
     private PlanService planService;
-    private ConfigService configService;
     private ProjectLifecycleService lifecycleService;
+    private WorkspaceManager workspaceManager;
     private ProjectService projectService;
 
     @BeforeEach
     void setUp() {
         projectDao = mock(ProjectDao.class);
         planService = mock(PlanService.class);
-        configService = mock(ConfigService.class);
         lifecycleService = mock(ProjectLifecycleService.class);
-        projectService = new ProjectService(projectDao, planService, configService, lifecycleService);
+        workspaceManager = mock(WorkspaceManager.class);
+        projectService = new ProjectService(projectDao, planService, lifecycleService, workspaceManager);
     }
 
     @Disabled("新建项目需在 super.save 后获取 id，依赖 Spring 容器与数据库；本地无 Docker 时由集成测试覆盖")
@@ -65,9 +65,9 @@ class ProjectServiceTest {
             }
             return p;
         });
-        PlatformConfig config = new PlatformConfig();
-        when(configService.get()).thenReturn(config);
-        when(configService.resolveWorkspaceRoot(config)).thenReturn("/tmp/sei-online-code");
+        when(workspaceManager.resolve("proj-1"))
+                .thenReturn(new com.changhong.onlinecode.dto.WorkspaceResolveResult("/tmp/sei-online-code/proj-1",
+                        false, null));
 
         // 执行
         OperateResultWithData<Project> result = projectService.save(entity);
@@ -99,7 +99,7 @@ class ProjectServiceTest {
         assertTrue(result.successful());
         assertEquals("/custom/workspace/proj-2", result.getData().getWorkspacePath());
         assertEquals(Boolean.TRUE, result.getData().getAutoRunCodingTask());
-        verify(configService, never()).get();
+        verify(workspaceManager, never()).resolve(anyString());
     }
 
     @Test

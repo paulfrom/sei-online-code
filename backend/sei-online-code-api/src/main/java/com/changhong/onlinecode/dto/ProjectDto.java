@@ -37,6 +37,15 @@ public class ProjectDto extends BaseEntityDto {
     @Schema(description = "项目 Git 地址")
     private String gitUrl;
 
+    @Schema(description = "项目编码/模板占位 projectCode；为空则按 gitUrl/name 推导")
+    private String projectCode;
+
+    @Schema(description = "项目版本；为空则默认 1.0.0-SNAPSHOT")
+    private String projectVersion;
+
+    @Schema(description = "后端包名；mono 模板 backend/ 目录优先使用该值，为空则自动推导")
+    private String packageName;
+
     @Schema(description = "项目工作区路径")
     private String workspacePath;
 

@@ -36,7 +36,7 @@ class ConfigServiceTest {
         assertEquals("/home/paul/project/sei-online-code/project/data", resolved,
                 "config.workspaceRoot 的前后空白须被 trim");
         // trim 后须能通过 isSafeRoot（证明修复闭环：原脏值会被 isSafeRoot 误拒）
-        assertTrue(new WorkspaceManager(null, null).isSafeRoot(resolved),
+        assertTrue(new WorkspaceManager(null, null, null).isSafeRoot(resolved),
                 "trim 后的绝对路径须通过 isSafeRoot");
     }
 
@@ -49,7 +49,7 @@ class ConfigServiceTest {
 
         assertEquals("/home/paul/project/sei-online-code/project/data", resolved,
                 "env oc.workspace.root 的前后空白须被 trim");
-        assertTrue(new WorkspaceManager(null, null).isSafeRoot(resolved),
+        assertTrue(new WorkspaceManager(null, null, null).isSafeRoot(resolved),
                 "trim 后的绝对路径须通过 isSafeRoot");
     }
 

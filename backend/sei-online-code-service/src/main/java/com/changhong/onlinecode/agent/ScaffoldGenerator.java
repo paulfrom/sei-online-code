@@ -66,7 +66,260 @@ public class ScaffoldGenerator {
         files.add(new ScaffoldFile("src/mocks/handlers.ts",
                 "glob 聚合 handlers：import.meta.glob 汇聚 src/mocks/*.handlers.ts，避免并行任务改同一 handlers 清单"));
         files.add(new ScaffoldFile("src/mocks/home.handlers.ts", "示例 per-feature mock handlers（home）"));
+        files.add(new ScaffoldFile(".gitignore", "工作区忽略规则"));
+        files.add(new ScaffoldFile("README.md", "工作区说明"));
+        files.add(new ScaffoldFile(".sei/runs/.gitkeep", "运行目录占位"));
+        files.add(new ScaffoldFile(".sei/generated/.gitkeep", "生成物目录占位"));
+        files.add(new ScaffoldFile(".sei/materials/.gitkeep", "平台物料目录占位"));
 
         return Collections.unmodifiableList(files);
+    }
+
+    /**
+     * 返回给定脚手架文件的初始内容；未知路径返回 null。
+     */
+    public String contentOf(String path) {
+        if (path == null) {
+            return null;
+        }
+        switch (path) {
+            case "package.json":
+                return """
+                        {
+                          "name": "sei-online-code-workspace",
+                          "private": true,
+                          "version": "0.0.1",
+                          "type": "module",
+                          "scripts": {
+                            "dev": "vite",
+                            "build": "tsc -b && vite build",
+                            "preview": "vite preview"
+                          },
+                          "dependencies": {
+                            "@ead/antd-style": "^1.0.0",
+                            "@ead/suid": "^1.0.0",
+                            "@ead/suid-utils-react": "^1.0.0",
+                            "msw": "^2.0.0",
+                            "react": "^18.3.1",
+                            "react-dom": "^18.3.1",
+                            "react-router-dom": "^6.28.0"
+                          },
+                          "devDependencies": {
+                            "@types/react": "^18.3.3",
+                            "@types/react-dom": "^18.3.0",
+                            "@vitejs/plugin-react": "^4.3.1",
+                            "typescript": "^5.5.4",
+                            "vite": "^5.4.2"
+                          }
+                        }
+                        """;
+            case "vite.config.ts":
+                return """
+                        import path from 'node:path';
+                        import { defineConfig } from 'vite';
+                        import react from '@vitejs/plugin-react';
+
+                        export default defineConfig({
+                          plugins: [react()],
+                          resolve: {
+                            alias: {
+                              '@': path.resolve(__dirname, 'src'),
+                            },
+                          },
+                        });
+                        """;
+            case "tsconfig.json":
+                return """
+                        {
+                          "compilerOptions": {
+                            "target": "ES2020",
+                            "useDefineForClassFields": true,
+                            "lib": ["DOM", "DOM.Iterable", "ES2020"],
+                            "allowJs": false,
+                            "skipLibCheck": true,
+                            "esModuleInterop": true,
+                            "allowSyntheticDefaultImports": true,
+                            "strict": true,
+                            "forceConsistentCasingInFileNames": true,
+                            "module": "ESNext",
+                            "moduleResolution": "Node",
+                            "resolveJsonModule": true,
+                            "isolatedModules": true,
+                            "noEmit": true,
+                            "jsx": "react-jsx",
+                            "baseUrl": ".",
+                            "paths": {
+                              "@/*": ["src/*"]
+                            }
+                          },
+                          "include": ["src"],
+                          "references": []
+                        }
+                        """;
+            case "index.html":
+                return """
+                        <!doctype html>
+                        <html lang="zh-CN">
+                          <head>
+                            <meta charset="UTF-8" />
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                            <title>SEI Online Code Workspace</title>
+                          </head>
+                          <body>
+                            <div id="root"></div>
+                            <script type="module" src="/src/main.tsx"></script>
+                          </body>
+                        </html>
+                        """;
+            case "src/main.tsx":
+                return """
+                        import React from 'react';
+                        import ReactDOM from 'react-dom/client';
+                        import App from './App';
+
+                        async function bootstrap() {
+                          if (import.meta.env.DEV) {
+                            const { worker } = await import('./mocks/browser');
+                            await worker.start({ onUnhandledRequest: 'bypass' });
+                          }
+
+                          ReactDOM.createRoot(document.getElementById('root')!).render(
+                            <React.StrictMode>
+                              <App />
+                            </React.StrictMode>,
+                          );
+                        }
+
+                        bootstrap();
+                        """;
+            case "src/App.tsx":
+                return """
+                        import { RouterView } from './router';
+
+                        export default function App() {
+                          return <RouterView />;
+                        }
+                        """;
+            case "src/router/index.tsx":
+                return """
+                        import { BrowserRouter, Route, Routes } from 'react-router-dom';
+
+                        type RouteModule = {
+                          default: {
+                            path: string;
+                            element: JSX.Element;
+                          };
+                        };
+
+                        const routeModules = import.meta.glob<RouteModule>('../pages/*/route.tsx', { eager: true });
+                        const routes = Object.values(routeModules).map((module) => module.default);
+
+                        export function RouterView() {
+                          return (
+                            <BrowserRouter>
+                              <Routes>
+                                {routes.map((route) => (
+                                  <Route key={route.path} path={route.path} element={route.element} />
+                                ))}
+                              </Routes>
+                            </BrowserRouter>
+                          );
+                        }
+                        """;
+            case "src/pages/home/index.tsx":
+                return """
+                        export default function HomePage() {
+                          return (
+                            <main style={{ padding: 24, fontFamily: 'sans-serif' }}>
+                              <h1>SEI Online Code Workspace</h1>
+                              <p>项目工作区已初始化，后续代码产物会持续落在当前目录。</p>
+                            </main>
+                          );
+                        }
+                        """;
+            case "src/pages/home/route.tsx":
+                return """
+                        import HomePage from './index';
+
+                        export default {
+                          path: '/',
+                          element: <HomePage />,
+                        };
+                        """;
+            case "src/mocks/browser.ts":
+                return """
+                        import { setupWorker } from 'msw/browser';
+                        import { handlers } from './handlers';
+
+                        export const worker = setupWorker(...handlers);
+                        """;
+            case "src/mocks/handlers.ts":
+                return """
+                        import type { HttpHandler } from 'msw';
+
+                        type HandlerModule = {
+                          default: HttpHandler[];
+                        };
+
+                        const modules = import.meta.glob<HandlerModule>('./*.handlers.ts', { eager: true });
+
+                        export const handlers = Object.entries(modules)
+                          .filter(([path]) => path !== './handlers.ts')
+                          .flatMap(([, module]) => module.default);
+                        """;
+            case "src/mocks/home.handlers.ts":
+                return """
+                        import { http, HttpResponse } from 'msw';
+
+                        export default [
+                          http.get('/api/home', () =>
+                            HttpResponse.json({
+                              code: 200,
+                              success: true,
+                              data: {
+                                message: 'workspace ready',
+                              },
+                            }),
+                          ),
+                        ];
+                        """;
+            case ".gitignore":
+                return """
+                        node_modules
+                        dist
+                        .DS_Store
+                        .sei/runs/*
+                        .sei/generated/*
+                        !.sei/runs/.gitkeep
+                        !.sei/generated/.gitkeep
+                        """;
+            case "README.md":
+                return """
+                        # SEI Online Code Workspace
+
+                        该目录是项目的物理工作区。
+
+                        - 业务代码默认落在仓库根目录。
+                        - 运行期辅助物料落在 `.sei/`。
+                        - Agent 运行说明会写入 `AGENTS.md` 或 `CLAUDE.md`。
+                        """;
+            case ".sei/runs/.gitkeep":
+            case ".sei/generated/.gitkeep":
+            case ".sei/materials/.gitkeep":
+                return "";
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * 平台自有工作区物料目录。所有运行态物料应收敛在这些目录中，而不是散落在根目录。
+     */
+    public List<String> managedPaths() {
+        return List.of(
+                ".sei/runs/.gitkeep",
+                ".sei/generated/.gitkeep",
+                ".sei/materials/.gitkeep"
+        );
     }
 }

@@ -34,7 +34,7 @@ const ProjectList: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const goProjectDetail = (record: ProjectDto) => {
-    history.push(`/online-code/project?id=${record.id}`);
+    history.push(`/online-code/requirements?projectId=${record.id}`);
   };
 
   const handleRowAction = (record: ProjectDto) => {
@@ -74,6 +74,9 @@ const ProjectList: React.FC = () => {
     name: string;
     design: string;
     gitUrl?: string;
+    projectCode?: string;
+    projectVersion?: string;
+    packageName?: string;
     workspacePath?: string;
     autoRunCodingTask?: boolean;
   }) => {
@@ -146,6 +149,15 @@ const ProjectList: React.FC = () => {
           </Form.Item>
           <Form.Item name="gitUrl" label="Git 地址">
             <Input placeholder="https://gitlab.example.com/group/project.git" allowClear />
+          </Form.Item>
+          <Form.Item name="projectCode" label="项目编码">
+            <Input placeholder="留空则按 Git 地址/项目名称推导" allowClear />
+          </Form.Item>
+          <Form.Item name="projectVersion" label="项目版本">
+            <Input placeholder="留空则默认 1.0.0-SNAPSHOT" allowClear />
+          </Form.Item>
+          <Form.Item name="packageName" label="后端包名">
+            <Input placeholder="mono 模板 backend/ 目录使用；留空则自动推导" allowClear />
           </Form.Item>
           <Form.Item name="workspacePath" label="工作区路径">
             <Input placeholder="留空则自动生成" allowClear />

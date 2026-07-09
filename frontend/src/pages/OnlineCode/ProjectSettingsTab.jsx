@@ -21,6 +21,9 @@ const ProjectSettingsTab = ({ project }) => {
         name: project.name,
         design: project.design,
         gitUrl: project.gitUrl,
+        projectCode: project.projectCode,
+        projectVersion: project.projectVersion,
+        packageName: project.packageName,
         workspacePath: project.workspacePath,
         autoRunCodingTask: project.autoRunCodingTask,
       });
@@ -50,6 +53,15 @@ const ProjectSettingsTab = ({ project }) => {
         </Form.Item>
         <Form.Item name="gitUrl" label="Git 地址">
           <Input placeholder="https://gitlab.example.com/group/project.git" />
+        </Form.Item>
+        <Form.Item name="projectCode" label="项目编码">
+          <Input placeholder="留空则按 Git 地址/项目名称推导" />
+        </Form.Item>
+        <Form.Item name="projectVersion" label="项目版本">
+          <Input placeholder="留空则默认 1.0.0-SNAPSHOT" />
+        </Form.Item>
+        <Form.Item name="packageName" label="后端包名">
+          <Input placeholder="mono 模板 backend/ 目录使用；留空则自动推导" />
         </Form.Item>
         <Form.Item name="workspacePath" label="工作区路径">
           <Input placeholder="留空则自动生成" />

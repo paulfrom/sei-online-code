@@ -1,7 +1,9 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.PlanDto;
+import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.sei.core.dao.BaseEntityDao;
@@ -10,7 +12,6 @@ import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.File;
 import java.util.Objects;
 
 /**
@@ -23,17 +24,17 @@ public class ProjectService extends BaseEntityService<Project> {
 
     private final ProjectDao dao;
     private final PlanService planService;
-    private final ConfigService configService;
     private final ProjectLifecycleService lifecycleService;
+    private final WorkspaceManager workspaceManager;
 
     public ProjectService(ProjectDao dao,
                           PlanService planService,
-                          ConfigService configService,
-                          ProjectLifecycleService lifecycleService) {
+                          ProjectLifecycleService lifecycleService,
+                          WorkspaceManager workspaceManager) {
         this.dao = dao;
         this.planService = planService;
-        this.configService = configService;
         this.lifecycleService = lifecycleService;
+        this.workspaceManager = workspaceManager;
     }
 
     @Override
@@ -42,11 +43,10 @@ public class ProjectService extends BaseEntityService<Project> {
     }
 
     /**
-     * 新建项目：仅保存元数据，不再触发旧规划流程。
-     * 若未指定 workspacePath，则按平台配置自动生成。
+     * 新建/更新项目。
      *
-     * @param entity 项目实体
-     * @return 写操作结果
+     * <p>项目保存后立即解析并 provision 物理工作区，确保从项目创建时起就有稳定的落盘目录；
+     * 后续代码执行、Agent brief、运行物料都落在同一 workspace。</p>
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -58,10 +58,14 @@ public class ProjectService extends BaseEntityService<Project> {
             entity.setAutoRunCodingTask(Boolean.FALSE);
         }
         OperateResultWithData<Project> result = super.save(entity);
-        if (result.successful() && (Objects.isNull(entity.getWorkspacePath()) || entity.getWorkspacePath().isBlank())) {
-            String root = configService.resolveWorkspaceRoot(configService.get());
-            entity.setWorkspacePath(root + File.separator + entity.getId());
-            result = super.save(entity);
+        if (!result.successful() || result.getData() == null || result.getData().getId() == null) {
+            return result;
+        }
+        Project saved = result.getData();
+        WorkspaceResolveResult workspace = workspaceManager.resolve(saved.getId());
+        if (!Objects.equals(saved.getWorkspacePath(), workspace.getPath())) {
+            saved.setWorkspacePath(workspace.getPath());
+            result = super.save(saved);
         }
         return result;
     }
