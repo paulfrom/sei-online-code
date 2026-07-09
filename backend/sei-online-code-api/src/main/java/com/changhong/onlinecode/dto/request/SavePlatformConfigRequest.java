@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
@@ -21,10 +22,6 @@ import java.io.Serializable;
 @Schema(description = "保存平台配置请求")
 public class SavePlatformConfigRequest implements Serializable {
 
-    private static final long serialVersionUID = 1L;
-
-    @Pattern(regexp = "^(?:\\s*|/.*|[A-Za-z]:[\\\\/].*)$",
-            message = "workspaceRoot 必须为绝对路径（如 /tmp/sei-online-code），空则走默认；相对路径将被拒绝")
     @Schema(description = "工作区根目录；空则默认 ${java.io.tmpdir}/sei-online-code", example = "/tmp/sei-online-code")
     private String workspaceRoot;
 
