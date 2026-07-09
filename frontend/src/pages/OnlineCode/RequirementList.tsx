@@ -4,15 +4,14 @@
  * URL: /online-code/requirements?projectId=...
  */
 import React, { useRef, useState } from 'react';
-import { history, useSearchParams } from 'umi';
+import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
 // @ts-ignore JS service module has no declaration file
 import { saveRequirement, REQUIREMENT_FIND_BY_PAGE_URL } from '@/services/requirement';
 import type { RequirementDto } from '@/services/onlineCodeTypes';
-import type { PageResult, ResultData } from '@/services/onlineCode';
+import type { ResultData } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import { Button, ExtModal, ExtTable, Form, Input, message } from '@ead/suid';
-import { ArrowLeftOutlined, PlusOutlined } from '@ead/suid-icons';
 
 const useStyles = createStyles(() => ({
   tableWrap: {
@@ -22,9 +21,7 @@ const useStyles = createStyles(() => ({
   },
 }));
 
-const RequirementList: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const projectId = searchParams.get('projectId') ?? '';
+const RequirementList = ({ projectId }) => {
   const tableRef = useRef<any>(null);
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,19 +97,6 @@ const RequirementList: React.FC = () => {
 
   return (
     <PageContainer>
-      <PageHeader
-        title="需求列表"
-        subTitle="项目需求管理"
-        back={{
-          to: `/online-code/project?id=${projectId}`,
-          text: '返回项目',
-        }}
-        actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            新建需求
-          </Button>
-        }
-      />
       <div className={styles.tableWrap}>
         <ExtTable
           ref={tableRef}

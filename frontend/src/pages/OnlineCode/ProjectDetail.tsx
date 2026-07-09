@@ -11,12 +11,11 @@ import type { RequirementDto } from '@/services/onlineCodeTypes';
 // @ts-ignore JS service module has no declaration file
 import { findRequirementsByPage } from '@/services/requirement';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
+import RequirementList from './RequirementList';
 import CodingTaskTab from './CodingTaskTab';
 import ProjectSettingsTab from './ProjectSettingsTab';
 
 // ExtTable 的根元素为 height:100%，依赖祖先链传递确定高度。
-// .ead-tabs-content / .ead-tabs-tabpane 默认 height:auto 会断链 → 表格 body 高度 0。
-// 这里把 Tabs 内容区也撑满，让高度能传到 ExtTable。
 const useStyles = createStyles(() => ({
   tabs: {
     height: '100%',
@@ -94,24 +93,7 @@ const ProjectDetail: React.FC = () => {
       key: 'requirements',
       label: '需求',
       children: (
-        <div style={{ padding: 16 }}>
-          <Card
-            title="需求概览"
-            extra={
-              <Button
-                type="primary"
-                onClick={() => history.push(`/online-code/requirements?projectId=${projectId}`)}
-              >
-                查看需求
-              </Button>
-            }
-          >
-            <p>
-              当前项目共有{' '}
-              {requirementCount === null ? '...' : `${requirementCount} 个`} 需求
-            </p>
-          </Card>
-        </div>
+        <RequirementList projectId={projectId} />
       ),
     },
     {
