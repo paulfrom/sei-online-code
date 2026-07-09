@@ -49,6 +49,7 @@ const Agents: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<AgentDto | null>(null);
   const [skillOptions, setSkillOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const editingBuiltin = Boolean(editing?.builtin);
 
   /** load the skill options for the multi-select (ep #17) — user skills + builtins */
   const loadSkills = useCallback(async () => {
@@ -104,12 +105,12 @@ const Agents: React.FC = () => {
     try {
       const saveRes = await saveAgent({
         id: editing?.id,
-        name: values.name,
+        name: editingBuiltin ? editing?.name ?? values.name : values.name,
         description: values.description ?? '',
         instructions: values.instructions ?? '',
-        model: values.model ?? '',
-        cliTool: values.cliTool ?? '',
-        mcpConfig: values.mcpConfig ?? '',
+        model: editingBuiltin ? editing?.model ?? '' : values.model ?? '',
+        cliTool: editingBuiltin ? editing?.cliTool ?? '' : values.cliTool ?? '',
+        mcpConfig: editingBuiltin ? editing?.mcpConfig ?? '' : values.mcpConfig ?? '',
       });
       if (!saveRes.success || !saveRes.data) {
         message.error(saveRes.message ?? '保存失败');
@@ -140,7 +141,9 @@ const Agents: React.FC = () => {
       width: 120,
       render: (_id: string, record: AgentDto) =>
         record.builtin ? (
-          <span>-</span>
+          <>
+            <ActionButton title="编辑" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          </>
         ) : (
           <>
             <ActionButton title="编辑" icon={<EditOutlined />} onClick={() => openEdit(record)} />
@@ -204,7 +207,7 @@ const Agents: React.FC = () => {
 
       <ExtModal
         open={modalOpen}
-        title={editing ? '编辑 Agent' : '新建 Agent'}
+        title={editing ? (editingBuiltin ? '编辑内置 Agent' : '编辑 Agent') : '新建 Agent'}
         confirmLoading={saving}
         onCancel={() => {
           setModalOpen(false);
@@ -219,7 +222,7 @@ const Agents: React.FC = () => {
             label="名称"
             rules={[{ required: true, message: '请输入 Agent 名称' }]}
           >
-            <Input placeholder="例如：suid-dev" allowClear />
+            <Input placeholder="例如：suid-dev" allowClear disabled={editingBuiltin} />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input placeholder="Agent 用途简述" allowClear />
@@ -228,12 +231,17 @@ const Agents: React.FC = () => {
             <Input.TextArea rows={5} placeholder="你负责实现单个页面…" />
           </Form.Item>
           <Form.Item name="model" label="模型" tooltip="留空则由 CLI 解析默认模型">
-            <Input placeholder="留空 = CLI 默认" allowClear />
+            <Input placeholder="留空 = CLI 默认" allowClear disabled={editingBuiltin} />
           </Form.Item>
-          <Form.Item name="cliTool" label="CLI 工具" tooltip="留空 = 默认 claude；codex 需操作机已安装 codex CLI">
+          <Form.Item
+            name="cliTool"
+            label="CLI 工具"
+            tooltip="留空 = 默认 claude；codex 需操作机已安装 codex CLI"
+          >
             <Select
               allowClear
               placeholder="留空 = claude"
+              disabled={editingBuiltin}
               options={[
                 { value: 'claude', label: 'claude' },
                 { value: 'codex', label: 'codex' },
@@ -249,8 +257,14 @@ const Agents: React.FC = () => {
               rows={4}
               placeholder='{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}'
               allowClear
+              disabled={editingBuiltin}
             />
           </Form.Item>
+          {editingBuiltin ? (
+            <Tag color="blue" icon={<LockOutlined />}>
+              内置 Agent 仅允许修改描述、指令和绑定技能
+            </Tag>
+          ) : null}
           <Form.Item name="skillIds" label="绑定技能">
             <Select
               mode="multiple"

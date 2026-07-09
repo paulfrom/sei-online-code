@@ -819,7 +819,7 @@ export function seed(): void {
  */
 function digest(parts: string[]): string {
   // length-prefixed join mirrors §6's boundary-safe concatenation
-  const canonical = parts.map((p) => `${p.length} ${p}`).join('');
+  const canonical = parts.map((p) => `${p.length}${p}`).join('');
   let h = 5381;
   for (let i = 0; i < canonical.length; i += 1) {
     h = ((h << 5) + h + canonical.charCodeAt(i)) | 0;

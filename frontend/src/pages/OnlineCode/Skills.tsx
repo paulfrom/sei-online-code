@@ -21,11 +21,12 @@ import {
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
-import { DeleteOutlined, EyeOutlined, ImportOutlined, PlusOutlined } from '@ead/suid-icons';
+import { DeleteOutlined, EyeOutlined, ImportOutlined } from '@ead/suid-icons';
 import {
   SKILL_FIND_BY_PAGE_URL,
   deleteSkill,
-  importSkill,
+  importGithubSkill,
+  importSkillArchive,
 } from '@/services/onlineCode';
 import type { SkillConfig, SkillDto } from '@/services/onlineCode';
 import { PageContainer } from './components/PageLayout';
@@ -65,11 +66,7 @@ function originTypeMeta(origin?: string): { color: string; label: string } {
 }
 
 interface ImportForm {
-  name: string;
-  description: string;
-  origin: string;
-  content: string;
-  files?: Array<{ path: string; content: string }>;
+  githubUrl: string;
 }
 
 const Skills: React.FC = () => {
@@ -79,6 +76,8 @@ const Skills: React.FC = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [viewing, setViewing] = useState<SkillDto | null>(null);
+  const [importMode, setImportMode] = useState<'github' | 'archive'>('github');
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
 
   const handleDelete = async (id: string) => {
     const res = await deleteSkill(id);
@@ -93,13 +92,11 @@ const Skills: React.FC = () => {
   const handleImport = async (values: ImportForm) => {
     setImporting(true);
     try {
-      const res = await importSkill({
-        name: values.name,
-        description: values.description ?? '',
-        config: { origin: values.origin || `inline:${values.name}` },
-        content: values.content,
-        files: (values.files ?? []).filter((f) => f.path && f.content),
-      });
+      const res = importMode === 'github'
+        ? await importGithubSkill(values.githubUrl)
+        : archiveFile
+          ? await importSkillArchive(archiveFile)
+          : { success: false, message: '请选择 zip/.skill 文件', data: null };
       if (!res.success || !res.data) {
         message.error(res.message ?? '导入失败');
         return;
@@ -107,6 +104,8 @@ const Skills: React.FC = () => {
       message.success(res.message ?? '技能已导入');
       setImportOpen(false);
       form.resetFields();
+      setArchiveFile(null);
+      setImportMode('github');
       tableRef.current?.reloadData();
     } finally {
       setImporting(false);
@@ -176,9 +175,14 @@ const Skills: React.FC = () => {
       <ExtModal
         open={importOpen}
         title="导入技能"
-        subTitle="导入后由服务端计算 Hash 锁，同名技能重复导入返回 409"
+        subTitle="支持 GitHub 地址导入或上传 zip/.skill，由后端解析 SKILL.md 并计算 Hash 锁"
         confirmLoading={importing}
-        onCancel={() => setImportOpen(false)}
+        onCancel={() => {
+          setImportOpen(false);
+          setArchiveFile(null);
+          setImportMode('github');
+          form.resetFields();
+        }}
         onOk={() => form.submit()}
         destroyOnHidden
       >
@@ -187,84 +191,48 @@ const Skills: React.FC = () => {
           onFinish={handleImport}
           layout="vertical"
         >
-          <Form.Item
-            name="name"
-            label="技能名称"
-            rules={[
-              { required: true, message: '请输入技能名称' },
-              {
-                pattern: /^[a-z0-9][a-z0-9-]{0,63}$/,
-                message: '仅小写字母/数字/连字符，需匹配 ^[a-z0-9][a-z0-9-]{0,63}$',
-              },
-            ]}
-          >
-            <Input placeholder="例如：suid" allowClear />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input placeholder="技能用途简述" allowClear />
-          </Form.Item>
-          <Form.Item
-            name="origin"
-            label="来源"
-            tooltip="github:<owner>/<repo>[/path] | local:<name> | inline"
-          >
-            <Input placeholder="例如：github:acme/skills/suid" allowClear />
-          </Form.Item>
-          <Form.Item
-            name="content"
-            label="SKILL.md 内容"
-            rules={[{ required: true, message: '请输入 SKILL.md 内容' }]}
-          >
-            <Input.TextArea rows={8} placeholder="# 技能标题\n\n技能正文（frontmatter + markdown）" />
-          </Form.Item>
-          <Form.Item label="辅助文件（可选，对应 references/**）">
-            <Form.List name="files">
-              {(fields, { add, remove }) => (
-                <>
-                  {fields.map(({ key, name: fieldName, ...restField }) => (
-                    <div
-                      key={key}
-                      className={styles.subFormCard}
-                    >
-                      <Form.Item
-                        {...restField}
-                        name={[fieldName, 'path']}
-                        label="路径"
-                        rules={[
-                          { required: true, message: '请输入路径' },
-                          {
-                            pattern: /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/,
-                            message: '禁止绝对路径或 .. 段',
-                          },
-                        ]}
-                      >
-                        <Input placeholder="例如：references/dao.md" allowClear />
-                      </Form.Item>
-                      <Form.Item
-                        {...restField}
-                        name={[fieldName, 'content']}
-                        label="内容"
-                        rules={[{ required: true, message: '请输入内容' }]}
-                      >
-                        <Input.TextArea rows={4} placeholder="辅助文件正文" />
-                      </Form.Item>
-                      <Button
-                        type="link"
-                        color="danger"
-                        icon={<DeleteOutlined />}
-                        onClick={() => remove(fieldName)}
-                      >
-                        删除该文件
-                      </Button>
-                    </div>
-                  ))}
-                  <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />} block>
-                    添加辅助文件
-                  </Button>
-                </>
-              )}
-            </Form.List>
-          </Form.Item>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <Button
+              type={importMode === 'github' ? 'primary' : 'default'}
+              onClick={() => setImportMode('github')}
+            >
+              GitHub 地址
+            </Button>
+            <Button
+              type={importMode === 'archive' ? 'primary' : 'default'}
+              onClick={() => setImportMode('archive')}
+            >
+              上传 zip/.skill
+            </Button>
+          </div>
+
+          {importMode === 'github' ? (
+            <Form.Item
+              name="githubUrl"
+              label="GitHub 地址"
+              rules={[
+                { required: true, message: '请输入 GitHub 地址' },
+                { pattern: /^https?:\/\/(www\.)?github\.com\/.+$/, message: '请输入合法的 github.com 地址' },
+              ]}
+              tooltip="支持仓库根地址、tree 地址，或直接指向 SKILL.md 的 blob 地址"
+            >
+              <Input placeholder="例如：https://github.com/acme/skills/tree/main/suid" allowClear />
+            </Form.Item>
+          ) : (
+            <div className={styles.subFormCard}>
+              <div style={{ marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>
+                请选择包含 SKILL.md 的 zip/.skill 包，后端会自动解压并导入 references 等辅助文件。
+              </div>
+              <input
+                type="file"
+                accept=".zip,.skill,application/zip"
+                onChange={(event) => setArchiveFile(event.target.files?.[0] ?? null)}
+              />
+              <div className={styles.hash} style={{ marginTop: 8 }}>
+                {archiveFile ? `已选择：${archiveFile.name}` : '未选择文件'}
+              </div>
+            </div>
+          )}
         </Form>
       </ExtModal>
 

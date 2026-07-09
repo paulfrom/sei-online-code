@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.exception.ConflictException;
+import com.changhong.onlinecode.exception.InvalidSkillImportException;
 import com.changhong.sei.core.dto.ResultData;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,5 +26,10 @@ public class PreBuildExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ResultData<Void>> handleConflict(ConflictException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ResultData.fail(e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidSkillImportException.class)
+    public ResponseEntity<ResultData<Void>> handleInvalidSkillImport(InvalidSkillImportException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ResultData.fail(e.getMessage()));
     }
 }

@@ -32,6 +32,12 @@ const routes: any[] = [
             component: './OnlineCode/ProjectDetail',
           },
           {
+            path: '/online-code/requirements',
+            name: 'onlineCodeRequirements',
+            title: 'menu.onlineCodeRequirements',
+            component: './OnlineCode/RequirementList',
+          },
+          {
             path: '/online-code/requirement',
             name: 'onlineCodeRequirement',
             title: 'menu.onlineCodeRequirement',

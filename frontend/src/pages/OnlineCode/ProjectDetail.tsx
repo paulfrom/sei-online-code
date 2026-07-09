@@ -4,11 +4,13 @@
 import React, { useEffect, useState } from 'react';
 import { history, useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { Tabs, message } from '@ead/suid';
+import { Button, Card, Tabs, message } from '@ead/suid';
 import { findOneProject } from '@/services/onlineCode';
-import type { ProjectDto } from '@/services/onlineCode';
+import type { ProjectDto, PageResult, ResultData } from '@/services/onlineCode';
+import type { RequirementDto } from '@/services/onlineCodeTypes';
+// @ts-ignore JS service module has no declaration file
+import { findRequirementsByPage } from '@/services/requirement';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
-import RequirementListTab from './RequirementListTab';
 import CodingTaskTab from './CodingTaskTab';
 import ProjectSettingsTab from './ProjectSettingsTab';
 
@@ -29,6 +31,7 @@ const ProjectDetail: React.FC = () => {
   const requestedTab = searchParams.get('tab') ?? 'plan';
   const [project, setProject] = useState<ProjectDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [requirementCount, setRequirementCount] = useState<number | null>(null);
   const { styles } = useStyles();
 
   useEffect(() => {
@@ -43,6 +46,27 @@ const ProjectDetail: React.FC = () => {
         message.error(res.message ?? '加载项目失败');
       }
       setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    let alive = true;
+    setRequirementCount(null);
+    if (!projectId) return;
+    (async () => {
+      const res = (await findRequirementsByPage({
+        pageInfo: { page: 1, rows: 1 },
+        filters: [{ fieldName: 'projectId', value: projectId, operator: 'EQ' }],
+      })) as ResultData<PageResult<RequirementDto>>;
+      if (!alive) return;
+      if (res.success && res.data) {
+        setRequirementCount(res.data.records);
+      } else {
+        message.error(res.message ?? '加载需求数量失败');
+      }
     })();
     return () => {
       alive = false;
@@ -69,7 +93,26 @@ const ProjectDetail: React.FC = () => {
     {
       key: 'requirements',
       label: '需求',
-      children: <RequirementListTab projectId={projectId} />,
+      children: (
+        <div style={{ padding: 16 }}>
+          <Card
+            title="需求概览"
+            extra={
+              <Button
+                type="primary"
+                onClick={() => history.push(`/online-code/requirements?projectId=${projectId}`)}
+              >
+                查看需求
+              </Button>
+            }
+          >
+            <p>
+              当前项目共有{' '}
+              {requirementCount === null ? '...' : `${requirementCount} 个`} 需求
+            </p>
+          </Card>
+        </div>
+      ),
     },
     {
       key: 'codingTasks',

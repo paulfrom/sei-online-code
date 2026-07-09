@@ -63,6 +63,7 @@ public class AgentService extends BaseEntityService<Agent> {
 
     @Override
     public OperateResultWithData<Agent> save(Agent agent) {
+        normalizeBuiltinFlag(agent);
         OperateResultWithData<Agent> result = super.save(agent);
         if (result != null && result.getData() != null) {
             populateSkillIds(result.getData());
@@ -119,6 +120,24 @@ public class AgentService extends BaseEntityService<Agent> {
             return OperateResult.operationFailure("内置 agent 不能删除: " + agent.getName());
         }
         return OperateResult.operationSuccess();
+    }
+
+    /**
+     * 兼容前端未回传 builtin 的更新请求：
+     * 更新时继承库中原值；新建时默认 false，避免命中 NOT NULL 约束。
+     */
+    private void normalizeBuiltinFlag(Agent agent) {
+        if (agent == null || agent.getBuiltin() != null) {
+            return;
+        }
+        if (agent.getId() == null) {
+            agent.setBuiltin(Boolean.FALSE);
+            return;
+        }
+        Agent persisted = dao.findById(agent.getId()).orElse(null);
+        agent.setBuiltin(persisted != null && persisted.getBuiltin() != null
+                ? persisted.getBuiltin()
+                : Boolean.FALSE);
     }
 
     /** 单个 agent populate skillIds（从 oc_agent_skill）。 */

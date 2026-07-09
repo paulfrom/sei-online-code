@@ -32,7 +32,7 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
   "id": "SKIL0001",
   "name": "suid",                         // unique; maps to .claude/skills/<name>/
   "description": "@ead/suid component library skill",
-  "config": { "origin": "local:suid" },   // "github:<owner>/<repo>[/path]" | "local:<name>" | "inline"
+  "config": { "origin": "local:suid" },   // "github:<owner>/<repo>[/path][#ref]" | "local:<name>" | "inline"
   "content": "# SUID Skill\n...",         // the SKILL.md body (frontmatter + markdown)
   "files": [ {"path": "references/general.md", "content": "..."} ],  // aux files (Phase 5)
   "computedHash": "sha256:ab12…",         // runtime lock: sha256 over (v1|config.origin|name|description|content)
@@ -86,7 +86,9 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
 
 | # | Method | Path | Request | Response `data` | Purpose |
 |---|--------|------|---------|-----------------|---------|
-| 16 | POST | `/api/skill/import` | `{ name, description, config, content, files[] }` | `SkillDto` | Import a skill; dedup by name (409 on conflict) |
+| 16 | POST | `/api/skill/import` | `{ name, description, config, content, files[] }` | `SkillDto` | Manual skill import; dedup by name (409 on conflict) |
+| 16a | POST | `/api/skill/import/github` | `{ url }` | `SkillDto` | Import a skill from a GitHub repo / tree / `SKILL.md` URL |
+| 16b | POST | `/api/skill/import/archive` | `multipart/form-data(file=.zip/.skill)` | `SkillDto` | Import a skill by uploading an archive; backend unzips and extracts `SKILL.md` + aux files |
 | 17 | POST | `/api/skill/findByPage` | `Search` | `PageResult<SkillDto>` | List skills |
 | 18 | GET  | `/api/skill/findOne?id=` | — | `SkillDto` | Load one skill |
 | 19 | DELETE | `/api/skill/delete?id=` | — | `void` | Delete a skill (rejected if bound to any agent) |
@@ -95,6 +97,21 @@ Ids are String-UUID (`IdGenerator.nextIdStr()`). Audit fields on read responses.
 | 22 | GET  | `/api/agent/findOne?id=` | — | `AgentDto` | Load one agent |
 | 23 | DELETE | `/api/agent/delete?id=` | — | `void` | Delete a custom agent (built-in rejected) |
 | 24 | POST | `/api/agent/skills` | `{ agentId, skillIds }` | `AgentDto` | Attach/replace an agent's bound skills |
+
+### 2.1 Skill import variants
+
+- `/api/skill/import` remains the low-level manual path for directly posting
+  `{name, description, config, content, files[]}`.
+- `/api/skill/import/github` accepts a GitHub URL in one of three forms:
+  repository root, `/tree/<ref>/<path>`, or `/blob/<ref>/<path>/SKILL.md`. The
+  backend downloads the repository archive, resolves the target skill root, and
+  persists the extracted `SKILL.md` plus non-binary aux files. `config.origin`
+  is normalized to a `github:` string.
+- `/api/skill/import/archive` accepts a user-uploaded `.zip` / `.skill`
+  archive. The backend locates the shallowest valid `SKILL.md`, treats its
+  parent directory as the skill root, ignores junk entries (dotfiles,
+  `__MACOSX`, license files), skips binary assets, and imports the remaining
+  text files as `files[]`.
 
 > Phase 2 dispatch (ep #10) is unchanged on the wire; internally DispatchService
 > now resolves `assignedAgent` → Agent and materializes its skills per task.

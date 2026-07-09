@@ -233,6 +233,23 @@ export async function importSkill(params: {
   return request({ url: `${API}/skill/import`, method: 'POST', data: params });
 }
 
+/** #16a import a skill from GitHub */
+export async function importGithubSkill(url: string): Promise<ResultData<SkillDto>> {
+  return request({ url: `${API}/skill/import/github`, method: 'POST', data: { url } });
+}
+
+/** #16b import a skill from an uploaded archive */
+export async function importSkillArchive(file: File): Promise<ResultData<SkillDto>> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request({
+    url: `${API}/skill/import/archive`,
+    method: 'POST',
+    data: formData,
+    requestType: 'form',
+  });
+}
+
 /** #17 list skills */
 export async function findSkillsByPage(search: Search): Promise<ResultData<PageResult<SkillDto>>> {
   return request({ url: `${API}/skill/findByPage`, method: 'POST', data: search });
