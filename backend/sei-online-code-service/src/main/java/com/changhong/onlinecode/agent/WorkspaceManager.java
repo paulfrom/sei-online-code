@@ -7,12 +7,18 @@ import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.service.ConfigService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.gitlab4j.api.Constants;
+import org.gitlab4j.api.GitLabApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,16 +30,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * WorkspaceManager（B35）。契约 Phase 5 §3，蓝图参照 multica {@code daemon/local_directory.go} + {@code repocache/cache.go}。
  *
  * <p>在可配置的 Workspace Root 下解析每个项目的工作区目录，语义为 <b>clone-once + reuse</b>：
  * 目录已存在即复用（后续 Build Loop 回合原地增量编辑，绝不重复 clone/生成）；不存在则按平台配置
- * 是否设置 templateGitlabUrl 决定 provision 来源——有地址走 CLONE、空则走 SCAFFOLD 生成 canonical SUID 脚手架。</p>
+ * 是否设置 templateGitlabUrl 决定 provision 来源——有地址走模板仓拉取、空则走 SCAFFOLD 生成 canonical SUID 脚手架。</p>
  *
  * <p>本实现不再停留在 compile-only：resolve 会真实创建项目物理工作区。平台自有运行物料统一落在
  * 工作区的 {@code .sei/} 目录，代码执行阶段写入 AGENTS.md / CLAUDE.md、技能目录和代码文件时，
@@ -66,6 +73,12 @@ public class WorkspaceManager {
     private final ProjectDao projectDao;
     private final ConfigService configService;
     private final ScaffoldGenerator scaffoldGenerator;
+
+    @Value("${oc.gitlab.host:}")
+    private String gitlabHost;
+
+    @Value("${oc.gitlab.token:}")
+    private String gitlabToken;
 
     public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator) {
         this.projectDao = projectDao;
@@ -193,33 +206,18 @@ public class WorkspaceManager {
     private void materializeTemplateWorkspace(PlatformConfig config, Project project, Path workspaceDir) {
         String templateUrl = config == null ? null : config.getTemplateGitlabUrl();
         if (templateUrl == null || templateUrl.isBlank()) {
-            throw new IllegalStateException("模板仓库地址为空，无法执行 clone");
+            throw new IllegalStateException("模板仓库地址为空，无法获取模板归档");
         }
-        Path cloneDir = workspaceDir.getParent().resolve(workspaceDir.getFileName() + ".template-" + UUID.randomUUID());
         try {
             Path parent = workspaceDir.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            Process process = new ProcessBuilder("git", "clone", templateUrl.trim(), cloneDir.toString())
-                    .redirectErrorStream(true)
-                    .start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int code = process.waitFor();
-            if (code != 0) {
-                throw new IllegalStateException("git clone 失败: " + output.trim());
-            }
-            generateFromTemplate(cloneDir, workspaceDir, project);
+            generateFromTemplateArchive(resolveTemplateRepo(templateUrl), workspaceDir, project);
             LOGGER.info("workspace: 已从模板生成 dir={}, template={}", workspaceDir, templateUrl);
         } catch (IOException e) {
             deleteTree(workspaceDir);
-            throw new IllegalStateException("执行 git clone 失败: " + templateUrl, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            deleteTree(workspaceDir);
-            throw new IllegalStateException("执行 git clone 被中断: " + templateUrl, e);
-        } finally {
-            deleteTree(cloneDir);
+            throw new IllegalStateException("拉取模板仓归档失败: " + templateUrl, e);
         }
     }
 
@@ -261,6 +259,115 @@ public class WorkspaceManager {
             content = replacePlaceholders(content, effectiveData);
             Files.writeString(targetFile, content, StandardCharsets.UTF_8);
         }
+    }
+
+    private void generateFromTemplateArchive(TemplateRepo templateRepo, Path workspaceDir, Project project) throws IOException {
+        Files.createDirectories(workspaceDir);
+        Map<String, String> replaceData = buildReplaceData(project);
+        Map<String, String> backendReplaceData = new HashMap<>(replaceData);
+        putPackageData(backendReplaceData, derivePackageName(project));
+        String resolvedHost = nullToEmpty(templateRepo.host(), nullToEmpty(gitlabHost));
+
+        try (InputStream is = getGitLabApi(resolvedHost).getRepositoryApi()
+                .getRepositoryArchive(templateRepo.projectPath(), null, Constants.ArchiveFormat.ZIP);
+             BufferedInputStream bis = new BufferedInputStream(is);
+             ZipInputStream zis = new ZipInputStream(bis)) {
+
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    continue;
+                }
+
+                String relative = normalizeArchiveEntry(entry.getName());
+                if (relative == null || "template_config.json".equals(relative)) {
+                    continue;
+                }
+
+                Map<String, String> effectiveData = relative.startsWith("backend/") ? backendReplaceData : replaceData;
+                String resolvedRelative = replacePlaceholders(relative, effectiveData);
+                Path targetFile = workspaceDir.resolve(resolvedRelative);
+                Path targetParent = targetFile.getParent();
+                if (targetParent != null) {
+                    Files.createDirectories(targetParent);
+                }
+
+                byte[] contentBytes = readAllBytes(zis);
+                if (isBinaryFile(targetFile.getFileName().toString())) {
+                    Files.write(targetFile, contentBytes);
+                    continue;
+                }
+
+                String content = replacePlaceholders(new String(contentBytes, StandardCharsets.UTF_8), effectiveData);
+                Files.writeString(targetFile, content, StandardCharsets.UTF_8);
+            }
+        } catch (RuntimeException e) {
+            deleteTree(workspaceDir);
+            throw e;
+        } catch (Exception e) {
+            deleteTree(workspaceDir);
+            throw new IllegalStateException("处理模板仓归档失败: " + templateRepo.projectPath(), e);
+        }
+    }
+
+    /**
+     * 创建 GitLab 连接并调大读取超时，避免拉取模板归档时在较大仓库上过早超时。
+     */
+    public GitLabApi getGitLabApi(String host) {
+        String resolvedHost = nullToEmpty(host);
+        if (resolvedHost.isBlank()) {
+            throw new IllegalStateException("未配置 GitLab Host，无法初始化 GitLabApi");
+        }
+        if (nullToEmpty(gitlabToken).isBlank()) {
+            throw new IllegalStateException("未配置 oc.gitlab.token，无法拉取模板仓归档");
+        }
+        try {
+            GitLabApi gitLabApi = new GitLabApi(resolvedHost, gitlabToken.trim());
+            gitLabApi.setRequestTimeout(60 * 1000, 120 * 1000);
+            return gitLabApi;
+        } catch (Exception e) {
+            throw new RuntimeException("获取Gitlab接口异常", e);
+        }
+    }
+
+    static TemplateRepo resolveTemplateRepo(String templateGitlabUrl) {
+        String raw = templateGitlabUrl == null ? "" : templateGitlabUrl.trim();
+        if (raw.isBlank()) {
+            throw new IllegalStateException("模板仓库地址为空，无法解析 GitLab 项目");
+        }
+        if (raw.startsWith("http://") || raw.startsWith("https://")) {
+            java.net.URI uri = java.net.URI.create(raw);
+            String path = uri.getPath() == null ? "" : uri.getPath().replaceAll("^/+", "");
+            if (path.endsWith(".git")) {
+                path = path.substring(0, path.length() - 4);
+            }
+            if (path.isBlank()) {
+                throw new IllegalStateException("模板仓库地址缺少项目路径: " + raw);
+            }
+            return new TemplateRepo(uri.getScheme() + "://" + uri.getAuthority(), path);
+        }
+        return new TemplateRepo("", raw.replaceAll("^/+", "").replaceAll("\\.git$", ""));
+    }
+
+    private String normalizeArchiveEntry(String originalPath) {
+        if (originalPath == null || originalPath.isBlank() || originalPath.contains("..") || originalPath.startsWith("/")) {
+            return null;
+        }
+        String[] parts = originalPath.split("/");
+        if (parts.length <= 1) {
+            return null;
+        }
+        return String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length));
+    }
+
+    private byte[] readAllBytes(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int len;
+        while ((len = inputStream.read(buffer)) != -1) {
+            output.write(buffer, 0, len);
+        }
+        return output.toByteArray();
     }
 
     private Map<String, String> buildReplaceData(Project project) {
@@ -492,5 +599,8 @@ public class WorkspaceManager {
             String workspacePath,
             String createdAt
     ) {
+    }
+
+    record TemplateRepo(String host, String projectPath) {
     }
 }
