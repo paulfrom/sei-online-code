@@ -22,6 +22,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DetailedDesignService.class);
+    private static final Pattern MODULE_TABLE_ROW =
+            Pattern.compile("^\\|\\s*([^|\\s][^|]*)\\s*\\|\\s*([^|][^|]*)\\s*\\|\\s*([^|]*)\\|\\s*$");
 
     private final DetailedDesignDao dao;
     private final DetailedDesignAgentService detailedDesignAgentService;
@@ -168,28 +172,26 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
     }
 
     /**
-     * 按概览设计内容扁平化创建详细设计（占位实现）。
+     * 按概览设计中的模块清单创建模块级详细设计。
      *
      * @param overviewDesign 概览设计
      */
     @Transactional(rollbackFor = Exception.class)
     public void createFromOverviewDesign(com.changhong.onlinecode.entity.OverviewDesign overviewDesign) {
-        List<FeatureRef> features = parseFeatures(overviewDesign.getContent());
-        if (features.isEmpty()) {
-            features = List.of(new FeatureRef("default", "默认模块", "default", "默认功能"));
+        List<ModuleRef> modules = parseModules(overviewDesign.getContent());
+        if (modules.isEmpty()) {
+            modules = List.of(new ModuleRef("default-module", "默认模块"));
         }
-        for (FeatureRef f : features) {
+        for (ModuleRef module : modules) {
             DetailedDesign design = new DetailedDesign();
             design.setProjectId(overviewDesign.getProjectId());
             design.setRequirementId(overviewDesign.getRequirementId());
             design.setOverviewDesignId(overviewDesign.getId());
-            design.setModuleId(f.moduleId);
-            design.setModuleTitle(f.moduleTitle);
-            design.setFeatureId(f.featureId);
-            design.setFeatureTitle(f.featureTitle);
+            design.setModuleId(module.moduleId);
+            design.setModuleTitle(module.moduleTitle);
             design.setStatus(DetailedDesignStatus.GENERATING);
             design.setVersion(1);
-            design.setContent("{\"placeholder\":true}");
+            design.setContent("# 详细设计: " + module.moduleTitle);
             design.setLastFailedAt(new Date());
             dao.save(design);
             String designId = design.getId();
@@ -204,29 +206,27 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
      */
     @Transactional(rollbackFor = Exception.class)
     public void createMissingFromOverviewDesign(com.changhong.onlinecode.entity.OverviewDesign overviewDesign) {
-        List<FeatureRef> expected = parseFeatures(overviewDesign.getContent());
+        List<ModuleRef> expected = parseModules(overviewDesign.getContent());
         if (expected.isEmpty()) {
-            expected = List.of(new FeatureRef("default", "默认模块", "default", "默认功能"));
+            expected = List.of(new ModuleRef("default-module", "默认模块"));
         }
         List<DetailedDesign> existing = dao.findByOverviewDesignId(overviewDesign.getId());
-        Set<String> existingFeatureIds = existing.stream()
-                .map(DetailedDesign::getFeatureId)
+        Set<String> existingModuleIds = existing.stream()
+                .map(DetailedDesign::getModuleId)
                 .collect(Collectors.toSet());
-        for (FeatureRef f : expected) {
-            if (existingFeatureIds.contains(f.featureId)) {
+        for (ModuleRef module : expected) {
+            if (existingModuleIds.contains(module.moduleId)) {
                 continue;
             }
             DetailedDesign design = new DetailedDesign();
             design.setProjectId(overviewDesign.getProjectId());
             design.setRequirementId(overviewDesign.getRequirementId());
             design.setOverviewDesignId(overviewDesign.getId());
-            design.setModuleId(f.moduleId);
-            design.setModuleTitle(f.moduleTitle);
-            design.setFeatureId(f.featureId);
-            design.setFeatureTitle(f.featureTitle);
+            design.setModuleId(module.moduleId);
+            design.setModuleTitle(module.moduleTitle);
             design.setStatus(DetailedDesignStatus.GENERATING);
             design.setVersion(1);
-            design.setContent("{\"placeholder\":true}");
+            design.setContent("# 详细设计: " + module.moduleTitle);
             design.setLastFailedAt(new Date());
             dao.save(design);
             String designId = design.getId();
@@ -234,8 +234,8 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         }
     }
 
-    private List<FeatureRef> parseFeatures(String content) {
-        List<FeatureRef> list = new ArrayList<>();
+    List<ModuleRef> parseModules(String content) {
+        List<ModuleRef> list = new ArrayList<>();
         if (content == null || content.isBlank()) {
             return list;
         }
@@ -246,23 +246,67 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
                 for (JsonNode module : modules) {
                     String moduleId = module.path("moduleId").asText("default");
                     String moduleTitle = module.path("moduleTitle").asText(moduleId);
-                    JsonNode features = module.path("features");
-                    if (features.isArray()) {
-                        for (JsonNode feature : features) {
-                            String featureId = feature.path("featureId").asText("default");
-                            String featureTitle = feature.path("featureTitle").asText(featureId);
-                            list.add(new FeatureRef(moduleId, moduleTitle, featureId, featureTitle));
-                        }
-                    }
+                    list.add(new ModuleRef(moduleId, moduleTitle));
                 }
+                return deduplicateModules(list);
             }
         } catch (Exception e) {
-            LOGGER.warn("解析概览设计 content 失败，回退到默认 feature: {}", e.getMessage());
+            LOGGER.debug("概览设计 content 非 legacy JSON，继续按 Markdown 解析: {}", e.getMessage());
         }
-        return list;
+        boolean inModuleTable = false;
+        for (String line : content.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("| moduleId | moduleTitle | summary |")) {
+                inModuleTable = true;
+                continue;
+            }
+            if (!inModuleTable) {
+                continue;
+            }
+            if (trimmed.isBlank()) {
+                break;
+            }
+            if (trimmed.matches("^\\|\\s*-+\\s*\\|\\s*-+\\s*\\|\\s*-+\\s*\\|\\s*$")) {
+                continue;
+            }
+            Matcher matcher = MODULE_TABLE_ROW.matcher(trimmed);
+            if (matcher.matches()) {
+                String moduleId = matcher.group(1).trim();
+                String moduleTitle = matcher.group(2).trim();
+                if ("moduleId".equalsIgnoreCase(moduleId)) {
+                    continue;
+                }
+                list.add(new ModuleRef(moduleId, moduleTitle.isBlank() ? moduleId : moduleTitle));
+                continue;
+            }
+            if (trimmed.startsWith("|")) {
+                LOGGER.warn("模块清单行格式无法解析，已跳过: {}", trimmed);
+                continue;
+            }
+            break;
+        }
+        return deduplicateModules(list);
     }
 
-    private record FeatureRef(String moduleId, String moduleTitle, String featureId, String featureTitle) {
+    private List<ModuleRef> deduplicateModules(List<ModuleRef> modules) {
+        List<ModuleRef> deduplicated = new ArrayList<>();
+        Set<String> seen = modules.stream()
+                .map(ModuleRef::moduleId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        for (ModuleRef module : modules) {
+            if (module.moduleId == null || module.moduleId.isBlank()) {
+                continue;
+            }
+            if (!seen.remove(module.moduleId)) {
+                continue;
+            }
+            deduplicated.add(module);
+        }
+        return deduplicated;
+    }
+
+    record ModuleRef(String moduleId, String moduleTitle) {
     }
 
     private boolean hasConfirmedDetailedDesigns(String overviewDesignId) {
@@ -284,8 +328,6 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         dto.setOverviewDesignId(design.getOverviewDesignId());
         dto.setModuleId(design.getModuleId());
         dto.setModuleTitle(design.getModuleTitle());
-        dto.setFeatureId(design.getFeatureId());
-        dto.setFeatureTitle(design.getFeatureTitle());
         dto.setStatus(design.getStatus());
         dto.setVersion(design.getVersion());
         dto.setContent(design.getContent());

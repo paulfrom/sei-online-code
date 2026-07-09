@@ -52,7 +52,7 @@ export type DetailedDesignStatus =
   | 'CONFIRMED'
   | 'FAILED';
 
-/** Module/feature scoped detailed design. */
+/** Module-scoped detailed design. */
 export interface DetailedDesignDto {
   id: string;
   projectId: string;
@@ -60,8 +60,6 @@ export interface DetailedDesignDto {
   overviewDesignId: string;
   moduleId: string;
   moduleTitle: string;
-  featureId: string;
-  featureTitle: string;
   status: DetailedDesignStatus;
   version: number;
   content?: string | null;

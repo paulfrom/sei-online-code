@@ -33,19 +33,13 @@ public class DetailedDesignDto extends BaseEntityDto {
     @Schema(description = "模块标题")
     private String moduleTitle;
 
-    @Schema(description = "功能 ID")
-    private String featureId;
-
-    @Schema(description = "功能标题")
-    private String featureTitle;
-
     @Schema(description = "状态")
     private DetailedDesignStatus status;
 
     @Schema(description = "版本号")
     private Integer version;
 
-    @Schema(description = "内容（JSON 字符串）")
+    @Schema(description = "内容（Markdown 文档）")
     private String content;
 
     @Schema(description = "失败摘要")

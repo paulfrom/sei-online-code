@@ -104,12 +104,12 @@ public class OverviewDesignAgentService {
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
-        future.thenApply(json -> {
-                    if (json == null || json.isBlank()) {
+        future.thenApply(result -> {
+                    if (result == null || result.isBlank()) {
                         LOGGER.warn("overview-design-agent: CLI 返回空，使用 fallback overviewId={}", overviewDesignId);
                         return generatePlaceholderContent(requirement);
                     }
-                    return extractJsonObject(json);
+                    return normalizeMarkdown(result);
                 })
                 .thenAccept(content -> {
                     overview.setContent(content);
@@ -132,17 +132,36 @@ public class OverviewDesignAgentService {
         String hint = modifyHint == null ? "" : modifyHint;
         return "PRD：" + requirement.getPrdContent()
                 + "\n修改提示：" + hint
-                + "\n输出概览设计 JSON 骨架：modules[]{moduleId,title,summary,features[]{featureId,title,outline}}"
-                + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
-                + "modules/features 为数组，moduleId/featureId 为字符串";
+                + "\n请基于 PRD 输出完整的概览设计 Markdown 文档。"
+                + "\n严格要求："
+                + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
+                + "\n2. 文档必须包含一个模块清单表格，列名固定为：| moduleId | moduleTitle | summary |。"
+                + "\n3. 模块清单表格中的每一行代表一个后续需要单独生成详细设计的模块。"
+                + "\n4. 除模块清单外，还需补充总体架构、模块职责、关键流程、接口协作、数据边界、风险与约束。";
     }
 
     private String generatePlaceholderContent(Requirement requirement) {
-        return "{\"modules\":[{\"moduleId\":\"default\",\"moduleTitle\":\"默认模块\","
-                + "\"summary\":\"\",\"features\":[{\"featureId\":\"default\",\"featureTitle\":\"默认功能\",\"outline\":\"\"}]}]}";
+        return "# 概览设计\n\n"
+                + "## 1. 设计目标\n\n"
+                + "基于 PRD 将需求拆分为可独立设计和编码的模块。\n\n"
+                + "## 2. 模块清单\n\n"
+                + "| moduleId | moduleTitle | summary |\n"
+                + "| --- | --- | --- |\n"
+                + "| default-module | 默认模块 | 需要进一步补充的默认模块 |\n\n"
+                + "## 3. 总体架构\n\n"
+                + "待补充。\n\n"
+                + "## 4. 模块职责说明\n\n"
+                + "### default-module 默认模块\n\n"
+                + "- 职责：待补充\n"
+                + "- 边界：待补充\n"
+                + "- 依赖：待补充\n\n"
+                + "## 5. 关键流程\n\n"
+                + "待补充。\n\n"
+                + "## 6. 风险与约束\n\n"
+                + "待补充。\n";
     }
 
-    private static String extractJsonObject(String raw) {
+    private static String normalizeMarkdown(String raw) {
         if (raw == null) {
             return null;
         }
@@ -155,11 +174,6 @@ public class OverviewDesignAgentService {
             if (t.endsWith("```")) {
                 t = t.substring(0, t.length() - 3);
             }
-        }
-        int start = t.indexOf('{');
-        int end = t.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return t.substring(start, end + 1);
         }
         return t;
     }

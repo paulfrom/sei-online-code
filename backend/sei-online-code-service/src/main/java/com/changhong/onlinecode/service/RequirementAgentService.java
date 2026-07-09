@@ -15,7 +15,6 @@ import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -52,7 +51,6 @@ public class RequirementAgentService {
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final FailureInfoSupport failureInfoSupport;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAgentService(RequirementDao requirementDao,
                                    AgentService agentService,
@@ -110,12 +108,12 @@ public class RequirementAgentService {
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
-        future.thenApply(json -> {
-                    if (json == null || json.isBlank()) {
+        future.thenApply(result -> {
+                    if (result == null || result.isBlank()) {
                         LOGGER.warn("prd-agent: CLI 返回空，使用 fallback requirementId={}", requirementId);
                         return generatePlaceholderPrd(requirement, prompt);
                     }
-                    return extractJsonObject(json);
+                    return normalizeMarkdown(result);
                 })
                 .thenAccept(content -> {
                     requirement.setPrdContent(content);
@@ -140,16 +138,32 @@ public class RequirementAgentService {
      *
      * @param requirement 需求实体
      * @param prompt      可选提示词
-     * @return JSON 字符串
+     * @return Markdown 文档
      */
     private String generatePlaceholderPrd(Requirement requirement, String prompt) {
-        String hint = prompt == null ? "" : "，补充要求：" + prompt;
-        return "{"
-                + "\"title\":\"" + escapeJson(requirement.getTitle()) + "\","
-                + "\"overview\":\"" + escapeJson(requirement.getDescription()) + "\","
-                + "\"modules\":[],"
-                + "\"hint\":\"" + escapeJson(hint) + "\""
-                + "}";
+        StringBuilder sb = new StringBuilder();
+        sb.append("# PRD: ").append(nullToEmpty(requirement.getTitle())).append("\n\n");
+        sb.append("## 1. 需求概述\n\n");
+        sb.append(nullToEmpty(requirement.getDescription())).append("\n\n");
+        sb.append("## 2. 业务目标\n\n");
+        sb.append("- 明确本次需求要解决的问题。\n");
+        sb.append("- 输出后续概览设计与模块详细设计的依据。\n\n");
+        sb.append("## 3. 范围\n\n");
+        sb.append("### 3.1 In Scope\n\n");
+        sb.append("- 待补充\n\n");
+        sb.append("### 3.2 Out of Scope\n\n");
+        sb.append("- 待补充\n\n");
+        sb.append("## 4. 用户场景\n\n");
+        sb.append("- 待补充\n\n");
+        sb.append("## 5. 功能需求\n\n");
+        sb.append("- 待补充\n\n");
+        sb.append("## 6. 非功能需求\n\n");
+        sb.append("- 待补充\n\n");
+        if (prompt != null && !prompt.isBlank()) {
+            sb.append("## 7. 补充提示\n\n");
+            sb.append(prompt).append('\n');
+        }
+        return sb.toString();
     }
 
     private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint) {
@@ -159,12 +173,14 @@ public class RequirementAgentService {
                 + "\n需求标题：" + requirement.getTitle()
                 + "\n需求描述：" + requirement.getDescription()
                 + "\n修改提示：" + hint
-                + "\n输出 PRD JSON 骨架：title/overview/modules[]{moduleId,title,features[]{featureId,title}}/hint"
-                + "\n严格要求：只输出一个 JSON 对象，不要 markdown 围栏，不要任何解释文字；"
-                + "title/overview 为字符串，modules/features 为数组，moduleId/featureId 为字符串";
+                + "\n请输出一个完整的 PRD Markdown 文档。"
+                + "\n严格要求："
+                + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
+                + "\n2. 至少包含：需求概述、业务目标、范围、用户场景、功能需求、非功能需求、验收标准、风险与待确认项。"
+                + "\n3. 文档内容要可直接进入评审，而不是提纲或骨架。";
     }
 
-    private static String extractJsonObject(String raw) {
+    private static String normalizeMarkdown(String raw) {
         if (raw == null) {
             return null;
         }
@@ -178,22 +194,7 @@ public class RequirementAgentService {
                 t = t.substring(0, t.length() - 3);
             }
         }
-        int start = t.indexOf('{');
-        int end = t.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return t.substring(start, end + 1);
-        }
         return t;
-    }
-
-    private static String escapeJson(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r");
     }
 
     private static String rootMessage(Throwable throwable) {
@@ -202,6 +203,10 @@ public class RequirementAgentService {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private Path materializeSkills(Agent agent) {

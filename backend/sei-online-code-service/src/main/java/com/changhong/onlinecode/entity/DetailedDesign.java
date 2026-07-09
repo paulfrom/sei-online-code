@@ -18,7 +18,7 @@ import lombok.EqualsAndHashCode;
 import java.util.Date;
 
 /**
- * DetailedDesign 实体。按 feature 拆分的详细设计。
+ * DetailedDesign 实体。按模块拆分的详细设计。
  *
  * @author sei-online-code
  */
@@ -50,12 +50,6 @@ public class DetailedDesign extends BaseAuditableEntity {
 
     @Column(name = "module_title", length = 200)
     private String moduleTitle;
-
-    @Column(name = "feature_id", nullable = false, length = 128)
-    private String featureId;
-
-    @Column(name = "feature_title", length = 200)
-    private String featureTitle;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
@@ -92,6 +86,6 @@ public class DetailedDesign extends BaseAuditableEntity {
     @Override
     @Transient
     public String getDisplay() {
-        return featureTitle;
+        return moduleTitle;
     }
 }

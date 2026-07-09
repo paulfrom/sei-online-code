@@ -3,6 +3,12 @@
 > 本契约定义需求驱动重构后的前后端接口：
 > `Project -> Requirement(PRD) -> OverviewDesign -> DetailedDesign -> CodingTask -> Run`。
 > 旧 `Plan/Spec/FeatureDesign/Task` 接口保留但不进入新 UI 主路径。
+>
+> 新链路的内容约束：
+> - `PRD` 产物是一份完整的 Markdown 文档。
+> - `OverviewDesign` 产物是基于 PRD 生成的一份完整 Markdown 文档，并明确列出模块清单。
+> - `DetailedDesign` 产物是基于 `OverviewDesign` 按模块生成的独立 Markdown 文档，一条记录对应一个模块。
+> - `CodingTask` 以模块级 `DetailedDesign` 为直接编码依据，并附带上游 `PRD` 与 `OverviewDesign` 作为上下文。
 
 ## 1. Domain Model & Status Enums
 
@@ -40,7 +46,7 @@ GENERATING -> DRAFT -> CONFIRMED
 
 - `GENERATING`: 概览设计生成中。
 - `DRAFT`: 生成完成，待确认/编辑/重生成。
-- `CONFIRMED`: 已确认，已拆分为 feature 级详细设计；概览设计冻结。
+- `CONFIRMED`: 已确认，已拆分为模块级详细设计；概览设计冻结。
 - `FAILED`: 生成失败。
 
 ### 1.4 DetailedDesignStatus
@@ -111,7 +117,7 @@ PENDING -> RUNNING -> SUCCEEDED
   "description": "string",
   "status": "PRD_GENERATING | PRD_REVIEW | PRD_CONFIRMED | FAILED",
   "prdVersion": "integer",
-  "prdContent": "object | string",
+  "prdContent": "string",
   "failureCode": "string?",
   "failureSummary": "string?",
   "createdDate": "datetime",
@@ -128,20 +134,7 @@ PENDING -> RUNNING -> SUCCEEDED
   "requirementId": "string",
   "status": "GENERATING | DRAFT | CONFIRMED | FAILED",
   "version": "integer",
-  "content": {
-    "modules": [
-      {
-        "moduleId": "string",
-        "moduleTitle": "string",
-        "features": [
-          {
-            "featureId": "string",
-            "featureTitle": "string"
-          }
-        ]
-      }
-    ]
-  },
+  "content": "string",
   "failureSummary": "string?",
   "createdDate": "datetime",
   "lastEditedDate": "datetime"
@@ -158,16 +151,17 @@ PENDING -> RUNNING -> SUCCEEDED
   "overviewDesignId": "string",
   "moduleId": "string",
   "moduleTitle": "string",
-  "featureId": "string",
-  "featureTitle": "string",
   "status": "GENERATING | REVIEW | CONFIRMED | FAILED",
   "version": "integer",
-  "content": "object | string",
+  "content": "string",
   "failureSummary": "string?",
   "createdDate": "datetime",
   "lastEditedDate": "datetime"
 }
 ```
+
+说明：
+- `content` 为模块详细设计 Markdown 文档，不再要求 JSON 骨架。
 
 ### 2.5 CodingTaskDto
 

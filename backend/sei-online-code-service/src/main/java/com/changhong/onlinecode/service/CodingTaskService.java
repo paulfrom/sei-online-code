@@ -76,7 +76,7 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         task.setDetailedDesignId(design.getId());
         task.setDetailedDesignVersion(design.getVersion());
         task.setStatus(CodingTaskStatus.PENDING);
-        task.setTitle(design.getFeatureTitle());
+        task.setTitle(firstNonBlank(design.getModuleTitle(), "未命名模块"));
         task.setDescription(design.getContent());
         dao.save(task);
 
@@ -186,5 +186,14 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         dto.setCreatedDate(task.getCreatedDate());
         dto.setLastEditedDate(task.getLastEditedDate());
         return dto;
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return "";
     }
 }

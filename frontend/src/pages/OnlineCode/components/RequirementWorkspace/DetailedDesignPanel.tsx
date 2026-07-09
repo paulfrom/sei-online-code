@@ -1,5 +1,5 @@
 /**
- * Detailed design panel: list/table of module/feature designs with an editable drawer.
+ * Detailed design panel: module-scoped designs with an editable drawer.
  */
 import React, { useMemo, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
@@ -53,7 +53,7 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
 
   const openEdit = (record: DetailedDesignDto) => {
     setEditing(record);
-    setDraftTitle(record.featureTitle || record.moduleTitle || '');
+    setDraftTitle(record.moduleTitle || '');
     setDraftContent(record.content ?? '');
     setDraftStatus(record.status);
   };
@@ -109,12 +109,6 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
       dataIndex: 'moduleTitle',
       render: (value: string | null | undefined, record: DetailedDesignDto) =>
         value || record.moduleId || '-',
-    },
-    {
-      title: '功能',
-      dataIndex: 'featureTitle',
-      render: (value: string | null | undefined, record: DetailedDesignDto) =>
-        value || record.featureId || '-',
     },
     {
       title: '状态',
@@ -188,7 +182,7 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
                 <Input
                   value={draftTitle}
                   onChange={(e) => setDraftTitle(e.target.value)}
-                  placeholder="功能标题"
+                  placeholder="模块标题"
                 />
               </Form.Item>
               <Form.Item label="状态">

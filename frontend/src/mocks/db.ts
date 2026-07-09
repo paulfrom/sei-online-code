@@ -250,8 +250,6 @@ export interface DetailedDesignDto {
   overviewDesignId: string;
   moduleId: string;
   moduleTitle: string;
-  featureId: string;
-  featureTitle: string;
   status: 'GENERATING' | 'REVIEW' | 'CONFIRMED' | 'FAILED';
   version: number;
   content: string;
@@ -476,11 +474,25 @@ export function createRequirement(projectId: string, title: string, description:
   db.requirements.set(requirement.id, requirement);
   setTimeout(() => {
     requirement.status = 'PRD_REVIEW';
-    requirement.prdContent = JSON.stringify({
-      title,
-      overview: description,
-      modules: [],
-    });
+    requirement.prdContent = `# PRD: ${title}
+
+## 1. 需求概述
+
+${description}
+
+## 2. 业务目标
+
+- 明确需求目标
+- 为概览设计和模块详细设计提供依据
+
+## 3. 功能需求
+
+- 待补充
+
+## 4. 验收标准
+
+- 待补充
+`;
     requirement.lastEditedDate = now();
   }, 500);
   return requirement;
@@ -507,15 +519,22 @@ export function confirmRequirementPrd(id: string): OverviewDesignDto | null {
   db.overviewDesigns.set(overview.id, overview);
   setTimeout(() => {
     overview.status = 'DRAFT';
-    overview.content = JSON.stringify({
-      modules: [
-        {
-          moduleId: 'default',
-          moduleTitle: '默认模块',
-          features: [{ featureId: 'default', featureTitle: '默认功能' }],
-        },
-      ],
-    });
+    overview.content = `# 概览设计
+
+## 1. 设计目标
+
+基于 PRD 将需求拆分为按模块落地的实现方案。
+
+## 2. 模块清单
+
+| moduleId | moduleTitle | summary |
+| --- | --- | --- |
+| default-module | 默认模块 | 默认模块的职责待补充 |
+
+## 3. 总体架构
+
+待补充。
+`;
     overview.lastEditedDate = now();
   }, 500);
   return overview;
@@ -534,13 +553,24 @@ export function confirmOverviewDesignMock(id: string): DetailedDesignDto[] {
     projectId: overview.projectId,
     requirementId: overview.requirementId,
     overviewDesignId: overview.id,
-    moduleId: 'default',
+    moduleId: 'default-module',
     moduleTitle: '默认模块',
-    featureId: 'default',
-    featureTitle: '默认功能',
     status: 'REVIEW',
     version: 1,
-    content: JSON.stringify({ placeholder: true }),
+    content: `# 详细设计: 默认模块
+
+## 1. 模块目标
+
+默认模块的详细设计待补充。
+
+## 2. 职责边界
+
+- 待补充
+
+## 3. 接口设计
+
+- 待补充
+`,
     createdDate: ts,
     lastEditedDate: ts,
   };
@@ -563,7 +593,7 @@ export function confirmDetailedDesignMock(id: string): CodingTaskDto | null {
     detailedDesignId: design.id,
     detailedDesignVersion: design.version,
     status: 'PENDING',
-    title: design.featureTitle,
+    title: design.moduleTitle,
     description: design.content,
     fileScope: [],
     createdDate: ts,

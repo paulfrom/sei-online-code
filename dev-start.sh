@@ -6,7 +6,7 @@
 #
 # 前置依赖（本脚本只检查、不自动创建）：
 #   - PostgreSQL 容器 pg17           监听 5433，已导入 db/migration V1–V5
-#   - Redis 容器     sei-local-redis 监听 6379（sei-core 多级缓存强依赖）
+#   - Redis 容器     redis           监听 6379（sei-core 多级缓存强依赖，事先常驻运行）
 # 端口：后端 8091 / 前端 8000
 set -euo pipefail
 
@@ -40,8 +40,8 @@ check_container() {
 }
 command -v docker >/dev/null 2>&1 || { err "未找到 docker，无法校验 pg17 / redis 依赖。"; exit 1; }
 check_container pg17
-check_container sei-local-redis
-log "依赖容器 pg17、sei-local-redis 均在运行。"
+check_container redis
+log "依赖容器 pg17、redis 均在运行。"
 
 # --- 本地配置：缺失时自动生成模板 ---
 if [ ! -f "$LOCAL_CFG_FILE" ]; then
