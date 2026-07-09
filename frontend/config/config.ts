@@ -31,6 +31,9 @@ export default defineConfig({
       react: {
         singleton: true,
       },
+      'react-dom': {
+        singleton: true,
+      },
       dayjs: {
         singleton: true,
       },

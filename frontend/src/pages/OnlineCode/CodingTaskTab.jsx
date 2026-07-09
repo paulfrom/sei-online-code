@@ -1,7 +1,7 @@
 /**
  * Coding task list tab inside project detail.
  */
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import {
   Button,
   ExtTable,
@@ -99,14 +99,24 @@ const CodingTaskTab = ({ projectId }) => {
     { title: '创建时间', dataIndex: 'createdDate', width: 170, dataType: 'datetime' },
   ];
 
-  const buildSearch = (pageSearch) => ({
-    ...pageSearch,
-    filters: [
-      ...(pageSearch.filters || []),
-      { fieldName: 'projectId', value: projectId, operator: 'EQ' },
-      ...(statusFilter ? [{ fieldName: 'status', value: statusFilter, operator: 'EQ' }] : []),
-    ],
-  });
+  const cascade = useMemo(() => {
+    const filters = [];
+    if (projectId) {
+      filters.push({
+        fieldName: 'projectId',
+        operator: 'EQ',
+        value: projectId,
+      });
+    }
+    // if (currentUser?.account) {
+    //   filters.push({
+    //     fieldName: 'creatorAccount',
+    //     operator: 'EQ',
+    //     value: currentUser.account,
+    //   });
+    // }
+    return { filters };
+  }, [projectId]);
 
   return (
     <div
@@ -133,13 +143,13 @@ const CodingTaskTab = ({ projectId }) => {
           ref={tableRef}
           rowKey="id"
           columns={columns}
+          cascade={cascade}
           store={{
             url: CODING_TASK_FIND_BY_PAGE_URL,
             type: 'POST',
           }}
           remotePaging
           searchProperties={['title']}
-          beforeLoad={buildSearch}
         />
       </div>
       <Modal

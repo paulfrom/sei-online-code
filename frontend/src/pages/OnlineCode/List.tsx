@@ -34,7 +34,7 @@ const ProjectList: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const goProjectDetail = (record: ProjectDto) => {
-    history.push(`/online-code/requirements?projectId=${record.id}`);
+    history.push(`/online-code/project?projectId=${record.id}`);
   };
 
   const handleRowAction = (record: ProjectDto) => {
@@ -49,9 +49,6 @@ const ProjectList: React.FC = () => {
       dataIndex: 'id',
       width: 110,
       render: (_id: string, record: ProjectDto) => (
-        // actionType="title" so the dynamic label renders as visible button text;
-        // ActionButton defaults to actionType="icon" which suppresses `title` to a
-        // tooltip — without an icon the button would render empty (invisible).
         <ActionButton
           actionType="title"
           title={rowActionLabel(record)}

@@ -14,7 +14,6 @@ import {
   Spin,
   Tag,
 } from '@ead/suid';
-import type { FormInstance } from '@ead/suid';
 import {
   edit,
   getLatest,
