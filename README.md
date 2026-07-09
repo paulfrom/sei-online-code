@@ -11,7 +11,7 @@ sei-online-code/
 │   └── sei-online-code-service/   ← 业务服务实现
 ├── frontend/                      ← 前端（React + UmiJS + @ead/suid）
 ├── cicd/                          ← cicd相关配置
-└── .claude/skills/                ← AI skill 定义
+└── .agent/skills/                ← AI skill 定义
 ```
 
 ## AI 编程工具

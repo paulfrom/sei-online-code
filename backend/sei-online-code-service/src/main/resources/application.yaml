@@ -1,7 +1,3 @@
-# 本地配置（去 nacos，全部走本地配置）。最小集，缺项按启动报错补。
-server:
-  port: 8081
-
 spring:
   autoconfigure:
     exclude:
@@ -18,7 +14,7 @@ spring:
       - com.alibaba.cloud.nacos.NacosConfigAutoConfiguration
       - com.alibaba.cloud.nacos.endpoint.NacosConfigEndpointAutoConfiguration
   datasource:
-    url: jdbc:postgresql://localhost:5433/sei-online-code
+    url: jdbc:postgresql://192.168.0.2:5433/sei-online-code
     username: postgres
     password: lslin@32
     driver-class-name: org.postgresql.Driver
@@ -28,14 +24,17 @@ spring:
     open-in-view: false
   data:
     redis:
-      host: localhost
+      host: 192.168.0.2
       port: 6379
   kafka:
     bootstrap-servers: localhost:9092
   freemarker:
     check-template-location: false
 
+
 logging:
   level:
     com.changhong: INFO
     org.hibernate.SQL: WARN
+server:
+  port: 8090

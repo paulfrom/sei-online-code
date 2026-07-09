@@ -36,8 +36,11 @@
 - Frontend MUST NOT reference backend internals (backend)
 - Backend MUST NOT reference frontend code (frontend)
 
+## 租户隔离
+
+- 本项目不进行租户隔离（单租户 / 无 `tenant_code` 维度）：不引入 `ITenant`、不带 `tenant_code` 列、不做多租户上下文过滤
+- `eadp-backend` skill 中描述的 `ITenant` / `tenantCode` 仅为 sei-core 框架能力说明，本项目不采用
 
 ## rules
-- 如果要求前后端同时开发，前后端必须先完成接口契约约定到docs,然后分别使用不同的子agent开发，不能在一个上下文中同时开发前后端
 - 如果任务超过3个文件的修改，使用superpowers进行任务拆解和执行
 - 项目内同级目录下的CLAUDE.md和AGENT.md都是相同内容，你只用了解其中一个
