@@ -200,6 +200,36 @@ export const handlers = [
     return skill ? ok(skill, '技能已导入') : fail(`技能名已存在: ${body.name}`);
   }),
 
+  http.post('*/api/skill/import/github', async ({ request }) => {
+    const body = (await request.json()) as { url?: string };
+    if (!body?.url) return fail('url is required');
+    const parts = body.url.split('/').filter(Boolean);
+    const guessedName = parts[parts.length - 1]?.replace(/\.md$/i, '') || 'github-skill';
+    const skill = importSkill({
+      name: guessedName.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'github-skill',
+      description: 'Imported from GitHub',
+      config: { origin: `github:${body.url}` },
+      content: `---\nname: ${guessedName}\n---\n\n# ${guessedName}\n`,
+      files: [{ path: 'references/source.md', content: body.url }],
+    });
+    return skill ? ok(skill, '技能已从 GitHub 导入') : fail(`技能名已存在: ${guessedName}`);
+  }),
+
+  http.post('*/api/skill/import/archive', async ({ request }) => {
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!(file instanceof File)) return fail('file is required');
+    const baseName = file.name.replace(/\.(zip|skill)$/i, '') || 'archive-skill';
+    const skill = importSkill({
+      name: baseName.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'archive-skill',
+      description: 'Imported from archive',
+      config: { origin: `local:${baseName}` },
+      content: `---\nname: ${baseName}\n---\n\n# ${baseName}\n`,
+      files: [{ path: 'references/archive.md', content: file.name }],
+    });
+    return skill ? ok(skill, '技能已从归档导入') : fail(`技能名已存在: ${baseName}`);
+  }),
+
   // #17 list skills (Search body → PageResult)
   http.post('*/api/skill/findByPage', async ({ request }) => {
     const search = (await request.json().catch(() => ({}))) as Search;
@@ -435,6 +465,52 @@ export const handlers = [
       }
     });
     return ok(list);
+  }),
+
+  http.post('*/api/detailed-design/:id/edit', async ({ params, request }) => {
+    const body = (await request.json()) as { content?: string };
+    const design = db.detailedDesigns.get(String(params.id));
+    if (!design) return fail('detailed design not found');
+    design.content = body?.content ?? '';
+    design.lastEditedDate = now();
+    return ok(design);
+  }),
+
+  http.post('*/api/detailed-design/:id/regenerate', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { prompt?: string };
+    const design = db.detailedDesigns.get(String(params.id));
+    if (!design) return fail('detailed design not found');
+    design.status = 'GENERATING';
+    design.version += 1;
+    design.failureSummary = null;
+    setTimeout(() => {
+      design.status = 'REVIEW';
+      design.content = JSON.stringify({ placeholder: true, regenerated: true, prompt: body?.prompt });
+      design.lastEditedDate = now();
+    }, 500);
+    return ok(design);
+  }),
+
+  http.get('*/api/coding-task/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const task = db.codingTasks.get(id);
+    return task ? ok(task) : fail(`coding task ${id} not found`);
+  }),
+
+  http.post('*/api/coding-task/:id/cancel', ({ params }) => {
+    const task = db.codingTasks.get(String(params.id));
+    if (!task) return fail('coding task not found');
+    if (task.status === 'RUNNING') {
+      task.status = 'CANCELLED';
+      task.lastEditedDate = now();
+    }
+    return ok(task);
+  }),
+
+  http.get('*/api/run/findOne', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const run = db.runs.get(id);
+    return run ? ok(run) : fail(`run ${id} not found`);
   }),
 
   http.post('*/api/coding-task/:id/run', async ({ params, request }) => {

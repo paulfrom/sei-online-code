@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.api;
 
 import com.changhong.onlinecode.dto.SkillDto;
+import com.changhong.onlinecode.dto.request.ImportGithubSkillRequest;
 import com.changhong.onlinecode.dto.request.ImportSkillRequest;
 import com.changhong.sei.core.api.BaseEntityApi;
 import com.changhong.sei.core.api.FindByPageApi;
@@ -11,6 +12,8 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Skill 管理 API。契约 Phase 3 §2 端点 16/17/18/19。
@@ -33,4 +36,12 @@ public interface SkillApi extends BaseEntityApi<SkillDto>, FindByPageApi<SkillDt
     @PostMapping(path = "import", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "导入技能", description = "导入技能，以 name 为去重键；同名已存在抛 ConflictException 返回 409。computedHash 由服务端运行时计算返回")
     ResultData<SkillDto> importSkill(@RequestBody @Valid ImportSkillRequest request);
+
+    @PostMapping(path = "import/github", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "从 GitHub 导入技能", description = "支持 GitHub 仓库、tree、blob(SKILL.md) 地址；服务端下载归档并解析 SKILL.md + 辅助文件")
+    ResultData<SkillDto> importGithubSkill(@RequestBody @Valid ImportGithubSkillRequest request);
+
+    @PostMapping(path = "import/archive", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "上传 zip 导入技能", description = "上传 .zip/.skill 归档，由服务端解压并解析 SKILL.md + 辅助文件")
+    ResultData<SkillDto> importArchiveSkill(@RequestPart("file") MultipartFile file);
 }

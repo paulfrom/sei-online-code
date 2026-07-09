@@ -110,4 +110,42 @@ class AgentServiceTest {
 
         verify(agentSkillDao, times(2)).save(any(AgentSkill.class));
     }
+
+    @Test
+    void save_preservesBuiltinFlag_whenUpdatePayloadOmitsIt() {
+        // WHY: 前端编辑内置 agent 时可能不回传 builtin；更新必须继承库中原值，避免置 null。
+        Agent persisted = new Agent();
+        persisted.setId("AGENT_BUILTIN");
+        persisted.setBuiltin(Boolean.TRUE);
+        when(agentDao.findById("AGENT_BUILTIN")).thenReturn(Optional.of(persisted));
+
+        Agent updating = new Agent();
+        updating.setId("AGENT_BUILTIN");
+        updating.setName("dev-agent");
+        updating.setBuiltin(null);
+
+        try {
+            agentService.save(updating);
+        } catch (Exception ignored) {
+            // BaseEntityService.save 依赖底层 DAO 行为；这里只验证 save 前的归一化副作用。
+        }
+
+        assertEquals(Boolean.TRUE, updating.getBuiltin());
+    }
+
+    @Test
+    void save_defaultsBuiltinFalse_whenCreatePayloadOmitsIt() {
+        // WHY: 新建请求若未显式传 builtin，也必须满足库表 NOT NULL 约束。
+        Agent creating = new Agent();
+        creating.setName("custom-agent");
+        creating.setBuiltin(null);
+
+        try {
+            agentService.save(creating);
+        } catch (Exception ignored) {
+            // BaseEntityService.save 依赖底层 DAO 行为；这里只验证 save 前的归一化副作用。
+        }
+
+        assertEquals(Boolean.FALSE, creating.getBuiltin());
+    }
 }
