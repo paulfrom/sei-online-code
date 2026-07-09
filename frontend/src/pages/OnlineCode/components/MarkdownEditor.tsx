@@ -137,6 +137,9 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
   previewOnly: css`
     padding: ${token.paddingMD}px;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
   `,
   empty: css`
     color: ${token.colorTextDisabled};
