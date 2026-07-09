@@ -3,7 +3,7 @@
  *
  * URL: /online-code/requirements?projectId=...
  */
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { history, useSearchParams } from 'umi';
 import { createStyles } from '@ead/antd-style';
 // @ts-ignore JS service module has no declaration file
@@ -11,7 +11,7 @@ import { saveRequirement, REQUIREMENT_FIND_BY_PAGE_URL } from '@/services/requir
 import type { RequirementDto } from '@/services/onlineCodeTypes';
 import type { PageResult, ResultData } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
-import { Button, ExtTable, message } from '@ead/suid';
+import { Button, ExtModal, ExtTable, Form, Input, message } from '@ead/suid';
 import { ArrowLeftOutlined, PlusOutlined } from '@ead/suid-icons';
 
 const useStyles = createStyles(() => ({
@@ -26,24 +26,30 @@ const RequirementList: React.FC = () => {
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('projectId') ?? '';
   const tableRef = useRef<any>(null);
+  const [form] = Form.useForm();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const { styles } = useStyles();
 
   const handleRowClick = (record: RequirementDto) => {
     history.push(`/online-code/requirement?id=${record.id}`);
   };
 
-  const handleCreate = async () => {
-    const res = (await saveRequirement({
-      projectId,
-      title: '新需求',
-      description: '',
-    })) as ResultData<RequirementDto>;
-    if (!res.success || !res.data) {
-      message.error(res.message ?? '创建需求失败');
-      return;
+  const handleSave = async (values: { title: string; description?: string }) => {
+    setSaving(true);
+    try {
+      const res = (await saveRequirement({ ...values, projectId })) as ResultData<RequirementDto>;
+      if (!res.success || !res.data) {
+        message.error(res.message ?? '创建需求失败');
+        return;
+      }
+      message.success('创建成功');
+      setModalOpen(false);
+      form.resetFields();
+      tableRef.current?.reloadData();
+    } finally {
+      setSaving(false);
     }
-    message.success('创建成功');
-    history.push(`/online-code/requirement?id=${res.data.id}`);
   };
 
   const buildSearch = (pageSearch: any) => ({
@@ -102,7 +108,7 @@ const RequirementList: React.FC = () => {
           text: '返回项目',
         }}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建需求
           </Button>
         }
@@ -123,6 +129,27 @@ const RequirementList: React.FC = () => {
           })}
         />
       </div>
+      <ExtModal
+        open={modalOpen}
+        title="新建需求"
+        confirmLoading={saving}
+        onCancel={() => setModalOpen(false)}
+        onOk={() => form.submit()}
+        destroyOnHidden
+      >
+        <Form form={form} onFinish={handleSave} layout="vertical">
+          <Form.Item
+            name="title"
+            label="需求标题"
+            rules={[{ required: true, message: '请输入需求标题' }]}
+          >
+            <Input placeholder="例如：用户登录流程" allowClear />
+          </Form.Item>
+          <Form.Item name="description" label="需求描述">
+            <Input.TextArea rows={4} placeholder="描述需求背景与目标…" allowClear />
+          </Form.Item>
+        </Form>
+      </ExtModal>
     </PageContainer>
   );
 };
