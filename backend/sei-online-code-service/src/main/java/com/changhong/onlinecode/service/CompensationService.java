@@ -181,6 +181,7 @@ public class CompensationService {
             }
             requirement.setStatus(RequirementStatus.PRD_GENERATING);
             failureInfoSupport.markRetrying(requirement, TriggerSource.SCHEDULED_COMPENSATION, now);
+            requirement.setGenerationToken(GenerationTokenSupport.newToken());
             requirementDao.save(requirement);
             if (wasStuckGenerating) {
                 stuckRetried++;
@@ -189,7 +190,8 @@ public class CompensationService {
                     "补偿重试 PRD", summary, TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("需求 {} 进入 PRD 补偿重试，当前重试次数={}", requirementId, requirement.getRetryCount());
             String hint = retryHint(summary);
-            TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, hint));
+            String generationToken = requirement.getGenerationToken();
+            TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, hint, generationToken));
             retried++;
         }
         LOGGER.info("失败需求补偿完成，跳过={}，重试={}（其中卡住={}）", skipped, retried, stuckRetried);
@@ -253,12 +255,15 @@ public class CompensationService {
             overview.setStatus(OverviewDesignStatus.GENERATING);
             failureInfoSupport.markRetrying(overview, TriggerSource.SCHEDULED_COMPENSATION, now);
             overview.setVersion(overview.getVersion() + 1);
+            overview.setGenerationToken(GenerationTokenSupport.newToken());
             overviewDesignDao.save(overview);
             compensationLogService.record("OVERVIEW_DESIGN", overview.getId(), "RETRY_OVERVIEW", true,
                     "补偿重试概览设计", overview.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("概览设计 {} 进入补偿重试，当前重试次数={}", overview.getId(), overview.getRetryCount());
             String prompt = retryHint(overview.getFailureSummary());
-            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overview.getId(), prompt));
+            String generationToken = overview.getGenerationToken();
+            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overview.getId(), prompt,
+                    generationToken));
             retried++;
         }
         LOGGER.info("失败概览设计补偿完成，跳过={}，重试={}", skipped, retried);
@@ -335,12 +340,15 @@ public class CompensationService {
             design.setStatus(DetailedDesignStatus.GENERATING);
             failureInfoSupport.markRetrying(design, TriggerSource.SCHEDULED_COMPENSATION, now);
             design.setVersion(design.getVersion() + 1);
+            design.setGenerationToken(GenerationTokenSupport.newToken());
             detailedDesignDao.save(design);
             compensationLogService.record("DETAILED_DESIGN", design.getId(), "RETRY_DETAILED", true,
                     "补偿重试详细设计", design.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
             LOGGER.info("详细设计 {} 进入补偿重试，当前重试次数={}", design.getId(), design.getRetryCount());
             String prompt = retryHint(design.getFailureSummary());
-            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(design.getId(), prompt));
+            String generationToken = design.getGenerationToken();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(design.getId(), prompt,
+                    generationToken));
             retried++;
         }
         LOGGER.info("失败详细设计补偿完成，跳过={}，重试={}", skipped, retried);

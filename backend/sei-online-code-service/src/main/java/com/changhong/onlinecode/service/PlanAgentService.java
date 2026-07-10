@@ -85,14 +85,18 @@ public class PlanAgentService {
     /**
      * spawn 规划智能体（latest Plan 应已由 caller 置 GENERATING）。D11 链式落库 DRAFT/FAILED。
      */
-    public void spawnPlanning(String projectId, String modifyHint) {
-        spawnPlanning(projectId, modifyHint, TriggerSource.USER_ACTION);
+    public void spawnPlanning(String projectId, String modifyHint, String generationToken) {
+        spawnPlanning(projectId, modifyHint, generationToken, TriggerSource.USER_ACTION);
     }
 
-    public void spawnPlanning(String projectId, String modifyHint, TriggerSource triggerSource) {
+    public void spawnPlanning(String projectId, String modifyHint, String generationToken, TriggerSource triggerSource) {
         Plan plan = planDao.findLatestByProjectId(projectId);
         if (plan == null) {
             LOGGER.warn("spawnPlanning: no Plan for projectId={}, skip", projectId);
+            return;
+        }
+        if (!matchesGenerationToken(plan, generationToken)) {
+            LOGGER.info("spawnPlanning: projectId={} generation token 已变化，跳过过期执行", projectId);
             return;
         }
         plan.setLastTriggerSource(triggerSource);
@@ -115,24 +119,38 @@ public class PlanAgentService {
                 agent == null ? null : agent.getMcpConfig());
         future.thenApply(json -> parseJson(json, PlanContent.class))
                 .thenAccept(content -> {
-                    plan.setContent(content);
-                    plan.setStatus(PlanStatus.DRAFT);
-                    failureInfoSupport.clearPlanFailure(plan);
-                    planDao.save(plan);
+                    Plan latest = planDao.findLatestByProjectId(projectId);
+                    if (latest == null || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期结果", projectId);
+                        return;
+                    }
+                    latest.setContent(content);
+                    latest.setStatus(PlanStatus.DRAFT);
+                    failureInfoSupport.clearPlanFailure(latest);
+                    planDao.save(latest);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("spawnPlanning failed projectId={}", projectId, e);
-                    plan.setStatus(PlanStatus.FAILED);
-                    failureInfoSupport.markPlanFailure(plan,
+                    Plan latest = planDao.findLatestByProjectId(projectId);
+                    if (latest == null || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期失败", projectId);
+                        return null;
+                    }
+                    latest.setStatus(PlanStatus.FAILED);
+                    failureInfoSupport.markPlanFailure(latest,
                             FailureCode.AGENT_JSON_PARSE_FAILED,
                             FailureStage.PLAN,
                             "概要设计生成失败",
                             rootMessage(e),
                             triggerSource,
                             new java.util.Date());
-                    planDao.save(plan);
+                    planDao.save(latest);
                     return null;
                 });
+    }
+
+    private static boolean matchesGenerationToken(Plan plan, String generationToken) {
+        return generationToken != null && generationToken.equals(plan.getGenerationToken());
     }
 
     /**

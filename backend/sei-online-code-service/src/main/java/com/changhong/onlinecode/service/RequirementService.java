@@ -55,11 +55,14 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (Objects.isNull(entity.getPrdVersion())) {
             entity.setPrdVersion(1);
         }
+        if (Objects.isNull(entity.getGenerationToken()) || entity.getGenerationToken().isBlank()) {
+            entity.setGenerationToken(GenerationTokenSupport.newToken());
+        }
         boolean isNew = entity.getId() == null;
         OperateResultWithData<Requirement> result = super.save(entity);
         Requirement saved = result.getData();
         if (result.successful() && isNew && saved != null) {
-            triggerPrdSpawnAfterCommit(saved.getId(), null);
+            triggerPrdSpawnAfterCommit(saved.getId(), null, saved.getGenerationToken());
         }
         return result;
     }
@@ -84,9 +87,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
         requirement.setStatus(RequirementStatus.PRD_GENERATING);
         requirement.setPrdVersion(requirement.getPrdVersion() + 1);
         requirement.setLastRetryAt(new Date());
+        requirement.setGenerationToken(GenerationTokenSupport.newToken());
         OperateResultWithData<Requirement> result = super.save(requirement);
         if (result.successful()) {
-            triggerPrdSpawnAfterCommit(id, prompt);
+            triggerPrdSpawnAfterCommit(id, prompt, requirement.getGenerationToken());
         }
         return result;
     }
@@ -100,8 +104,8 @@ public class RequirementService extends BaseEntityService<Requirement> {
      * @param requirementId 需求 ID
      * @param prompt        可选提示词
      */
-    void triggerPrdSpawnAfterCommit(String requirementId, String prompt) {
-        TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, prompt));
+    void triggerPrdSpawnAfterCommit(String requirementId, String prompt, String generationToken) {
+        TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(requirementId, prompt, generationToken));
     }
 
     /**

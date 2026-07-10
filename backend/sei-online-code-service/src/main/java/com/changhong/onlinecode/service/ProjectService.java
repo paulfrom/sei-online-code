@@ -83,10 +83,12 @@ public class ProjectService extends BaseEntityService<Project> {
     }
 
     /**
-     * 兼容旧 refineSpec 入口：发起概要设计生成。
+     * 兼容旧 refineSpec 入口：实际触发的是 Plan 重生成，而不是旧 Spec 流程。
+     *
+     * <p>仅用于兼容旧客户端；新的需求驱动流程应走 RequirementWorkspace 下的 PRD/设计链路。</p>
      *
      * @param projectId 项目 id
-     * @return 写操作结果（携带新建 GENERATING 概要设计）
+     * @return 写操作结果（携带新建 GENERATING Plan）
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<PlanDto> refineSpec(String projectId) {

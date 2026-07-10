@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  *   <li>#1 POST /project/save        —— BaseEntityApi.save</li>
  *   <li>#2 GET  /project/findOne     —— BaseEntityApi.findOne</li>
  *   <li>#3 POST /project/findByPage  —— FindByPageApi.findByPage</li>
- *   <li>#4 POST /project/refineSpec  —— 生成概要设计（兼容旧入口名）</li>
+ *   <li>#4 POST /project/refineSpec  —— 兼容旧入口名，实际触发 Plan 重生成</li>
  *   <li>#9 GET  /project/state       —— 轮询生命周期</li>
  *   <li>#26 POST /project/{projectId}/build —— 批量执行功能设计编码</li>
  * </ul>
@@ -38,8 +38,9 @@ public interface ProjectApi extends BaseEntityApi<ProjectDto>, FindByPageApi<Pro
 
     String PATH = "project";
 
+    @Deprecated
     @PostMapping(path = "refineSpec", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "生成概要设计", description = "兼容旧 refineSpec 入口：发起概要设计生成，创建 GENERATING 状态 Plan")
+    @Operation(summary = "兼容旧 refineSpec 入口", description = "Deprecated。该接口保留旧名称，但当前实际行为是发起 Plan 重生成并创建 GENERATING 状态 Plan；新的需求流请走 RequirementWorkspace。")
     ResultData<PlanDto> refineSpec(@RequestBody @Valid RefineSpecRequest request);
 
     @GetMapping(path = "state")

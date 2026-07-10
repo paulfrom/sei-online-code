@@ -34,14 +34,14 @@ class RequirementServiceAfterCommitTest {
         TransactionSynchronizationManager.initSynchronization();
         try {
             // 提交前：不得触发 spawn（否则异步线程读不到未提交行 → agent 静默跳过）
-            service.triggerPrdSpawnAfterCommit("req1", "hint");
+            service.triggerPrdSpawnAfterCommit("req1", "hint", "token-1");
             assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
-            verify(agent, never()).spawnPrd(anyString(), any());
+            verify(agent, never()).spawnPrd(anyString(), any(), anyString());
 
             // 模拟事务提交：afterCommit 回调触发 spawn
             TransactionSynchronizationManager.getSynchronizations()
                     .forEach(TransactionSynchronization::afterCommit);
-            verify(agent).spawnPrd("req1", "hint");
+            verify(agent).spawnPrd("req1", "hint", "token-1");
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
@@ -55,7 +55,7 @@ class RequirementServiceAfterCommitTest {
         RequirementService service = new RequirementService(dao, agent, overviewDesignService);
 
         // 无活动事务时 TransactionUtil.afterCommit 立即执行（非事务上下文调用方的安全回退）
-        service.triggerPrdSpawnAfterCommit("req2", null);
-        verify(agent).spawnPrd("req2", null);
+        service.triggerPrdSpawnAfterCommit("req2", null, "token-2");
+        verify(agent).spawnPrd("req2", null, "token-2");
     }
 }

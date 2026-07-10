@@ -184,7 +184,7 @@ export async function findOneProject(id: string): Promise<ResultData<ProjectDto>
   return request({ url: `${API}/project/findOne`, method: 'GET', params: { id } });
 }
 
-/** #4 compatibility endpoint: legacy refineSpec path now starts overview design generation. */
+/** #4 deprecated compatibility endpoint: legacy refineSpec name now triggers Plan regeneration, not the Requirement workspace flow. */
 export async function refineSpec(projectId: string): Promise<ResultData<PlanDto>> {
   return request({ url: `${API}/project/refineSpec`, method: 'POST', data: { projectId } });
 }

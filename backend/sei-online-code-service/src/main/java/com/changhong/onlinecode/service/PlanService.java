@@ -146,6 +146,7 @@ public class PlanService extends BaseEntityService<Plan> {
         newPlan.setModifyHint(modifyHint);
         newPlan.setIsLatest(true);
         newPlan.setLastTriggerSource(TriggerSource.USER_ACTION);
+        newPlan.setGenerationToken(GenerationTokenSupport.newToken());
 
         OperateResultWithData<Plan> saved = super.save(newPlan);
         if (!saved.successful()) {
@@ -153,7 +154,7 @@ public class PlanService extends BaseEntityService<Plan> {
         }
 
         // spawn 规划智能体
-        planAgentService.spawnPlanning(projectId, modifyHint);
+        planAgentService.spawnPlanning(projectId, modifyHint, saved.getData().getGenerationToken());
 
         return OperateResultWithData.operationSuccessWithData(toDto(saved.getData()));
     }

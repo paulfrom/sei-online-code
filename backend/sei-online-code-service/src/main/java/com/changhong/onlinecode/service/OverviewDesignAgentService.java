@@ -74,10 +74,14 @@ public class OverviewDesignAgentService {
      * @param prompt           可选提示词
      */
     @Async
-    public void spawnOverviewDesign(String overviewDesignId, String prompt) {
+    public void spawnOverviewDesign(String overviewDesignId, String prompt, String generationToken) {
         OverviewDesign overview = overviewDesignDao.findOne(overviewDesignId);
         if (Objects.isNull(overview)) {
             LOGGER.warn("overview-design-agent: overview 不存在 {}", overviewDesignId);
+            return;
+        }
+        if (!matchesGenerationToken(overview, generationToken)) {
+            LOGGER.info("overview-design-agent: overview {} generation token 已变化，跳过过期执行", overviewDesignId);
             return;
         }
         Requirement requirement = requirementDao.findOne(overview.getRequirementId());
@@ -104,26 +108,33 @@ public class OverviewDesignAgentService {
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
-        future.thenApply(result -> {
-                    if (result == null || result.isBlank()) {
-                        LOGGER.warn("overview-design-agent: CLI 返回空，使用 fallback overviewId={}", overviewDesignId);
-                        return generatePlaceholderContent(requirement);
-                    }
-                    return normalizeMarkdown(result);
-                })
+        future.thenApply(OverviewDesignAgentService::normalizeMarkdown)
                 .thenAccept(content -> {
-                    overview.setContent(content);
-                    overview.setStatus(OverviewDesignStatus.DRAFT);
-                    failureInfoSupport.clearOverviewDesignFailure(overview);
-                    overviewDesignDao.save(overview);
+                    OverviewDesign latest = overviewDesignDao.findOne(overviewDesignId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("overview-design-agent: overview {} 已被新一轮生成接管，丢弃过期结果",
+                                overviewDesignId);
+                        return;
+                    }
+                    validateOverviewContent(content);
+                    latest.setContent(content);
+                    latest.setStatus(OverviewDesignStatus.DRAFT);
+                    failureInfoSupport.clearOverviewDesignFailure(latest);
+                    overviewDesignDao.save(latest);
                     LOGGER.info("overview-design-agent: overview {} 生成完成", overviewDesignId);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("overview-design-agent: overview {} 生成失败", overviewDesignId, e);
-                    overview.setStatus(OverviewDesignStatus.FAILED);
-                    failureInfoSupport.markOverviewDesignFailure(overview,
+                    OverviewDesign latest = overviewDesignDao.findOne(overviewDesignId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("overview-design-agent: overview {} 已被新一轮生成接管，丢弃过期失败",
+                                overviewDesignId);
+                        return null;
+                    }
+                    latest.setStatus(OverviewDesignStatus.FAILED);
+                    failureInfoSupport.markOverviewDesignFailure(latest,
                             "概览设计生成失败", rootMessage(e), TriggerSource.AUTO, new Date());
-                    overviewDesignDao.save(overview);
+                    overviewDesignDao.save(latest);
                     return null;
                 });
     }
@@ -138,27 +149,6 @@ public class OverviewDesignAgentService {
                 + "\n2. 文档必须包含一个模块清单表格，列名固定为：| moduleId | moduleTitle | summary |。"
                 + "\n3. 模块清单表格中的每一行代表一个后续需要单独生成详细设计的模块。"
                 + "\n4. 除模块清单外，还需补充总体架构、模块职责、关键流程、接口协作、数据边界、风险与约束。";
-    }
-
-    private String generatePlaceholderContent(Requirement requirement) {
-        return "# 概览设计\n\n"
-                + "## 1. 设计目标\n\n"
-                + "基于 PRD 将需求拆分为可独立设计和编码的模块。\n\n"
-                + "## 2. 模块清单\n\n"
-                + "| moduleId | moduleTitle | summary |\n"
-                + "| --- | --- | --- |\n"
-                + "| default-module | 默认模块 | 需要进一步补充的默认模块 |\n\n"
-                + "## 3. 总体架构\n\n"
-                + "待补充。\n\n"
-                + "## 4. 模块职责说明\n\n"
-                + "### default-module 默认模块\n\n"
-                + "- 职责：待补充\n"
-                + "- 边界：待补充\n"
-                + "- 依赖：待补充\n\n"
-                + "## 5. 关键流程\n\n"
-                + "待补充。\n\n"
-                + "## 6. 风险与约束\n\n"
-                + "待补充。\n";
     }
 
     private static String normalizeMarkdown(String raw) {
@@ -176,6 +166,22 @@ public class OverviewDesignAgentService {
             }
         }
         return t;
+    }
+
+    private void validateOverviewContent(String content) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("概览设计输出为空");
+        }
+        if (!content.contains("| moduleId | moduleTitle | summary |")) {
+            throw new IllegalArgumentException("概览设计缺少模块清单表头");
+        }
+        if (!content.contains("总体架构")) {
+            throw new IllegalArgumentException("概览设计缺少总体架构章节");
+        }
+    }
+
+    private static boolean matchesGenerationToken(OverviewDesign overview, String generationToken) {
+        return generationToken != null && generationToken.equals(overview.getGenerationToken());
     }
 
     private static String rootMessage(Throwable throwable) {

@@ -1,78 +1,38 @@
-All backend code must be developed following the eadp-backend skill (`.claude/skills/eadp-backend/SKILL.md`).
-When generating code: add comments for every method and core logic. Multi-language keys must be considered and applied.
+# Backend Contributor Guide
 
-## Build Commands
+## Scope
+This module contains the Java backend for `sei-online-code`. Work under `backend/` only and keep frontend concerns out of this module.
+
+## Module Layout
+- `sei-online-code-api/`: shared API contracts, DTOs, and enums for external callers
+- `sei-online-code-service/`: Spring Boot service implementation
+- `sei-online-code-service/src/main/java`: business code
+- `sei-online-code-service/src/main/resources/db/migration`: Flyway migrations
+- `sei-online-code-service/src/test/java`: JUnit tests
+- `gradlew`, `build.gradle`, `settings.gradle`: Gradle entrypoints
+
+## Build and Run
+Run commands from `backend/`.
 
 ```bash
-# Build the entire project
-./gradlew build
-
-# Build without tests
-./gradlew build -x test
-
-# Run all tests
 ./gradlew test
-
-# Run a single test class
-./gradlew :sei-online-code-service:test --tests "com.changhong.onlinecode.controller.reporting.HelloControllerTest"
-
-# Publish API module to Nexus (credentials in gradle.properties)
-./gradlew :sei-online-code-api:publish
+./gradlew :sei-online-code-service:bootRun
+./gradlew build
+./gradlew :sei-online-code-service:test --tests "com.changhong.onlinecode.service.ProjectServiceTest"
 ```
 
-| Item | Value                                        |
-|------|----------------------------------------------|
-| Group / artifact | `com.changhong.onlinecode`                   |
-| Version | `7.0.1` (from `gradle.properties`)           |
-| Java | 21                                           |
-| Gradle | 8.5 (wrapper — always use `./gradlew`)       |
-| Spring Boot | 3.3.9                                        |
-| Spring Cloud | 2023.0.5                                     |
-| SEI platform | `7.+` (`sei_version`, `util_version`)        |
-| Service JAR | `sei-online-code-service/build/libs/sei-online-code.jar` |
-| API JAR | `sei-online-code-api` plain library (published to Nexus) |
+Use the wrapper only. The project targets Java 21. Local startup also depends on `sei-online-code-service/local-config/application-local.yaml`.
 
-## Architecture
+## Coding Rules
+- Follow the `eadp-backend` skill and existing sei-core layering.
+- Keep the structure aligned with `entity -> dao -> service -> controller`.
+- Put shared contracts in `sei-online-code-api`; keep implementation details in `sei-online-code-service`.
+- Use PascalCase for classes, camelCase for methods and fields, and UTF-8 source files.
+- Add Swagger annotations to API and DTO fields when introducing or changing external contracts.
+- This repository is single-tenant: do not add `tenant_code`, `ITenant`, or tenant filters.
 
-### Multi-Module Layout
+## Testing
+Backend tests run on JUnit Platform. Place tests in `src/test/java` and name them `*Test.java`. Add or update tests for service logic, converters, DAO behavior, and validation changes. Prefer focused tests near the changed package.
 
-```
-sei-online-code-api/       →  Feign API contracts, DTOs, enums; published for other services
-sei-online-code-service/   →  Spring Boot app: controllers, services, DAOs, entities
-docs/sql/                   →  PostgreSQL / MySQL DDL for reporting tables
-```
-
-- **sei-online-code-api**: `@FeignClient` interfaces under `com.changhong.onlinecode.api`, DTOs under `com.changhong.onlinecode.dto`, shared enums.
-- **sei-online-code-service**: Implements API interfaces in `controller` classes; depends on `sei-online-code-api` and SEI starters.
-- Other services consume **sei-online-code-api** to call sei-online-code via Feign (`name = ${sei.feign.client.sei-online-code:sei-online-code}`).
-
-### Standard EADP Layering
-
-```
-Entity → DAO → DAOImpl → Service → Controller → API (Feign)
-                      ↕
-                    DTO
-```
-
-Controllers **implement** the API interface; services extend `BaseEntityService` and do **not** implement the API. API I/O uses DTOs only.
-
-
-### EADP / SEI Platform
-
-| Concern | Usage in sei-online-code |
-|---------|--------------------------|
-| Session | `ContextUtil.getSessionUser()`, `SessionUser` |
-| API response | `ResultData<T>`, `ResultDataUtil` |
-| Pagination | `Search`, `PageResult`, `FindByPageApi` |
-| CRUD stack | `BaseEntityApi` / `BaseEntityController` / `BaseEntityService` / `BaseEntityDao` |
-| Distributed lock | `@SeiLock` on `deliverPlan` / `withdrawPlan` (anti duplicate dispatch) |
-| Logging | `@Log`, `LogUtil.bizLog()` |
-| BPM | `sei-bpm-sdk`; `ReportingPlanTaskApi` extends `BpmDefaultBaseApi` |
-| Serial numbers | `sei-serial-sdk` via `SerialGenerator` |
-| Testing | `BaseUnit5Test` + `sei-test-starter` (JUnit 5) |
-
-**sei-online-code-service** dependencies: `sei-cloud-nacos-starter`, `sei-bpm-sdk`, `sei-serial-sdk`, MySQL connector (version from `gradle.properties`).
-
-**sei-online-code-api** dependencies: `sei-core-api`, `sei-bpm-sdk`.
-
-所有的dto和api都必须加上swagger注解，以提供完整的字段命名和接口说明
+## Commits and PRs
+Use commit messages in the format `feat: description`, `fix: description`, `refactor: description`, and so on. Keep PRs scoped, describe impacted modules, mention schema or config changes, and include sample requests or screenshots when the API behavior affects the UI.

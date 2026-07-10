@@ -72,6 +72,9 @@ public class OverviewDesign extends BaseAuditableEntity {
     @Column(name = "last_trigger_source", length = 32)
     private TriggerSource lastTriggerSource;
 
+    @Column(name = "generation_token", length = 64)
+    private String generationToken;
+
     @Override
     @Transient
     public String getDisplay() {

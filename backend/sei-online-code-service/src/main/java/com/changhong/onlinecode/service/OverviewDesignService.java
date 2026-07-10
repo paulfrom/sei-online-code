@@ -58,9 +58,11 @@ public class OverviewDesignService extends BaseEntityService<OverviewDesign> {
         overview.setRequirementId(requirement.getId());
         overview.setStatus(OverviewDesignStatus.GENERATING);
         overview.setVersion(1);
+        overview.setGenerationToken(GenerationTokenSupport.newToken());
         dao.save(overview);
         String overviewId = overview.getId();
-        TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, null));
+        String generationToken = overview.getGenerationToken();
+        TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, null, generationToken));
     }
 
     /**
@@ -96,10 +98,13 @@ public class OverviewDesignService extends BaseEntityService<OverviewDesign> {
         }
         overview.setStatus(OverviewDesignStatus.GENERATING);
         overview.setVersion(overview.getVersion() + 1);
+        overview.setGenerationToken(GenerationTokenSupport.newToken());
         OperateResultWithData<OverviewDesign> result = super.save(overview);
         if (result.successful()) {
             String overviewId = overview.getId();
-            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, prompt));
+            String generationToken = overview.getGenerationToken();
+            TransactionUtil.afterCommit(() -> overviewDesignAgentService.spawnOverviewDesign(overviewId, prompt,
+                    generationToken));
         }
         return ResultData.success(convertToDto(overview));
     }

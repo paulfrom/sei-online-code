@@ -99,10 +99,13 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         design.setStatus(DetailedDesignStatus.GENERATING);
         design.setVersion(design.getVersion() + 1);
         design.setLastFailedAt(null);
+        design.setGenerationToken(GenerationTokenSupport.newToken());
         OperateResultWithData<DetailedDesign> result = super.save(design);
         if (result.successful()) {
             String designId = design.getId();
-            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, prompt));
+            String generationToken = design.getGenerationToken();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, prompt,
+                    generationToken));
         }
         return ResultData.success(convertToDto(design));
     }
@@ -193,9 +196,12 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
             design.setVersion(1);
             design.setContent("# 详细设计: " + module.moduleTitle);
             design.setLastFailedAt(new Date());
+            design.setGenerationToken(GenerationTokenSupport.newToken());
             dao.save(design);
             String designId = design.getId();
-            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null));
+            String generationToken = design.getGenerationToken();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null,
+                    generationToken));
         }
     }
 
@@ -228,9 +234,12 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
             design.setVersion(1);
             design.setContent("# 详细设计: " + module.moduleTitle);
             design.setLastFailedAt(new Date());
+            design.setGenerationToken(GenerationTokenSupport.newToken());
             dao.save(design);
             String designId = design.getId();
-            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null));
+            String generationToken = design.getGenerationToken();
+            TransactionUtil.afterCommit(() -> detailedDesignAgentService.spawnDetailedDesign(designId, null,
+                    generationToken));
         }
     }
 

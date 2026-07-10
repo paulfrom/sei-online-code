@@ -212,7 +212,7 @@ class PlanServiceTest {
         assertFalse(result.successful());
         assertTrue(result.getMessage().contains("正在生成中"));
         verify(planDao, never()).markNonLatest(any());
-        verify(planAgentService, never()).spawnPlanning(any(), any());
+        verify(planAgentService, never()).spawnPlanning(any(), any(), any());
     }
 
     @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
@@ -246,6 +246,6 @@ class PlanServiceTest {
         assertEquals("modify hint", result.getData().getModifyHint());
 
         verify(planDao).markNonLatest(projectId);
-        verify(planAgentService).spawnPlanning(projectId, "modify hint");
+        verify(planAgentService).spawnPlanning(eq(projectId), eq("modify hint"), anyString());
     }
 }

@@ -27,6 +27,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 /**
  * Requirement PRD 代理服务。
@@ -42,6 +43,7 @@ public class RequirementAgentService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAgentService.class);
     private static final String AGENT_NAME = "prd-agent";
+    private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
 
     private final RequirementDao requirementDao;
     private final AgentService agentService;
@@ -77,10 +79,14 @@ public class RequirementAgentService {
      * @param prompt        可选提示词
      */
     @Async
-    public void spawnPrd(String requirementId, String prompt) {
+    public void spawnPrd(String requirementId, String prompt, String generationToken) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (Objects.isNull(requirement)) {
             LOGGER.warn("prd-agent: requirement 不存在 {}", requirementId);
+            return;
+        }
+        if (!matchesGenerationToken(requirement, generationToken)) {
+            LOGGER.info("prd-agent: requirement {} generation token 已变化，跳过过期执行", requirementId);
             return;
         }
         if (requirement.getStatus() != RequirementStatus.PRD_GENERATING
@@ -108,62 +114,34 @@ public class RequirementAgentService {
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
-        future.thenApply(result -> {
-                    if (result == null || result.isBlank()) {
-                        LOGGER.warn("prd-agent: CLI 返回空，使用 fallback requirementId={}", requirementId);
-                        return generatePlaceholderPrd(requirement, prompt);
-                    }
-                    return normalizeMarkdown(result);
-                })
+        future.thenApply(RequirementAgentService::normalizeMarkdown)
                 .thenAccept(content -> {
-                    requirement.setPrdContent(content);
-                    requirement.setStatus(RequirementStatus.PRD_REVIEW);
-                    failureInfoSupport.clearRequirementFailure(requirement);
-                    requirementDao.save(requirement);
-                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}", requirementId, requirement.getPrdVersion());
+                    Requirement latest = requirementDao.findOne(requirementId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
+                        return;
+                    }
+                    validatePrdContent(content);
+                    latest.setPrdContent(content);
+                    latest.setStatus(RequirementStatus.PRD_REVIEW);
+                    failureInfoSupport.clearRequirementFailure(latest);
+                    requirementDao.save(latest);
+                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}", requirementId, latest.getPrdVersion());
                 })
                 .exceptionally(e -> {
                     LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
-                    requirement.setStatus(RequirementStatus.FAILED);
-                    failureInfoSupport.markRequirementFailure(requirement, FailureCode.AGENT_EXECUTION_FAILED,
+                    Requirement latest = requirementDao.findOne(requirementId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期失败", requirementId);
+                        return null;
+                    }
+                    latest.setStatus(RequirementStatus.FAILED);
+                    failureInfoSupport.markRequirementFailure(latest, FailureCode.AGENT_EXECUTION_FAILED,
                             FailureStage.PRD_GENERATION, "PRD 生成失败", rootMessage(e),
                             TriggerSource.AUTO, new Date());
-                    requirementDao.save(requirement);
+                    requirementDao.save(latest);
                     return null;
                 });
-    }
-
-    /**
-     * 确定性占位 PRD 生成器（backend 规则 #11 fallback）。
-     *
-     * @param requirement 需求实体
-     * @param prompt      可选提示词
-     * @return Markdown 文档
-     */
-    private String generatePlaceholderPrd(Requirement requirement, String prompt) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# PRD: ").append(nullToEmpty(requirement.getTitle())).append("\n\n");
-        sb.append("## 1. 需求概述\n\n");
-        sb.append(nullToEmpty(requirement.getDescription())).append("\n\n");
-        sb.append("## 2. 业务目标\n\n");
-        sb.append("- 明确本次需求要解决的问题。\n");
-        sb.append("- 输出后续概览设计与模块详细设计的依据。\n\n");
-        sb.append("## 3. 范围\n\n");
-        sb.append("### 3.1 In Scope\n\n");
-        sb.append("- 待补充\n\n");
-        sb.append("### 3.2 Out of Scope\n\n");
-        sb.append("- 待补充\n\n");
-        sb.append("## 4. 用户场景\n\n");
-        sb.append("- 待补充\n\n");
-        sb.append("## 5. 功能需求\n\n");
-        sb.append("- 待补充\n\n");
-        sb.append("## 6. 非功能需求\n\n");
-        sb.append("- 待补充\n\n");
-        if (prompt != null && !prompt.isBlank()) {
-            sb.append("## 7. 补充提示\n\n");
-            sb.append(prompt).append('\n');
-        }
-        return sb.toString();
     }
 
     private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint) {
@@ -197,16 +175,34 @@ public class RequirementAgentService {
         return t;
     }
 
+    private void validatePrdContent(String content) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("PRD 输出为空");
+        }
+        if (!MARKDOWN_HEADING.matcher(content).find()) {
+            throw new IllegalArgumentException("PRD 输出缺少 Markdown 标题");
+        }
+        requireKeyword(content, "需求概述");
+        requireKeyword(content, "业务目标");
+        requireKeyword(content, "功能需求");
+    }
+
+    private static void requireKeyword(String content, String keyword) {
+        if (!content.contains(keyword)) {
+            throw new IllegalArgumentException("PRD 输出缺少关键章节: " + keyword);
+        }
+    }
+
+    private static boolean matchesGenerationToken(Requirement requirement, String generationToken) {
+        return generationToken != null && generationToken.equals(requirement.getGenerationToken());
+    }
+
     private static String rootMessage(Throwable throwable) {
         Throwable current = throwable;
         while (current.getCause() != null) {
             current = current.getCause();
         }
         return current.getMessage();
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     private Path materializeSkills(Agent agent) {

@@ -73,6 +73,7 @@ class PlanAgentServiceTest {
         plan.setId("plan1");
         plan.setProjectId("p1");
         plan.setStatus(PlanStatus.GENERATING);
+        plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
@@ -81,7 +82,7 @@ class PlanAgentServiceTest {
         when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(json));
 
-        service.spawnPlanning("p1", "hint");
+        service.spawnPlanning("p1", "hint", "token-1");
 
         ArgumentCaptor<Plan> captor = ArgumentCaptor.forClass(Plan.class);
         verify(planDao).save(captor.capture());
@@ -93,6 +94,7 @@ class PlanAgentServiceTest {
     void spawnPlanning_parseFailure_persistsFailed() {
         Plan plan = new Plan();
         plan.setStatus(PlanStatus.GENERATING);
+        plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
@@ -100,7 +102,7 @@ class PlanAgentServiceTest {
         when(runner.execute(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("not json"));
 
-        service.spawnPlanning("p1", null);
+        service.spawnPlanning("p1", null, "token-1");
 
         ArgumentCaptor<Plan> captor = ArgumentCaptor.forClass(Plan.class);
         verify(planDao).save(captor.capture());
@@ -113,6 +115,7 @@ class PlanAgentServiceTest {
         // 旧实现直接 readValue 抛 JsonParseException 落 FAILED；extractJsonObject 兜底后须落 DRAFT。
         Plan plan = new Plan();
         plan.setStatus(PlanStatus.GENERATING);
+        plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
         when(agentService.findByName("planning-agent")).thenReturn(new Agent());
@@ -122,7 +125,7 @@ class PlanAgentServiceTest {
         when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(raw));
 
-        service.spawnPlanning("p1", null);
+        service.spawnPlanning("p1", null, "token-1");
 
         ArgumentCaptor<Plan> captor = ArgumentCaptor.forClass(Plan.class);
         verify(planDao).save(captor.capture());
@@ -133,8 +136,31 @@ class PlanAgentServiceTest {
     @Test
     void spawnPlanning_noPlan_skips() {
         when(planDao.findLatestByProjectId("p1")).thenReturn(null);
-        service.spawnPlanning("p1", null);
+        service.spawnPlanning("p1", null, "token-1");
         verify(runner, never()).execute(anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void spawnPlanning_staleToken_skipsPersistingResult() {
+        Plan initial = new Plan();
+        initial.setProjectId("p1");
+        initial.setStatus(PlanStatus.GENERATING);
+        initial.setGenerationToken("token-1");
+        Plan latest = new Plan();
+        latest.setProjectId("p1");
+        latest.setStatus(PlanStatus.GENERATING);
+        latest.setGenerationToken("token-2");
+
+        when(planDao.findLatestByProjectId("p1")).thenReturn(initial, latest);
+        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
+        String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
+        when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(json));
+
+        service.spawnPlanning("p1", null, "token-1");
+
+        verify(planDao, never()).save(any(Plan.class));
     }
 
     @Test

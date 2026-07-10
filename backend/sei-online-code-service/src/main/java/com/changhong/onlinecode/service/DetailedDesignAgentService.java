@@ -79,10 +79,14 @@ public class DetailedDesignAgentService {
      * @param prompt           可选提示词
      */
     @Async
-    public void spawnDetailedDesign(String detailedDesignId, String prompt) {
+    public void spawnDetailedDesign(String detailedDesignId, String prompt, String generationToken) {
         DetailedDesign design = detailedDesignDao.findOne(detailedDesignId);
         if (Objects.isNull(design)) {
             LOGGER.warn("detailed-design-agent: design 不存在 {}", detailedDesignId);
+            return;
+        }
+        if (!matchesGenerationToken(design, generationToken)) {
+            LOGGER.info("detailed-design-agent: design {} generation token 已变化，跳过过期执行", detailedDesignId);
             return;
         }
         OverviewDesign overview = overviewDesignDao.findOne(design.getOverviewDesignId());
@@ -110,26 +114,33 @@ public class DetailedDesignAgentService {
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
-        future.thenApply(result -> {
-                    if (result == null || result.isBlank()) {
-                        LOGGER.warn("detailed-design-agent: CLI 返回空，使用 fallback designId={}", detailedDesignId);
-                        return generatePlaceholderContent(design);
-                    }
-                    return normalizeMarkdown(result);
-                })
+        future.thenApply(DetailedDesignAgentService::normalizeMarkdown)
                 .thenAccept(content -> {
-                    design.setContent(content);
-                    design.setStatus(DetailedDesignStatus.REVIEW);
-                    failureInfoSupport.clearDetailedDesignFailure(design);
-                    detailedDesignDao.save(design);
+                    DetailedDesign latest = detailedDesignDao.findOne(detailedDesignId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("detailed-design-agent: design {} 已被新一轮生成接管，丢弃过期结果",
+                                detailedDesignId);
+                        return;
+                    }
+                    validateDetailedContent(content);
+                    latest.setContent(content);
+                    latest.setStatus(DetailedDesignStatus.REVIEW);
+                    failureInfoSupport.clearDetailedDesignFailure(latest);
+                    detailedDesignDao.save(latest);
                     LOGGER.info("detailed-design-agent: design {} 生成完成", detailedDesignId);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("detailed-design-agent: design {} 生成失败", detailedDesignId, e);
-                    design.setStatus(DetailedDesignStatus.FAILED);
-                    failureInfoSupport.markDetailedDesignFailure(design,
+                    DetailedDesign latest = detailedDesignDao.findOne(detailedDesignId);
+                    if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
+                        LOGGER.info("detailed-design-agent: design {} 已被新一轮生成接管，丢弃过期失败",
+                                detailedDesignId);
+                        return null;
+                    }
+                    latest.setStatus(DetailedDesignStatus.FAILED);
+                    failureInfoSupport.markDetailedDesignFailure(latest,
                             "详细设计生成失败", rootMessage(e), TriggerSource.AUTO, new Date());
-                    detailedDesignDao.save(design);
+                    detailedDesignDao.save(latest);
                     return null;
                 });
     }
@@ -148,25 +159,6 @@ public class DetailedDesignAgentService {
                 + "\n3. 至少包含：模块目标、职责边界、业务流程、接口设计、数据模型、页面/组件设计、状态流转、异常处理、测试要点、编码约束。";
     }
 
-    private String generatePlaceholderContent(DetailedDesign design) {
-        return "# 详细设计: " + design.getModuleTitle() + "\n\n"
-                + "## 1. 模块目标\n\n"
-                + "围绕模块 `" + design.getModuleId() + "` 的详细设计待补充。\n\n"
-                + "## 2. 职责边界\n\n"
-                + "- 职责：待补充\n"
-                + "- 边界：待补充\n\n"
-                + "## 3. 业务流程\n\n"
-                + "待补充。\n\n"
-                + "## 4. 接口设计\n\n"
-                + "待补充。\n\n"
-                + "## 5. 数据模型\n\n"
-                + "待补充。\n\n"
-                + "## 6. 页面与组件设计\n\n"
-                + "待补充。\n\n"
-                + "## 7. 测试要点\n\n"
-                + "待补充。\n";
-    }
-
     private static String normalizeMarkdown(String raw) {
         if (raw == null) {
             return null;
@@ -182,6 +174,25 @@ public class DetailedDesignAgentService {
             }
         }
         return t;
+    }
+
+    private void validateDetailedContent(String content) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("详细设计输出为空");
+        }
+        requireKeyword(content, "模块目标");
+        requireKeyword(content, "接口设计");
+        requireKeyword(content, "测试要点");
+    }
+
+    private static void requireKeyword(String content, String keyword) {
+        if (!content.contains(keyword)) {
+            throw new IllegalArgumentException("详细设计缺少关键章节: " + keyword);
+        }
+    }
+
+    private static boolean matchesGenerationToken(DetailedDesign design, String generationToken) {
+        return generationToken != null && generationToken.equals(design.getGenerationToken());
     }
 
     private static String rootMessage(Throwable throwable) {

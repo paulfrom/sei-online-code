@@ -118,7 +118,7 @@ class CompensationServiceTest {
         verify(requirementDao).save(captor.capture());
         assertEquals(RequirementStatus.PRD_GENERATING, captor.getValue().getStatus());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(requirementAgentService).spawnPrd(eq("req1"), anyString());
+        verify(requirementAgentService).spawnPrd(eq("req1"), anyString(), anyString());
     }
 
     @Test
@@ -141,7 +141,7 @@ class CompensationServiceTest {
         verify(requirementDao).save(captor.capture());
         assertEquals(RequirementStatus.PRD_GENERATING, captor.getValue().getStatus());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(requirementAgentService).spawnPrd(eq("req2"), anyString());
+        verify(requirementAgentService).spawnPrd(eq("req2"), anyString(), anyString());
     }
 
     @Test
@@ -158,7 +158,7 @@ class CompensationServiceTest {
         compensationService.compensateFailedRequirements(new Date());
 
         verify(requirementDao, never()).save(any(Requirement.class));
-        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString());
+        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -174,7 +174,7 @@ class CompensationServiceTest {
         compensationService.compensateFailedRequirements(new Date());
 
         verify(requirementDao, never()).save(any(Requirement.class));
-        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString());
+        verify(requirementAgentService, never()).spawnPrd(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -209,7 +209,7 @@ class CompensationServiceTest {
         ArgumentCaptor<OverviewDesign> captor = ArgumentCaptor.forClass(OverviewDesign.class);
         verify(overviewDesignDao).save(captor.capture());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(overviewDesignAgentService).spawnOverviewDesign(eq("ov1"), anyString());
+        verify(overviewDesignAgentService).spawnOverviewDesign(eq("ov1"), anyString(), anyString());
     }
 
     @Test
@@ -244,7 +244,7 @@ class CompensationServiceTest {
         ArgumentCaptor<DetailedDesign> captor = ArgumentCaptor.forClass(DetailedDesign.class);
         verify(detailedDesignDao).save(captor.capture());
         assertEquals(1, captor.getValue().getRetryCount());
-        verify(detailedDesignAgentService).spawnDetailedDesign(eq("dd1"), anyString());
+        verify(detailedDesignAgentService).spawnDetailedDesign(eq("dd1"), anyString(), anyString());
     }
 
     @Test
