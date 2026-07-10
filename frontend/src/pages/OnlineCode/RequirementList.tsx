@@ -3,15 +3,20 @@
  *
  * URL: /online-code/requirements?projectId=...
  */
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useCallback } from 'react';
 import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
+import { useUserContext } from '@ead/suid-utils-react';
+import {
+  PlusOutlined, ExportOutlined, ReloadOutlined
+} from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { saveRequirement, REQUIREMENT_FIND_BY_PAGE_URL } from '@/services/requirement';
 import type { RequirementDto } from '@/services/onlineCodeTypes';
 import type { ResultData } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
-import { Button, ExtModal, ExtTable, Form, Input, message } from '@ead/suid';
+import { Button, ExtModal, ExtTable, Form, Input, message, Space } from '@ead/suid';
+
 
 const useStyles = createStyles(() => ({
   tableWrap: {
@@ -24,6 +29,7 @@ const useStyles = createStyles(() => ({
 const RequirementList = ({ projectId }) => {
   const tableRef = useRef<any>(null);
   const [form] = Form.useForm();
+  const { currentUser } = useUserContext();
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { styles } = useStyles();
@@ -31,6 +37,8 @@ const RequirementList = ({ projectId }) => {
   const handleRowClick = (record: RequirementDto) => {
     history.push(`/online-code/requirement?id=${record.id}`);
   };
+
+  const reloadData = useCallback(() => { tableRef.current?.reloadData(); }, []);
 
   const handleSave = async (values: { title: string; description?: string }) => {
     setSaving(true);
@@ -49,13 +57,25 @@ const RequirementList = ({ projectId }) => {
     }
   };
 
-  const buildSearch = (pageSearch: any) => ({
-    ...pageSearch,
-    filters: [
-      ...(pageSearch.filters || []),
-      { fieldName: 'projectId', value: projectId, operator: 'EQ' },
-    ],
-  });
+  const cascade = useMemo(() => {
+    const filters = [];
+    if (projectId) {
+      filters.push({
+        fieldName: 'projectId',
+        operator: 'EQ',
+        value: projectId,
+      });
+    }
+    // if (currentUser?.account) {
+    //   filters.push({
+    //     fieldName: 'creatorAccount',
+    //     operator: 'EQ',
+    //     value: currentUser.account,
+    //   });
+    // }
+    return { filters };
+  }, [projectId, currentUser?.account]);
+
 
   const formatDate = (value?: string | null) =>
     value ? new Date(value).toLocaleString() : '-';
@@ -107,10 +127,24 @@ const RequirementList = ({ projectId }) => {
             type: 'POST',
           }}
           remotePaging
-          beforeLoad={buildSearch}
+          cascade={cascade}
           onRow={(record: RequirementDto) => ({
             onClick: () => handleRowClick(record),
           })}
+          toolbar={{
+            left: (
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+                  新增需求
+                </Button>
+              </Space>
+            ),
+            right: (
+              <>
+                <Button icon={<ReloadOutlined />} onClick={reloadData}></Button>
+              </>
+            ),
+          }}
         />
       </div>
       <ExtModal

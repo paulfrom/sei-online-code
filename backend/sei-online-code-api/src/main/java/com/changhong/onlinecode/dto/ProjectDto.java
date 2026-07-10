@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -14,6 +15,7 @@ import java.util.Date;
  * @author sei-online-code
  */
 @Data
+@EqualsAndHashCode(callSuper = false)
 @Schema(description = "项目 DTO")
 public class ProjectDto extends BaseEntityDto {
 
