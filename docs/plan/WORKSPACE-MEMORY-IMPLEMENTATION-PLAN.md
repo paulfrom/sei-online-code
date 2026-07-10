@@ -1948,16 +1948,13 @@ git diff --check
 - [ ] 回写失败不影响 CodingTask 成功。
 - [ ] focused tests 通过。
 
-## 25. 待二次审核问题
-
+## 25. 确认问题
 以下问题在实现前需要最终拍板：
 
 1. 历史文档没有 `design_context_id` 时，确认操作是否允许 bypass memory validation。
-2. `platform-memory` 写入失败是否阻断 `WorkspaceMemory CURRENT`。
-3. 每个 `project_id` 只有一个 CURRENT 是否用数据库部分唯一索引实现，还是只用 service 事务保证。
-4. `RequirementDesignContext` stale 后，是否允许用户强制基于旧上下文确认；当前草案为第一版禁止。
-5. 代码扫描预算默认值是否采用本文的 `200 files / 128KB each / 5MB total / depth 8`。
-6. `MEMORY_INITIALIZE` 是否在项目工作区 ready 后立即执行，还是允许项目设置关闭自动初始化；当前草案为自动执行。
-7. seed 内容从 `unreviewed` 升级为 `reviewed` 的触发方式是否需要前端确认入口；当前草案不做在线编辑，仅保留 front matter 能力。
-8. seed 模板是否第一版只允许一个 active default，还是项目创建时就允许选择模板；当前草案为第一版只允许一个 active default。
-9. seed 模板发布是否需要审批流；当前草案为有平台设置编辑权限即可发布。
+2. `platform-memory` 写入失败不阻断 `WorkspaceMemory CURRENT`, 但要通过job任务重试，保证最终写入。
+3. 每个 `project_id` 只有一个 CURRENT 用数据库唯一索引实现。
+4. 代码扫描预算默认值采用本文的 `200 files / 128KB each / 5MB total / depth 8`。
+5. `MEMORY_INITIALIZE` 在项目工作区 ready 后立即执行。
+6. seed 内容从 `unreviewed` 升级为 `reviewed` 的触发方式是否需要前端确认入口；当前草案不做在线编辑，仅保留 front matter 能力。
+7. seed 模板允许多个 active default，项目创建时就允许选择模板。
