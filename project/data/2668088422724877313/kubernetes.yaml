@@ -1,0 +1,499 @@
+# ------------------------------------------ 平台标准环境变量配置 ------------------------------------------#
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eadp-backend-env
+  namespace: eadp-demo
+data:
+  # 系统环境标识(与效能平台->后台配置->环境管理->代码保持一致)
+  SEI_SYS_ENV: "DEV"
+  # 应用环境标识，对应 sei.application.env (与效能平台->后台配置->环境管理->代码保持一致)
+  SEI_APPLICATION_ENV: "DEV"
+  # Nacos 服务地址，对应 spring.cloud.nacos.server-addr
+  SPRING_CLOUD_NACOS_SERVER_ADDR: "nacos:8848"
+  # Nacos 配置命名空间ID，对应 spring.cloud.nacos.namespace
+  SPRING_CLOUD_NACOS_CONFIG_NAMESPACE: "DEV"
+  # Nacos 服务发现命名空间ID，对应 spring.cloud.nacos.discovery.namespace
+  SPRING_CLOUD_NACOS_DISCOVERY_NAMESPACE: "DEV"
+  # 是否注册到注册中心，默认为true，对应 spring.cloud.nacos.discovery.register.enabled
+  SPRING_CLOUD_NACOS_DISCOVERY_REGISTER_ENABLED: "true"
+  # 服务注册IP(若使用NodePort模式暴露服务，可填任意Node节点IP)
+  # SPRING_CLOUD_NACOS_DISCOVERY_IP: "2668088422724877313.eadp-demo.svc"
+---
+apiVersion: v1
+data:
+  # base64加密（echo -n 'nacos' | base64）
+  SPRING_CLOUD_NACOS_USERNAME: bmFjb3M=
+  # base64加密（echo -n 'MyHandsomePassword' | base64）
+  SPRING_CLOUD_NACOS_PASSWORD: TXlIYW5kc29tZVBhc3N3b3Jk
+kind: Secret
+metadata:
+  name: eadp-backend-auth
+  namespace: eadp-demo
+
+# ------------------------------------------ SkyWalking 环境变量配置(APM链路监控，与OTel链路监控二选一) ------------------------------------------#
+---
+apiVersion: v1
+data:
+  JAVA_TOOL_OPTIONS: '-javaagent:/skywalking/agent/skywalking-agent.jar'
+  SW_AGENT_COLLECTOR_BACKEND_SERVICES: skywalking-oap:11800
+  SW_AGENT_NAMESPACE: eadp-demo
+  SW_LOGGING_DIR: /tmp
+  SW_LOGGING_MAX_FILE_SIZE: '31457280'
+  SW_LOGGING_MAX_HISTORY_FILES: '3'
+kind: ConfigMap
+metadata:
+  name: skywalking-env
+  namespace: eadp-demo
+---
+apiVersion: v1
+data:
+  # base64加密（echo -n 'MyHandsomeAgentToken' | base64）
+  SW_AGENT_AUTHENTICATION: TXlIYW5kc29tZUFnZW50VG9rZW4=
+kind: Secret
+metadata:
+  name: skywalking-auth
+  namespace: eadp-demo
+# ------------------------------------------ OpenTelemetry Collector（OTel链路监控，与APM链路监控二选一） ------------------------------------------#
+---
+apiVersion: v1
+data:
+  JAVA_TOOL_OPTIONS: '-javaagent:/otel/javaagent.jar'
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_RESOURCE_ATTRIBUTES: >-
+    service.namespace=eadp-demo,deployment.environment=eadp-demo,deployment.environment.name=eadp-demo,team=eadp
+kind: ConfigMap
+metadata:
+  name: otel-env
+  namespace: eadp-demo
+---
+apiVersion: v1
+data:
+  # base64加密（echo -n 'MyHandsomeOTelCollectorToken' | base64）
+  OTEL_EXPORTER_OTLP_HEADERS: TXlIYW5kc29tZU9UZWxDb2xsZWN0b3JUb2tlbg==
+kind: Secret
+metadata:
+  name: otel-auth
+  namespace: eadp-demo
+# ------------------------------------------ 无状态服务Deployment配置(后端) ------------------------------------------#
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: 2668088422724877313
+  name: 2668088422724877313
+  namespace: eadp-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: 2668088422724877313
+  template:
+    metadata:
+      labels:
+        app: 2668088422724877313
+    spec:
+      # Pod 级安全上下文
+      securityContext:
+        # 文件系统组：用于控制挂载卷权限。挂载卷会自动赋予该组权限，保证容器用户可读写
+        fsGroup: 1000
+      # 节点亲和性和pod反亲和性设置
+      affinity:
+        # 节点亲和性：要求 Pod 调度到带有指定标签的节点上
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-project
+                operator: In
+                values:
+                - EADP-DEMO
+        # pod反亲和性（硬约束），要求具有相同 app 标签的 Pod 不得调度到同一主机上，用于提升高可用性
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - 2668088422724877313
+            topologyKey: "kubernetes.io/hostname"
+        # pod反亲和性（软规则），同一节点上不运行具有相同标签的pod，非强制
+        # podAntiAffinity:
+        #   preferredDuringSchedulingIgnoredDuringExecution:
+        #   - weight: 50
+        #     podAffinityTerm:
+        #       labelSelector:
+        #         matchExpressions:
+        #         - key: app
+        #           operator: In
+        #           values:
+        #           - 2668088422724877313
+        #       topologyKey: "kubernetes.io/hostname"
+      volumes:
+      - name: agent-vol
+        emptyDir: { }
+      # 使用SkyWalking APM（与OTel Collector二选一）
+      initContainers:
+      - name: agent-container
+        image: rddhub.changhong.com/library/skywalking-java-agent:9.6.0-alpine
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: agent-vol
+          mountPath: /agent
+        command: [ "/bin/sh" ]
+        args: [ "-c", "cp -R /skywalking/agent /agent/" ]
+      # 使用OTel Collector（与SkyWalking APM二选一）
+      # initContainers:
+      # - name: agent-container
+      #   image: rddhub.changhong.com/library/autoinstrumentation-java:2.24.0
+      #   imagePullPolicy: IfNotPresent
+      #   volumeMounts:
+      #   - name: agent-vol
+      #     mountPath: /agent
+      #   command: [ "/bin/sh" ]
+      #   args: [ "-c", "cp -a /javaagent.jar /agent/" ]
+      containers:
+      - env:
+        # 使用SkyWalking APM（与OTel Collector二选一）
+        - name: SW_AGENT_NAME
+          value: eadp-demo::2668088422724877313
+        # 使用OTel Collector（与SkyWalking APM二选一）
+        # - name: OTEL_SERVICE_NAME
+        #   value: '2668088422724877313'
+        # 平台标准环境变量配置
+        envFrom:
+        - configMapRef:
+            name: eadp-backend-env
+        - secretRef:
+            name: eadp-backend-auth
+        # 使用SkyWalking APM（与OTel Collector二选一）
+        - configMapRef:
+            name: skywalking-env
+        - secretRef:
+            name: skywalking-auth
+        # 使用OTel Collector（与SkyWalking APM二选一）
+        # - configMapRef:
+        #     name: otel-env
+        # - secretRef:
+        #     name: otel-auth
+
+        # -------------- 本地联调场景可启用以下配置，使用 NodePort 暴露服务时，可指定任一工作节点 IP 和唯一端口进行注册 -------------- #
+        # # 对应 spring.cloud.nacos.discovery.ip
+        # - name: SPRING_CLOUD_NACOS_DISCOVERY_IP
+        #   value: '2668088422724877313.eadp-demo.svc'
+        # # 对应 spring.cloud.nacos.discovery.port
+        # - name: SPRING_CLOUD_NACOS_DISCOVERY_PORT
+        #   value: '8080'
+        # -------------- 本地联调场景可启用以上配置，使用 NodePort 暴露服务时，可指定任一工作节点 IP 和唯一端口进行注册 -------------- #
+        
+        image: rddhub.registry.com/sei/2668088422724877313:demo
+        imagePullPolicy: IfNotPresent
+        name: 2668088422724877313
+        ports:
+        - containerPort: 8080
+          name: container-port
+          protocol: TCP
+        # Java 服务通常建议内存 requests 与 limits 保持一致，以降低因内存波动导致的调度与稳定性问题
+        # CPU 可适当拉开 requests 与 limits 的差距，以兼顾启动性能和资源利用率
+        resources:
+          limits:
+            cpu: '2'
+            memory: 3Gi
+          requests:
+            cpu: 200m
+            memory: 3Gi
+        # 使用SkyWalking APM（与OTel Collector二选一）
+        volumeMounts:
+        - mountPath: /skywalking
+          name: agent-vol
+        # 使用OTel Collector（与SkyWalking APM二选一）
+        # volumeMounts:
+        # - mountPath: /otel
+        #   name: agent-vol
+        # startupProbe，livenessProbe，readinessProbe
+        # 就绪探针（应用就绪后才接受流量）
+        readinessProbe:
+          # 容器启动60s后开始检测
+          initialDelaySeconds: 60
+          # 容器需要在3s内响应(默认1s)
+          timeoutSeconds: 3
+          # 每10s探测一次
+          periodSeconds: 10
+          # 连续探测1成功表示成功
+          successThreshold: 1
+          # 连续探测3次失败表示失败
+          failureThreshold: 3
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+        # 启动探针。Java 服务启动通常较慢，需要预留足够启动时间。特别是在节点重启或同一节点上多个服务同时启动时，若探测窗口设置过短，可能导致容器反复重启。
+        startupProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+          # 最长允许30*10 + 15 = 315s的启动时间
+          initialDelaySeconds: 15
+          failureThreshold: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+        # 存活探针：用于检测容器是否仍正常运行，若应用发生死锁、线程阻塞或无响应，Kubernetes 将根据探针结果重启容器
+        livenessProbe:
+          # 容器启动60s后启动存活探针
+          initialDelaySeconds: 60
+          # 容器需要在5s内响应(默认1s)
+          timeoutSeconds: 5
+          # 每10s探测一次
+          periodSeconds: 10
+          # 连续探测1成功表示成功
+          successThreshold: 1
+          # 连续探测3次失败表示失败
+          failureThreshold: 3
+          httpGet:
+            scheme: HTTP
+            port: 8080
+            path: /actuator/health
+        # 容器安全上下文配置（securityContext）
+        # 用于控制容器运行权限、安全策略及文件访问行为，建议在生产环境中显式配置
+        securityContext:
+          # 是否启用特权模式（privileged）, 生产环境应保持关闭
+          # true：容器拥有接近宿主机 root 权限
+          # false：默认值，推荐保持关闭
+          privileged: false
+          # 是否以非 root 用户运行
+          # true：强制容器不能以 root 启动（推荐开启，符合安全基线）
+          # 若镜像默认用户为 root 且未指定 runAsUser，则会启动失败
+          runAsNonRoot: true
+          # 是否启用只读根文件系统
+          # true：容器根目录（/）不可写
+          # false：允许写入根文件系统（适用于未适配只读的应用）
+          # ⚠️ 若开启 true，需要将 /tmp、/home/app 等写路径挂载为 volume
+          readOnlyRootFilesystem: false
+          # 容器运行用户 ID
+          runAsUser: 1000
+          # 容器运行主组 ID
+          runAsGroup: 1000
+          # 是否允许权限提升（如 setuid、sudo 等）false：禁止容器内进程提权，true：允许提权（存在安全风险）
+          allowPrivilegeEscalation: false
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: image-registry-config
+      restartPolicy: Always
+      # 允许调度到有污点标签的节点
+      # tolerations:
+      # - key: "stresstest-node"
+      #   operator: "Exists"
+      #   effect: "NoSchedule"
+# ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: 2668088422724877313
+  namespace: eadp-demo
+spec:
+  ports:
+  - name: 2668088422724877313
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: 2668088422724877313
+  type: ClusterIP
+  # 会话保持
+  # sessionAffinity: ClientIP
+  # sessionAffinityConfig:
+  #   clientIP:
+  #     timeoutSeconds: 10800
+# NodePort
+---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: 2668088422724877313
+#   namespace: eadp-demo
+# spec:
+#   selector:
+#     app: 2668088422724877313
+#   ports:
+#   - name: http
+#     port: 8080
+#     此端口需要与SPRING_CLOUD_NACOS_DISCOVERY_PORT的值对应
+#     nodePort: 30500
+#     targetPort: 8080
+#     protocol: TCP
+#   type: NodePort
+---
+# 基于CPU自动扩缩容，最少2个副本，最多5个副本（集群需要安装metrics-server）
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: 2668088422724877313-hpa
+  namespace: eadp-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: 2668088422724877313
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+      selectPolicy: Min
+
+# ------------------------------------------ 无状态服务Deployment配置(前端) ------------------------------------------#
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: 2668088422724877313-web
+  name: 2668088422724877313-web
+  namespace: eadp-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: 2668088422724877313-web
+  template:
+    metadata:
+      labels:
+        app: 2668088422724877313-web
+    spec:
+      # Pod 级安全上下文
+      securityContext:
+        # 文件系统组：用于控制挂载卷权限。挂载卷会自动赋予该组权限，保证容器用户可读写
+        fsGroup: 101
+      # 节点亲和性和pod反亲和性设置
+      affinity:
+        # 节点亲和性：要求 Pod 调度到带有指定标签的节点上
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-project
+                operator: In
+                values:
+                - EADP-DEMO
+        # pod反亲和性（硬约束），要求具有相同 app 标签的 Pod 不得调度到同一主机上，用于提升高可用性
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - 2668088422724877313-web
+            topologyKey: "kubernetes.io/hostname"
+        # pod反亲和性（软规则），同一节点上不运行具有相同标签的pod，非强制
+        # podAntiAffinity:
+        #   preferredDuringSchedulingIgnoredDuringExecution:
+        #   - weight: 50
+        #     podAffinityTerm:
+        #       labelSelector:
+        #         matchExpressions:
+        #         - key: app
+        #           operator: In
+        #           values:
+        #           - 2668088422724877313-web
+        #       topologyKey: "kubernetes.io/hostname"
+      containers:
+      - image: rddhub.registry.com/sei/2668088422724877313-web:demo
+        imagePullPolicy: IfNotPresent
+        name: 2668088422724877313-web
+        ports:
+        - containerPort: 3000
+          name: container-port
+          protocol: TCP
+        # Java 服务通常建议内存 requests 与 limits 保持一致，以降低因内存波动导致的调度与稳定性问题
+        # CPU 可适当拉开 requests 与 limits 的差距，以兼顾启动性能和资源利用率
+        resources:
+          limits:
+            cpu: 500m
+            memory: 150Mi
+          requests:
+            cpu: 200m
+            memory: 100Mi
+        # 容器安全上下文配置（securityContext）
+        # 用于控制容器运行权限、安全策略及文件访问行为，建议在生产环境中显式配置
+        securityContext:
+          # 是否启用特权模式（privileged）, 生产环境应保持关闭
+          # true：容器拥有接近宿主机 root 权限
+          # false：默认值，推荐保持关闭
+          privileged: false
+          # 是否以非 root 用户运行
+          # true：强制容器不能以 root 启动（推荐开启，符合安全基线）
+          # 若镜像默认用户为 root 且未指定 runAsUser，则会启动失败
+          runAsNonRoot: true
+          # 是否启用只读根文件系统
+          # true：容器根目录（/）不可写
+          # false：允许写入根文件系统（适用于未适配只读的应用）
+          # ⚠️ 若开启 true，需要将 /tmp、/home/app 等写路径挂载为 volume
+          readOnlyRootFilesystem: false
+          # 容器运行用户 ID
+          runAsUser: 101
+          # 容器运行主组 ID
+          runAsGroup: 101
+          # 是否允许权限提升（如 setuid、sudo 等）false：禁止容器内进程提权，true：允许提权（存在安全风险）
+          allowPrivilegeEscalation: false
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: image-registry-config
+      restartPolicy: Always
+      # 允许调度到有污点标签的节点
+      # tolerations:
+      # - key: "stresstest-node"
+      #   operator: "Exists"
+      #   effect: "NoSchedule"
+# ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: 2668088422724877313-web
+  namespace: eadp-demo
+spec:
+  ports:
+  - name: 2668088422724877313-web
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: 2668088422724877313-web
+  type: ClusterIP
+  # 会话保持
+  # sessionAffinity: ClientIP
+  # sessionAffinityConfig:
+  #   clientIP:
+  #     timeoutSeconds: 10800

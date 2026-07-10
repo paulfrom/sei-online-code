@@ -1,0 +1,24 @@
+pluginManagement {
+    repositories {
+
+        mavenLocal()
+
+        maven { url 'https://maven.aliyun.com/repository/public/' }
+
+        maven {
+            url REPOSITORY
+            // Gradle默认情况下不允许使用不安全的协议，以提高安全性。
+            allowInsecureProtocol true
+        }
+
+        mavenCentral()
+
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = '2668088422724877313'
+
+include '2668088422724877313-service'
+include '2668088422724877313-api'
+
