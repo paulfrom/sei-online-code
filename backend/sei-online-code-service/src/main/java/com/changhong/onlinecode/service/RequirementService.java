@@ -1,9 +1,13 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.RequirementDto;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
@@ -26,13 +30,25 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private final RequirementDao dao;
     private final RequirementAgentService requirementAgentService;
     private final OverviewDesignService overviewDesignService;
+    private final RequirementDesignContextDao requirementDesignContextDao;
+    private final RequirementDesignContextService requirementDesignContextService;
+    private final DesignMemoryValidationService designMemoryValidationService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public RequirementService(RequirementDao dao,
                               @Lazy RequirementAgentService requirementAgentService,
-                              @Lazy OverviewDesignService overviewDesignService) {
+                              @Lazy OverviewDesignService overviewDesignService,
+                              RequirementDesignContextDao requirementDesignContextDao,
+                              RequirementDesignContextService requirementDesignContextService,
+                              DesignMemoryValidationService designMemoryValidationService,
+                              com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.dao = dao;
         this.requirementAgentService = requirementAgentService;
         this.overviewDesignService = overviewDesignService;
+        this.requirementDesignContextDao = requirementDesignContextDao;
+        this.requirementDesignContextService = requirementDesignContextService;
+        this.designMemoryValidationService = designMemoryValidationService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -59,12 +75,23 @@ public class RequirementService extends BaseEntityService<Requirement> {
             entity.setGenerationToken(GenerationTokenSupport.newToken());
         }
         boolean isNew = entity.getId() == null;
+        if (!isNew) {
+            Requirement existing = dao.findOne(entity.getId());
+            if (existing != null && requirementChanged(existing, entity)) {
+                requirementDesignContextService.invalidate(entity.getId());
+            }
+        }
         OperateResultWithData<Requirement> result = super.save(entity);
         Requirement saved = result.getData();
         if (result.successful() && isNew && saved != null) {
             triggerPrdSpawnAfterCommit(saved.getId(), null, saved.getGenerationToken());
         }
         return result;
+    }
+
+    private boolean requirementChanged(Requirement existing, Requirement updated) {
+        return !Objects.equals(existing.getTitle(), updated.getTitle())
+                || !Objects.equals(existing.getDescription(), updated.getDescription());
     }
 
     /**
@@ -125,6 +152,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
             return OperateResultWithData.operationFailure("仅 PRD_REVIEW 状态可编辑: " + requirement.getStatus());
         }
         requirement.setPrdContent(prdContent);
+        revalidateAfterEdit(requirement, DesignMemoryValidationService.DocumentType.PRD, prdContent);
         return super.save(requirement);
     }
 
@@ -143,12 +171,79 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (requirement.getStatus() != RequirementStatus.PRD_REVIEW) {
             return OperateResultWithData.operationFailure("仅 PRD_REVIEW 状态可确认: " + requirement.getStatus());
         }
+        if (requirement.getMemoryValidationStatus() == MemoryValidationStatus.FAILED) {
+            return OperateResultWithData.operationFailure("记忆校验未通过（FAILED），请修改后重新校验");
+        }
+        OperateResultWithData<Void> validation = validateDesignContextForConfirm(requirement.getDesignContextId(), id);
+        if (validation.notSuccessful()) {
+            return OperateResultWithData.operationFailure(validation.getMessage());
+        }
         requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
         OperateResultWithData<Requirement> result = super.save(requirement);
         if (result.successful()) {
             overviewDesignService.createGeneratingOverview(requirement);
         }
         return result;
+    }
+
+    /**
+     * 手动编辑后重新校验文档，并写入 Requirement 的 memory_validation_status/result。
+     */
+    private void revalidateAfterEdit(Requirement requirement,
+                                     DesignMemoryValidationService.DocumentType type,
+                                     String content) {
+        RequirementDesignContext context = null;
+        if (requirement.getDesignContextId() != null && !requirement.getDesignContextId().isBlank()) {
+            context = requirementDesignContextDao.findOne(requirement.getDesignContextId());
+        }
+        if (context == null) {
+            context = requirementDesignContextDao.findByRequirementIdAndStatus(requirement.getId(),
+                    com.changhong.onlinecode.dto.enums.MemoryRecordStatus.CURRENT);
+        }
+        if (context == null) {
+            requirement.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
+            requirement.setMemoryValidationResultJson(null);
+            return;
+        }
+        DesignMemoryValidationService.ValidationResult result = designMemoryValidationService.validate(type, content, context);
+        requirement.setMemoryValidationStatus(result.getStatus());
+        requirement.setMemoryValidationResultJson(toJson(result));
+    }
+
+    private String toJson(DesignMemoryValidationService.ValidationResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
+        }
+    }
+
+    /**
+     * 确认前校验：design_context_id 存在、validation 未 FAILED、context 未 STALE。
+     *
+     * @param designContextId 设计上下文 id
+     * @param requirementId   需求 id（用于回退查询）
+     * @return 校验结果
+     */
+    private OperateResultWithData<Void> validateDesignContextForConfirm(String designContextId, String requirementId) {
+        if (designContextId == null || designContextId.isBlank()) {
+            return OperateResultWithData.operationFailure("未关联设计上下文，请重新生成 PRD");
+        }
+        RequirementDesignContext context = requirementDesignContextDao.findOne(designContextId);
+        if (context == null) {
+            context = requirementDesignContextDao.findByRequirementIdAndStatus(requirementId,
+                    com.changhong.onlinecode.dto.enums.MemoryRecordStatus.CURRENT);
+        }
+        if (context == null) {
+            return OperateResultWithData.operationFailure("未找到有效设计上下文，请重新生成 PRD");
+        }
+        if (context.getContextStatus() == RequirementDesignContextStatus.FAILED) {
+            return OperateResultWithData.operationFailure("设计上下文状态为 FAILED，请重新生成 PRD");
+        }
+        if (context.getContextStatus() == RequirementDesignContextStatus.STALE) {
+            return OperateResultWithData.operationFailure("设计上下文已过期（STALE），请重新生成 PRD");
+        }
+        return OperateResultWithData.operationSuccess();
     }
 
     /**
@@ -166,6 +261,9 @@ public class RequirementService extends BaseEntityService<Requirement> {
         dto.setStatus(requirement.getStatus());
         dto.setPrdVersion(requirement.getPrdVersion());
         dto.setPrdContent(requirement.getPrdContent());
+        dto.setDesignContextId(requirement.getDesignContextId());
+        dto.setMemoryValidationStatus(requirement.getMemoryValidationStatus());
+        dto.setMemoryValidationResultJson(requirement.getMemoryValidationResultJson());
         dto.setFailureSummary(requirement.getFailureSummary());
         dto.setCreatedDate(requirement.getCreatedDate());
         dto.setLastEditedDate(requirement.getLastEditedDate());

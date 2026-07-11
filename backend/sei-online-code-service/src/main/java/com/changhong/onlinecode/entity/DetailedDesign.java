@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
@@ -85,6 +86,26 @@ public class DetailedDesign extends BaseAuditableEntity {
 
     @Column(name = "generation_token", length = 64)
     private String generationToken;
+
+    /**
+     * 生成详细设计时引用的 RequirementDesignContext id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.4、§15.3。
+     * 默认使用 OverviewDesign 引用的 context，为空时回退 Requirement 引用的 context。
+     */
+    @Column(name = "design_context_id", length = 36)
+    private String designContextId;
+
+    /**
+     * 记忆校验状态。契约 §9.4、§15.4。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "memory_validation_status", length = 32)
+    private MemoryValidationStatus memoryValidationStatus;
+
+    /**
+     * 记忆校验结果（JSON 字符串）。契约 §9.4、§19。
+     */
+    @Column(name = "memory_validation_result_json", columnDefinition = "TEXT")
+    private String memoryValidationResultJson;
 
     @Override
     @Transient

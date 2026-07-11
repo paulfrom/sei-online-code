@@ -62,6 +62,7 @@ export interface ProjectDto {
   packageName?: string;
   workspacePath?: string;
   autoRunCodingTask?: boolean;
+  memorySeedTemplateId?: string;
   state: LifecycleState;
   currentSpecId: string | null;
   createdDate: string;
@@ -175,6 +176,7 @@ export async function saveProject(params: {
   packageName?: string;
   workspacePath?: string;
   autoRunCodingTask?: boolean;
+  memorySeedTemplateId?: string;
 }): Promise<ResultData<ProjectDto>> {
   return request({ url: `${API}/project/save`, method: 'POST', data: params });
 }

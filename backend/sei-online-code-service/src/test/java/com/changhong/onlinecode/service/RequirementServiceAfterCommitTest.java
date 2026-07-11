@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -29,7 +30,9 @@ class RequirementServiceAfterCommitTest {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementAgentService agent = mock(RequirementAgentService.class);
         OverviewDesignService overviewDesignService = mock(OverviewDesignService.class);
-        RequirementService service = new RequirementService(dao, agent, overviewDesignService);
+        RequirementService service = new RequirementService(dao, agent, overviewDesignService,
+                mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
+                mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
 
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -52,7 +55,9 @@ class RequirementServiceAfterCommitTest {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementAgentService agent = mock(RequirementAgentService.class);
         OverviewDesignService overviewDesignService = mock(OverviewDesignService.class);
-        RequirementService service = new RequirementService(dao, agent, overviewDesignService);
+        RequirementService service = new RequirementService(dao, agent, overviewDesignService,
+                mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
+                mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
 
         // 无活动事务时 TransactionUtil.afterCommit 立即执行（非事务上下文调用方的安全回退）
         service.triggerPrdSpawnAfterCommit("req2", null, "token-2");

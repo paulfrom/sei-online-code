@@ -53,7 +53,9 @@ class DetailedDesignAgentServiceTest {
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         service = new DetailedDesignAgentService(detailedDesignDao, overviewDesignDao, requirementDao, agentService,
-                skillService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport);
+                skillService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
+                mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
+                mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test

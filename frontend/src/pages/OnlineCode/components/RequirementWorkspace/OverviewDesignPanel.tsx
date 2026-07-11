@@ -1,14 +1,18 @@
 /**
  * Overview design panel: title/status/content with MarkdownEditor editing.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Card, Empty, Space, Tag, message } from '@ead/suid';
 import { EditOutlined, ReloadOutlined, SaveOutlined, CheckCircleOutlined } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { editOverviewDesign, confirmOverviewDesign, regenerateOverviewDesign } from '@/services/overviewDesign';
+// @ts-ignore JS service module has no declaration file
+import { current as fetchContext } from '@/services/memoryRequirementContext';
 import type { OverviewDesignStatus } from '@/services/onlineCodeTypes';
 import MarkdownEditor from '../MarkdownEditor';
+import DesignContextStatusBar, { formatValidationMessage } from './DesignContextStatusBar';
+import type { DesignContextStatusBarProps } from './DesignContextStatusBar';
 import type { OverviewDesignPanelProps, ResultData } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -48,12 +52,28 @@ const OverviewDesignPanel: React.FC<OverviewDesignPanelProps> = ({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(overviewDesign?.content ?? '');
   const [saving, setSaving] = useState(false);
+  const [contextStatus, setContextStatus] = useState<DesignContextStatusBarProps['contextStatus']>(null);
+  const validationMessage = useMemo(
+    () => formatValidationMessage(overviewDesign.memoryValidationResultJson),
+    [overviewDesign.memoryValidationResultJson],
+  );
 
   useEffect(() => {
     if (!editing) {
       setDraft(overviewDesign?.content ?? '');
     }
   }, [overviewDesign?.content, editing]);
+
+  useEffect(() => {
+    if (overviewDesign?.requirementId) {
+      fetchContext(overviewDesign.requirementId).then((res: ResultData<unknown>) => {
+        if (res.success && res.data) {
+          const ctx = res.data as { contextStatus?: DesignContextStatusBarProps['contextStatus'] };
+          setContextStatus(ctx.contextStatus ?? null);
+        }
+      });
+    }
+  }, [overviewDesign?.requirementId, overviewDesign?.designContextId]);
 
   if (!overviewDesign) {
     return (
@@ -64,6 +84,7 @@ const OverviewDesignPanel: React.FC<OverviewDesignPanelProps> = ({
   }
 
   const status = STATUS_META[overviewDesign.status] ?? { color: 'default', label: overviewDesign.status };
+  const confirmDisabled = overviewDesign.memoryValidationStatus === 'FAILED' || contextStatus === 'STALE';
 
   const handleSave = async () => {
     setSaving(true);
@@ -125,7 +146,7 @@ const OverviewDesignPanel: React.FC<OverviewDesignPanelProps> = ({
                 重生成
               </Button>
               {overviewDesign.status === 'DRAFT' && (
-                <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleConfirm}>
+                <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleConfirm} disabled={confirmDisabled}>
                   确认
                 </Button>
               )}
@@ -137,6 +158,13 @@ const OverviewDesignPanel: React.FC<OverviewDesignPanelProps> = ({
       {overviewDesign.failureSummary && (
         <p style={{ color: '#cf1322', marginBottom: 16 }}>失败摘要：{overviewDesign.failureSummary}</p>
       )}
+
+      <DesignContextStatusBar
+        designContextId={overviewDesign.designContextId}
+        memoryValidationStatus={overviewDesign.memoryValidationStatus}
+        contextStatus={contextStatus}
+        validationMessage={validationMessage}
+      />
 
       <MarkdownEditor
         value={draft}

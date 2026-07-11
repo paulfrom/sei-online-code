@@ -7,8 +7,12 @@ import { Button, Card, Drawer, Form, Input, Select, Space, Table, Tag, message }
 import { EditOutlined, SaveOutlined, CheckCircleOutlined, CheckSquareOutlined } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { editDetailedDesign, confirmDetailedDesign, batchConfirmDetailedDesign } from '@/services/detailedDesign';
+// @ts-ignore JS service module has no declaration file
+import { current as fetchContext } from '@/services/memoryRequirementContext';
 import type { DetailedDesignDto, DetailedDesignStatus } from '@/services/onlineCodeTypes';
 import MarkdownEditor from '../MarkdownEditor';
+import DesignContextStatusBar, { formatValidationMessage } from './DesignContextStatusBar';
+import type { DesignContextStatusBarProps } from './DesignContextStatusBar';
 import type { DetailedDesignPanelProps, ResultData } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -45,6 +49,24 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
   const [draftContent, setDraftContent] = useState('');
   const [draftStatus, setDraftStatus] = useState<DetailedDesignStatus>('REVIEW');
   const [saving, setSaving] = useState(false);
+  const [contextStatus, setContextStatus] = useState<DesignContextStatusBarProps['contextStatus']>(null);
+  const validationMessage = useMemo(
+    () => formatValidationMessage(editing?.memoryValidationResultJson),
+    [editing?.memoryValidationResultJson],
+  );
+
+  const requirementId = detailedDesigns[0]?.requirementId;
+
+  useEffect(() => {
+    if (requirementId) {
+      fetchContext(requirementId).then((res: ResultData<unknown>) => {
+        if (res.success && res.data) {
+          const ctx = res.data as { contextStatus?: DesignContextStatusBarProps['contextStatus'] };
+          setContextStatus(ctx.contextStatus ?? null);
+        }
+      });
+    }
+  }, [requirementId]);
 
   const reviewIds = useMemo(
     () => detailedDesigns.filter((d) => d.status === 'REVIEW').map((d) => d.id),
@@ -121,6 +143,17 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
     },
     { title: '版本', dataIndex: 'version', width: 90 },
     {
+      title: '校验状态',
+      dataIndex: 'memoryValidationStatus',
+      width: 100,
+      render: (status: DetailedDesignDto['memoryValidationStatus'], record: DetailedDesignDto) => {
+        const effective = contextStatus === 'STALE' ? 'FAILED' : (status ?? 'NOT_RUN');
+        const label = effective === 'PASSED' ? '通过' : effective === 'WARNING' ? '警告' : effective === 'FAILED' ? '失败' : '未校验';
+        const color = effective === 'PASSED' ? 'success' : effective === 'WARNING' ? 'warning' : effective === 'FAILED' ? 'error' : 'default';
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    {
       title: '失败摘要',
       dataIndex: 'failureSummary',
       render: (value: string | null | undefined) => value || '-',
@@ -135,7 +168,12 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
             编辑
           </Button>
           {record.status === 'REVIEW' && (
-            <Button type="link" icon={<CheckCircleOutlined />} onClick={() => handleConfirm(record.id)}>
+            <Button
+              type="link"
+              icon={<CheckCircleOutlined />}
+              onClick={() => handleConfirm(record.id)}
+              disabled={record.memoryValidationStatus === 'FAILED' || contextStatus === 'STALE'}
+            >
               确认
             </Button>
           )}
@@ -177,6 +215,12 @@ const DetailedDesignPanel: React.FC<DetailedDesignPanelProps> = ({ detailedDesig
       >
         {editing && (
           <div className={styles.drawerBody}>
+            <DesignContextStatusBar
+              designContextId={editing.designContextId}
+              memoryValidationStatus={editing.memoryValidationStatus}
+              contextStatus={contextStatus}
+              validationMessage={validationMessage}
+            />
             <Form layout="vertical">
               <Form.Item label="标题">
                 <Input

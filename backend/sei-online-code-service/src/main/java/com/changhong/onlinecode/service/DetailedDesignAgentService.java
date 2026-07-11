@@ -9,13 +9,17 @@ import com.changhong.onlinecode.dao.DetailedDesignDao;
 import com.changhong.onlinecode.dao.OverviewDesignDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.DetailedDesign;
 import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -51,6 +55,10 @@ public class DetailedDesignAgentService {
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final FailureInfoSupport failureInfoSupport;
+    private final RequirementDesignContextService requirementDesignContextService;
+    private final DesignContextPromptAssembler designContextPromptAssembler;
+    private final DesignMemoryValidationService designMemoryValidationService;
+    private final ObjectMapper objectMapper;
 
     public DetailedDesignAgentService(DetailedDesignDao detailedDesignDao,
                                       OverviewDesignDao overviewDesignDao,
@@ -60,7 +68,11 @@ public class DetailedDesignAgentService {
                                       CliRunnerRegistry cliRunnerRegistry,
                                       SkillMaterializer skillMaterializer,
                                       BuiltInSkillRegistry builtInSkillRegistry,
-                                      FailureInfoSupport failureInfoSupport) {
+                                      FailureInfoSupport failureInfoSupport,
+                                      RequirementDesignContextService requirementDesignContextService,
+                                      DesignContextPromptAssembler designContextPromptAssembler,
+                                      DesignMemoryValidationService designMemoryValidationService,
+                                      ObjectMapper objectMapper) {
         this.detailedDesignDao = detailedDesignDao;
         this.overviewDesignDao = overviewDesignDao;
         this.requirementDao = requirementDao;
@@ -70,6 +82,10 @@ public class DetailedDesignAgentService {
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
         this.failureInfoSupport = failureInfoSupport;
+        this.requirementDesignContextService = requirementDesignContextService;
+        this.designContextPromptAssembler = designContextPromptAssembler;
+        this.designMemoryValidationService = designMemoryValidationService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -97,7 +113,8 @@ public class DetailedDesignAgentService {
         }
 
         Agent agent = agentService.findByName(AGENT_NAME);
-        String fullPrompt = buildDetailedPrompt(requirement, overview, design, prompt);
+        RequirementDesignContext context = resolveContext(requirement, overview);
+        String fullPrompt = buildDetailedPrompt(requirement, overview, design, prompt, context);
         Path workdir = materializeSkills(agent);
 
         if (agent != null) {
@@ -125,9 +142,15 @@ public class DetailedDesignAgentService {
                     validateDetailedContent(content);
                     latest.setContent(content);
                     latest.setStatus(DetailedDesignStatus.REVIEW);
+                    latest.setDesignContextId(context.getId());
+                    DesignMemoryValidationService.ValidationResult validation = designMemoryValidationService.validate(
+                            DesignMemoryValidationService.DocumentType.DETAILED, content, context);
+                    latest.setMemoryValidationStatus(validation.getStatus());
+                    latest.setMemoryValidationResultJson(toJson(validation));
                     failureInfoSupport.clearDetailedDesignFailure(latest);
                     detailedDesignDao.save(latest);
-                    LOGGER.info("detailed-design-agent: design {} 生成完成", detailedDesignId);
+                    LOGGER.info("detailed-design-agent: design {} 生成完成，校验 {}",
+                            detailedDesignId, validation.getStatus());
                 })
                 .exceptionally(e -> {
                     LOGGER.error("detailed-design-agent: design {} 生成失败", detailedDesignId, e);
@@ -146,17 +169,25 @@ public class DetailedDesignAgentService {
     }
 
     private String buildDetailedPrompt(Requirement requirement, OverviewDesign overview,
-                                       DetailedDesign design, String modifyHint) {
+                                       DetailedDesign design, String modifyHint,
+                                       RequirementDesignContext context) {
         String hint = modifyHint == null ? "" : modifyHint;
+        String designContextSection = designContextPromptAssembler.assemble(context);
+        // 注入当前模块相关 RealityClaim 切片，让详细设计只围绕本模块相关现状展开（契约 §10.8）。
+        String moduleRealitySlice = designContextPromptAssembler.assembleModuleRealitySlice(
+                context, design.getModuleId(), design.getModuleTitle());
         return "PRD：" + requirement.getPrdContent()
                 + "\n概览设计：" + (overview == null ? "" : overview.getContent())
                 + "\n当前模块：" + design.getModuleTitle() + "(" + design.getModuleId() + ")"
                 + "\n修改提示：" + hint
+                + "\n\n" + designContextSection
+                + (moduleRealitySlice == null || moduleRealitySlice.isBlank() ? "" : "\n" + moduleRealitySlice)
                 + "\n请仅围绕当前模块输出一份完整的详细设计 Markdown 文档。"
                 + "\n严格要求："
                 + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
                 + "\n2. 该文档只描述当前模块，不展开其他模块。"
-                + "\n3. 至少包含：模块目标、职责边界、业务流程、接口设计、数据模型、页面/组件设计、状态流转、异常处理、测试要点、编码约束。";
+                + "\n3. 至少包含：模块目标、职责边界、业务流程、接口设计、数据模型、页面/组件设计、状态流转、异常处理、测试要点、编码约束。"
+                + "\n4. 必须包含当前模块目标、职责边界、现有代码影响点、新增/修改文件建议、接口设计、数据模型影响、页面/组件设计、状态流转、异常处理、测试要点、兼容和回归风险。";
     }
 
     private static String normalizeMarkdown(String raw) {
@@ -201,6 +232,35 @@ public class DetailedDesignAgentService {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    private RequirementDesignContext resolveContext(Requirement requirement, OverviewDesign overview) {
+        RequirementDesignContext context = null;
+        String contextId = overview == null ? null : overview.getDesignContextId();
+        if (contextId == null || contextId.isBlank()) {
+            contextId = requirement.getDesignContextId();
+        }
+        if (contextId != null && !contextId.isBlank()) {
+            context = requirementDesignContextService.findCurrentByRequirement(requirement.getId());
+        }
+        if (isReady(context)) {
+            return context;
+        }
+        return requirementDesignContextService.prepare(requirement.getId());
+    }
+
+    private boolean isReady(RequirementDesignContext context) {
+        return context != null
+                && context.getContextStatus() == RequirementDesignContextStatus.READY;
+    }
+
+    private String toJson(DesignMemoryValidationService.ValidationResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            LOGGER.warn("详细设计校验结果序列化失败", e);
+            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
+        }
     }
 
     private Path materializeSkills(Agent agent) {

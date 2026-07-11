@@ -67,6 +67,10 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "worktree_path", length = 500)
     private String worktreePath;
 
+    /** CodingTask 开始执行前的 Git HEAD，用作完成后增量记忆采集基准。 */
+    @Column(name = "base_commit", length = 64)
+    private String baseCommit;
+
     @Column(name = "exit_code")
     private Integer exitCode;
 

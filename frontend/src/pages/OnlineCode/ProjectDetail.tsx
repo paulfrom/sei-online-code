@@ -11,6 +11,7 @@ import { PageContainer, PageHeader, PageState } from './components/PageLayout';
 import RequirementList from './RequirementList';
 import CodingTaskTab from './CodingTaskTab';
 import ProjectSettingsTab from './ProjectSettingsTab';
+import ProjectMemoryTab from './components/ProjectMemoryTab';
 
 // ExtTable 的根元素为 height:100%，依赖祖先链传递确定高度。
 const useStyles = createStyles(() => ({
@@ -75,6 +76,11 @@ const ProjectDetail: React.FC = () => {
       key: 'codingTasks',
       label: '编码任务',
       children: <CodingTaskTab projectId={projectId} />,
+    },
+    {
+      key: 'memory',
+      label: '项目记忆',
+      children: <ProjectMemoryTab projectId={projectId} />,
     },
     {
       key: 'settings',

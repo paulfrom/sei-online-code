@@ -7,17 +7,24 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
+import com.changhong.onlinecode.dto.DetailedDesignDto;
+import com.changhong.onlinecode.dto.OverviewDesignDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
+import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
+import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.dto.DetailedDesignDto;
-import com.changhong.onlinecode.dto.OverviewDesignDto;
+import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.sei.core.dto.ResultData;
+import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,7 +38,9 @@ import java.util.concurrent.CompletableFuture;
 /**
  * CodingTask 执行服务。
  *
- * <p>优先通过 {@link CliRunner} 调用真实 dev-agent 执行编码；CLI 不可用时回退到本地占位执行。</p>
+ * <p>优先通过 {@link CliRunner} 调用真实 dev-agent 执行编码；CLI 不可用时回退到本地占位执行。
+ * CodingTask 成功完成后投递 {@code MEMORY_UPDATE_AFTER_CODING_TASK} job 以增量回写平台记忆，
+ * 投递失败不影响 CodingTask 成功状态（契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §16）。</p>
  *
  * @author sei-online-code
  */
@@ -50,6 +59,11 @@ public class CodingTaskExecutionService {
     private final AgentService agentService;
     private final CliRunnerRegistry cliRunnerRegistry;
     private final FailureInfoSupport failureInfoSupport;
+    private final RequirementDesignContextService requirementDesignContextService;
+    private final DesignContextPromptAssembler designContextPromptAssembler;
+    private final MemoryJobService memoryJobService;
+    private final WorkspaceMemoryService workspaceMemoryService;
+    private final CodingTaskChangeCollector codingTaskChangeCollector;
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
@@ -59,7 +73,12 @@ public class CodingTaskExecutionService {
                                       WorkspaceManager workspaceManager,
                                       AgentService agentService,
                                       CliRunnerRegistry cliRunnerRegistry,
-                                      FailureInfoSupport failureInfoSupport) {
+                                      FailureInfoSupport failureInfoSupport,
+                                      RequirementDesignContextService requirementDesignContextService,
+                                      DesignContextPromptAssembler designContextPromptAssembler,
+                                      MemoryJobService memoryJobService,
+                                      WorkspaceMemoryService workspaceMemoryService,
+                                      CodingTaskChangeCollector codingTaskChangeCollector) {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
         this.requirementService = requirementService;
@@ -69,6 +88,11 @@ public class CodingTaskExecutionService {
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.failureInfoSupport = failureInfoSupport;
+        this.requirementDesignContextService = requirementDesignContextService;
+        this.designContextPromptAssembler = designContextPromptAssembler;
+        this.memoryJobService = memoryJobService;
+        this.workspaceMemoryService = workspaceMemoryService;
+        this.codingTaskChangeCollector = codingTaskChangeCollector;
     }
 
     /**
@@ -102,6 +126,7 @@ public class CodingTaskExecutionService {
 
         WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
         run.setWorktreePath(workspace.getPath());
+        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.getPath()));
         runDao.save(run);
 
         Agent agent = agentService.findByName(AGENT_NAME);
@@ -171,17 +196,53 @@ public class CodingTaskExecutionService {
         persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
         runDao.save(persistedRun);
         codingTaskDao.save(persistedTask);
+
+        if (success) {
+            submitMemoryUpdateJob(persistedTask, persistedRun);
+        }
+    }
+
+    /**
+     * CodingTask 成功后投递 MEMORY_UPDATE_AFTER_CODING_TASK job。失败只记录日志，不影响 CodingTask 成功状态。
+     */
+    private void submitMemoryUpdateJob(CodingTask task, Run run) {
+        try {
+            WorkspaceMemory current = workspaceMemoryService.findCurrent(task.getProjectId());
+            String baseWorkspaceMemoryId = current == null ? null : current.getId();
+            String idempotencyKey = task.getProjectId() + ":" + task.getId() + ":" + run.getId() + ":" + baseWorkspaceMemoryId;
+            OperateResultWithData<MemoryJob> result = memoryJobService.submit(
+                    task.getProjectId(),
+                    MemoryJobType.MEMORY_UPDATE_AFTER_CODING_TASK,
+                    MemoryJobTriggerSource.CODING_TASK_SUCCEEDED,
+                    idempotencyKey,
+                    task.getRequirementId(),
+                    task.getId(),
+                    run.getId(),
+                    baseWorkspaceMemoryId);
+            if (result.successful()) {
+                LOGGER.info("coding-task: 已投递记忆回写 job taskId={}, runId={}, baseMemoryId={}",
+                        task.getId(), run.getId(), baseWorkspaceMemoryId);
+            } else {
+                LOGGER.warn("coding-task: 投递记忆回写 job 失败 taskId={}, reason={}",
+                        task.getId(), result.getMessage());
+            }
+        } catch (Exception e) {
+            LOGGER.warn("coding-task: 投递记忆回写 job 异常 taskId={}", task.getId(), e);
+        }
     }
 
     private String buildExecutionPrompt(CodingTask task, String userPrompt) {
         Requirement requirement = requirementService.findOne(task.getRequirementId());
         OverviewDesignDto overview = overviewDesignService.findByRequirementId(task.getRequirementId());
         DetailedDesignDto detailedDesign = detailedDesignService.findOneDto(task.getDetailedDesignId());
+        RequirementDesignContext context = resolveContext(requirement);
+        String designContextSection = designContextPromptAssembler.assemble(context);
 
         StringBuilder sb = new StringBuilder();
         sb.append("PRD：").append(requirement == null ? "" : requirement.getPrdContent()).append('\n');
         sb.append("概览设计：").append(overview == null ? "" : overview.getContent()).append('\n');
         sb.append("详细设计：").append(detailedDesign == null ? "" : detailedDesign.getContent()).append('\n');
+        sb.append("\n").append(designContextSection).append("\n");
         sb.append("编码任务：").append(task.getTitle()).append('\n');
         sb.append("任务描述：").append(task.getDescription()).append('\n');
 
@@ -194,6 +255,23 @@ public class CodingTaskExecutionService {
         }
         sb.append("请在已解析的工作区中按上述设计执行编码，只修改任务范围内的文件。");
         return sb.toString();
+    }
+
+    private RequirementDesignContext resolveContext(Requirement requirement) {
+        if (requirement == null) {
+            return null;
+        }
+        RequirementDesignContext context = requirementDesignContextService
+                .findCurrentByRequirement(requirement.getId());
+        if (isReady(context)) {
+            return context;
+        }
+        return requirementDesignContextService.prepare(requirement.getId());
+    }
+
+    private boolean isReady(RequirementDesignContext context) {
+        return context != null
+                && context.getContextStatus() == com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus.READY;
     }
 
     private Run findLastFailedRun(String codingTaskId) {

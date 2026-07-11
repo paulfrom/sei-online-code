@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.DetailedDesignDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -15,7 +16,10 @@ class DetailedDesignServiceTest {
         DetailedDesignService service = new DetailedDesignService(
                 mock(DetailedDesignDao.class),
                 mock(DetailedDesignAgentService.class),
-                mock(CodingTaskService.class));
+                mock(CodingTaskService.class),
+                mock(RequirementDesignContextDao.class),
+                mock(DesignMemoryValidationService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         String overview = """
                 # 概览设计
@@ -46,7 +50,10 @@ class DetailedDesignServiceTest {
         DetailedDesignService service = new DetailedDesignService(
                 mock(DetailedDesignDao.class),
                 mock(DetailedDesignAgentService.class),
-                mock(CodingTaskService.class));
+                mock(CodingTaskService.class),
+                mock(RequirementDesignContextDao.class),
+                mock(DesignMemoryValidationService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         String legacyJson = """
                 {

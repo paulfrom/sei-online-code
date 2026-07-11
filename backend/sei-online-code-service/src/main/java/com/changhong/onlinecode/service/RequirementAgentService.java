@@ -8,13 +8,16 @@ import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -53,6 +56,10 @@ public class RequirementAgentService {
     private final SkillMaterializer skillMaterializer;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final FailureInfoSupport failureInfoSupport;
+    private final RequirementDesignContextService requirementDesignContextService;
+    private final DesignContextPromptAssembler designContextPromptAssembler;
+    private final DesignMemoryValidationService designMemoryValidationService;
+    private final ObjectMapper objectMapper;
 
     public RequirementAgentService(RequirementDao requirementDao,
                                    AgentService agentService,
@@ -61,7 +68,11 @@ public class RequirementAgentService {
                                    CliRunnerRegistry cliRunnerRegistry,
                                    SkillMaterializer skillMaterializer,
                                    BuiltInSkillRegistry builtInSkillRegistry,
-                                   FailureInfoSupport failureInfoSupport) {
+                                   FailureInfoSupport failureInfoSupport,
+                                   RequirementDesignContextService requirementDesignContextService,
+                                   DesignContextPromptAssembler designContextPromptAssembler,
+                                   DesignMemoryValidationService designMemoryValidationService,
+                                   ObjectMapper objectMapper) {
         this.requirementDao = requirementDao;
         this.agentService = agentService;
         this.skillService = skillService;
@@ -70,6 +81,10 @@ public class RequirementAgentService {
         this.skillMaterializer = skillMaterializer;
         this.builtInSkillRegistry = builtInSkillRegistry;
         this.failureInfoSupport = failureInfoSupport;
+        this.requirementDesignContextService = requirementDesignContextService;
+        this.designContextPromptAssembler = designContextPromptAssembler;
+        this.designMemoryValidationService = designMemoryValidationService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -97,7 +112,8 @@ public class RequirementAgentService {
 
         Agent agent = agentService.findByName(AGENT_NAME);
         Project project = projectService.findOne(requirement.getProjectId());
-        String fullPrompt = buildPrdPrompt(project, requirement, prompt);
+        RequirementDesignContext context = requirementDesignContextService.prepare(requirementId);
+        String fullPrompt = buildPrdPrompt(project, requirement, prompt, context);
         Path workdir = materializeSkills(agent);
 
         if (agent != null) {
@@ -124,9 +140,15 @@ public class RequirementAgentService {
                     validatePrdContent(content);
                     latest.setPrdContent(content);
                     latest.setStatus(RequirementStatus.PRD_REVIEW);
+                    latest.setDesignContextId(context.getId());
+                    DesignMemoryValidationService.ValidationResult validation = designMemoryValidationService.validate(
+                            DesignMemoryValidationService.DocumentType.PRD, content, context);
+                    latest.setMemoryValidationStatus(validation.getStatus());
+                    latest.setMemoryValidationResultJson(toJson(validation));
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
-                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}", requirementId, latest.getPrdVersion());
+                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}，校验 {}",
+                            requirementId, latest.getPrdVersion(), validation.getStatus());
                 })
                 .exceptionally(e -> {
                     LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
@@ -144,18 +166,22 @@ public class RequirementAgentService {
                 });
     }
 
-    private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint) {
+    private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint,
+                                  RequirementDesignContext context) {
         String projectDesign = project == null ? "" : project.getDesign();
         String hint = modifyHint == null ? "" : modifyHint;
+        String designContextSection = designContextPromptAssembler.assemble(context);
         return "项目描述：" + projectDesign
                 + "\n需求标题：" + requirement.getTitle()
                 + "\n需求描述：" + requirement.getDescription()
                 + "\n修改提示：" + hint
+                + "\n\n" + designContextSection
                 + "\n请输出一个完整的 PRD Markdown 文档。"
                 + "\n严格要求："
                 + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
                 + "\n2. 至少包含：需求概述、业务目标、范围、用户场景、功能需求、非功能需求、验收标准、风险与待确认项。"
-                + "\n3. 文档内容要可直接进入评审，而不是提纲或骨架。";
+                + "\n3. 必须包含与现有系统关系、复用/扩展/重构范围、冲突与待确认项、非目标、验收标准、规范符合性说明。"
+                + "\n4. 文档内容要可直接进入评审，而不是提纲或骨架。";
     }
 
     private static String normalizeMarkdown(String raw) {
@@ -203,6 +229,15 @@ public class RequirementAgentService {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    private String toJson(DesignMemoryValidationService.ValidationResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            LOGGER.warn("PRD 校验结果序列化失败", e);
+            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
+        }
     }
 
     private Path materializeSkills(Agent agent) {

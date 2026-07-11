@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.dto;
 
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -32,6 +33,15 @@ public class OverviewDesignDto extends BaseEntityDto {
 
     @Schema(description = "内容（JSON 字符串，modules[].features[]）")
     private String content;
+
+    @Schema(description = "设计上下文 ID")
+    private String designContextId;
+
+    @Schema(description = "记忆校验状态")
+    private MemoryValidationStatus memoryValidationStatus;
+
+    @Schema(description = "记忆校验结果（JSON 字符串）")
+    private String memoryValidationResultJson;
 
     @Schema(description = "失败摘要")
     private String failureSummary;

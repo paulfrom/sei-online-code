@@ -2,6 +2,7 @@ package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
@@ -87,6 +88,25 @@ public class Requirement extends BaseAuditableEntity {
 
     @Column(name = "generation_token", length = 64)
     private String generationToken;
+
+    /**
+     * 生成 PRD 时引用的 RequirementDesignContext id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.2、§15.1。
+     */
+    @Column(name = "design_context_id", length = 36)
+    private String designContextId;
+
+    /**
+     * 记忆校验状态。新生成初始 NOT_RUN，校验后更新。契约 §9.2、§15.4。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "memory_validation_status", length = 32)
+    private MemoryValidationStatus memoryValidationStatus;
+
+    /**
+     * 记忆校验结果（JSON 字符串）。契约 §9.2、§19。
+     */
+    @Column(name = "memory_validation_result_json", columnDefinition = "TEXT")
+    private String memoryValidationResultJson;
 
     @Override
     @Transient

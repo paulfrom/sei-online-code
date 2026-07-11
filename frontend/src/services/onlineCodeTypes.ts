@@ -20,6 +20,9 @@ export interface RequirementDto {
   status: RequirementStatus;
   prdVersion: number;
   prdContent?: string | null;
+  designContextId?: string | null;
+  memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
+  memoryValidationResultJson?: string | null;
   failureSummary?: string | null;
   createdDate: string;
   lastEditedDate: string;
@@ -40,6 +43,9 @@ export interface OverviewDesignDto {
   status: OverviewDesignStatus;
   version: number;
   content?: string | null;
+  designContextId?: string | null;
+  memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
+  memoryValidationResultJson?: string | null;
   failureSummary?: string | null;
   createdDate: string;
   lastEditedDate: string;
@@ -63,6 +69,9 @@ export interface DetailedDesignDto {
   status: DetailedDesignStatus;
   version: number;
   content?: string | null;
+  designContextId?: string | null;
+  memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
+  memoryValidationResultJson?: string | null;
   failureSummary?: string | null;
   createdDate: string;
   lastEditedDate: string;

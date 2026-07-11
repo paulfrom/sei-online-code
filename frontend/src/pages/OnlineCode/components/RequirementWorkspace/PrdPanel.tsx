@@ -1,14 +1,18 @@
 /**
  * PRD panel: read-only preview with an editable mode and save action.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Card, Space, Tag, message } from '@ead/suid';
 import { EditOutlined, ReloadOutlined, SaveOutlined, CheckCircleOutlined } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { editPrd, confirmPrd, regeneratePrd } from '@/services/requirement';
+// @ts-ignore JS service module has no declaration file
+import { current as fetchContext } from '@/services/memoryRequirementContext';
 import type { RequirementStatus } from '@/services/onlineCodeTypes';
 import MarkdownEditor from '../MarkdownEditor';
+import DesignContextStatusBar, { formatValidationMessage } from './DesignContextStatusBar';
+import type { DesignContextStatusBarProps } from './DesignContextStatusBar';
 import type { PrdPanelProps, ResultData } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -45,6 +49,11 @@ const PrdPanel: React.FC<PrdPanelProps> = ({ requirement, onRefresh }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(requirement.prdContent ?? '');
   const [saving, setSaving] = useState(false);
+  const [contextStatus, setContextStatus] = useState<DesignContextStatusBarProps['contextStatus']>(null);
+  const validationMessage = useMemo(
+    () => formatValidationMessage(requirement.memoryValidationResultJson),
+    [requirement.memoryValidationResultJson],
+  );
 
   useEffect(() => {
     if (!editing) {
@@ -52,7 +61,17 @@ const PrdPanel: React.FC<PrdPanelProps> = ({ requirement, onRefresh }) => {
     }
   }, [requirement.prdContent, editing]);
 
+  useEffect(() => {
+    fetchContext(requirement.id).then((res: ResultData<unknown>) => {
+      if (res.success && res.data) {
+        const ctx = res.data as { contextStatus?: DesignContextStatusBarProps['contextStatus'] };
+        setContextStatus(ctx.contextStatus ?? null);
+      }
+    });
+  }, [requirement.id, requirement.designContextId]);
+
   const status = STATUS_META[requirement.status] ?? { color: 'default', label: requirement.status };
+  const confirmDisabled = requirement.memoryValidationStatus === 'FAILED' || contextStatus === 'STALE';
 
   const handleSave = async () => {
     setSaving(true);
@@ -115,7 +134,7 @@ const PrdPanel: React.FC<PrdPanelProps> = ({ requirement, onRefresh }) => {
                   <Button icon={<ReloadOutlined />} onClick={handleRegenerate}>
                     重生成
                   </Button>
-                  <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleConfirm}>
+                  <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleConfirm} disabled={confirmDisabled}>
                     确认
                   </Button>
                 </>
@@ -128,6 +147,13 @@ const PrdPanel: React.FC<PrdPanelProps> = ({ requirement, onRefresh }) => {
       {requirement.failureSummary && (
         <p style={{ color: '#cf1322', marginBottom: 16 }}>失败摘要：{requirement.failureSummary}</p>
       )}
+
+      <DesignContextStatusBar
+        designContextId={requirement.designContextId}
+        memoryValidationStatus={requirement.memoryValidationStatus}
+        contextStatus={contextStatus}
+        validationMessage={validationMessage}
+      />
 
       <MarkdownEditor
         value={draft}

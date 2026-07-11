@@ -1,9 +1,13 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.DetailedDesignDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.DetailedDesignDto;
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.entity.DetailedDesign;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
@@ -41,14 +45,22 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
     private final DetailedDesignDao dao;
     private final DetailedDesignAgentService detailedDesignAgentService;
     private final CodingTaskService codingTaskService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RequirementDesignContextDao requirementDesignContextDao;
+    private final DesignMemoryValidationService designMemoryValidationService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public DetailedDesignService(DetailedDesignDao dao,
                                  @Lazy DetailedDesignAgentService detailedDesignAgentService,
-                                 @Lazy CodingTaskService codingTaskService) {
+                                 @Lazy CodingTaskService codingTaskService,
+                                 RequirementDesignContextDao requirementDesignContextDao,
+                                 DesignMemoryValidationService designMemoryValidationService,
+                                 com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.dao = dao;
         this.detailedDesignAgentService = detailedDesignAgentService;
         this.codingTaskService = codingTaskService;
+        this.requirementDesignContextDao = requirementDesignContextDao;
+        this.designMemoryValidationService = designMemoryValidationService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -127,6 +139,7 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
             return ResultData.fail("仅 REVIEW 状态可编辑: " + design.getStatus());
         }
         design.setContent(content);
+        revalidateAfterEdit(design, DesignMemoryValidationService.DocumentType.DETAILED, content);
         OperateResultWithData<DetailedDesign> result = super.save(design);
         return result.successful()
                 ? ResultData.success(convertToDto(result.getData()))
@@ -148,6 +161,13 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         if (design.getStatus() != DetailedDesignStatus.REVIEW) {
             return ResultData.fail("仅 REVIEW 状态可确认: " + design.getStatus());
         }
+        if (design.getMemoryValidationStatus() == MemoryValidationStatus.FAILED) {
+            return ResultData.fail("记忆校验未通过（FAILED），请修改后重新校验");
+        }
+        ResultData<Void> validation = validateDesignContextForConfirm(design.getDesignContextId());
+        if (!validation.successful()) {
+            return ResultData.fail(validation.getMessage());
+        }
         design.setStatus(DetailedDesignStatus.CONFIRMED);
         OperateResultWithData<DetailedDesign> result = super.save(design);
         if (result.successful()) {
@@ -165,11 +185,17 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
     @Transactional(rollbackFor = Exception.class)
     public ResultData<List<DetailedDesignDto>> batchConfirm(List<String> ids) {
         List<DetailedDesignDto> list = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
         for (String id : ids) {
             ResultData<DetailedDesignDto> result = confirm(id);
             if (result.successful() && result.getData() != null) {
                 list.add(result.getData());
+            } else {
+                failures.add(id + ": " + result.getMessage());
             }
+        }
+        if (!failures.isEmpty()) {
+            return ResultData.fail("部分详细设计确认失败: " + String.join("; ", failures));
         }
         return ResultData.success(list);
     }
@@ -324,6 +350,58 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
     }
 
     /**
+     * 手动编辑后重新校验详细设计。
+     */
+    private void revalidateAfterEdit(DetailedDesign design,
+                                     DesignMemoryValidationService.DocumentType type,
+                                     String content) {
+        RequirementDesignContext context = findCurrentContext(design.getDesignContextId());
+        if (context == null) {
+            design.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
+            design.setMemoryValidationResultJson(null);
+            return;
+        }
+        DesignMemoryValidationService.ValidationResult result = designMemoryValidationService.validate(type, content, context);
+        design.setMemoryValidationStatus(result.getStatus());
+        design.setMemoryValidationResultJson(toJson(result));
+    }
+
+    private RequirementDesignContext findCurrentContext(String designContextId) {
+        if (designContextId == null || designContextId.isBlank()) {
+            return null;
+        }
+        return requirementDesignContextDao.findOne(designContextId);
+    }
+
+    private String toJson(DesignMemoryValidationService.ValidationResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
+        }
+    }
+
+    /**
+     * 确认前校验：design_context_id 存在、context 未 STALE/FAILED。
+     */
+    private ResultData<Void> validateDesignContextForConfirm(String designContextId) {
+        if (designContextId == null || designContextId.isBlank()) {
+            return ResultData.fail("未关联设计上下文，请重新生成详细设计");
+        }
+        RequirementDesignContext context = requirementDesignContextDao.findOne(designContextId);
+        if (context == null) {
+            return ResultData.fail("未找到有效设计上下文，请重新生成详细设计");
+        }
+        if (context.getContextStatus() == RequirementDesignContextStatus.FAILED) {
+            return ResultData.fail("设计上下文状态为 FAILED，请重新生成详细设计");
+        }
+        if (context.getContextStatus() == RequirementDesignContextStatus.STALE) {
+            return ResultData.fail("设计上下文已过期（STALE），请重新生成详细设计");
+        }
+        return ResultData.success(null);
+    }
+
+    /**
      * 实体转 DTO。
      *
      * @param design 详细设计实体
@@ -340,6 +418,9 @@ public class DetailedDesignService extends BaseEntityService<DetailedDesign> {
         dto.setStatus(design.getStatus());
         dto.setVersion(design.getVersion());
         dto.setContent(design.getContent());
+        dto.setDesignContextId(design.getDesignContextId());
+        dto.setMemoryValidationStatus(design.getMemoryValidationStatus());
+        dto.setMemoryValidationResultJson(design.getMemoryValidationResultJson());
         dto.setFailureSummary(design.getFailureSummary());
         dto.setCreatedDate(design.getCreatedDate());
         dto.setLastEditedDate(design.getLastEditedDate());

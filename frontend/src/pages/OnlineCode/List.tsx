@@ -5,7 +5,7 @@
  * Row action enters the current Project Description -> Overview Design -> Module Detailed Design
  * -> Feature Design -> Coding Execution flow.
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { history } from 'umi';
 import {
   ActionButton,
@@ -15,6 +15,7 @@ import {
   ExtTable,
   Form,
   Input,
+  Select,
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
@@ -23,6 +24,7 @@ import {
   PROJECT_FIND_BY_PAGE_URL,
   saveProject,
 } from '@/services/onlineCode';
+import * as memorySeedTemplate from '@/services/memorySeedTemplate';
 import type { LifecycleState, ProjectDto } from '@/services/onlineCode';
 import LifecycleBadge from './components/LifecycleBadge';
 import { PageContainer } from './components/PageLayout';
@@ -32,6 +34,35 @@ const ProjectList: React.FC = () => {
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [seedTemplates, setSeedTemplates] = useState<Array<{ value: string; label: string }>>([]);
+  const [seedTemplatesLoading, setSeedTemplatesLoading] = useState(false);
+
+  const loadSeedTemplates = async () => {
+    setSeedTemplatesLoading(true);
+    try {
+      const res = await memorySeedTemplate.list();
+      if (res.success && res.data) {
+        const options = res.data
+          .filter((t) => t.status === 'ACTIVE')
+          .map((t) => ({
+            value: t.id,
+            label: `${t.name} (v${t.version}${t.isDefault ? ' · 默认' : ''})`,
+          }));
+        setSeedTemplates(options);
+      } else {
+        message.error(res.message ?? '加载 seed 模板失败');
+      }
+    } finally {
+      setSeedTemplatesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (modalOpen) {
+      loadSeedTemplates();
+      form.resetFields();
+    }
+  }, [modalOpen]);
 
   const goProjectDetail = (record: ProjectDto) => {
     history.push(`/online-code/project?projectId=${record.id}`);
@@ -76,6 +107,7 @@ const ProjectList: React.FC = () => {
     packageName?: string;
     workspacePath?: string;
     autoRunCodingTask?: boolean;
+    memorySeedTemplateId?: string;
   }) => {
     setSaving(true);
     try {
@@ -158,6 +190,14 @@ const ProjectList: React.FC = () => {
           </Form.Item>
           <Form.Item name="workspacePath" label="工作区路径">
             <Input placeholder="留空则自动生成" allowClear />
+          </Form.Item>
+          <Form.Item name="memorySeedTemplateId" label="记忆 Seed 模板">
+            <Select
+              placeholder="留空则使用全局默认模板"
+              allowClear
+              loading={seedTemplatesLoading}
+              options={seedTemplates}
+            />
           </Form.Item>
           <Form.Item name="autoRunCodingTask" valuePropName="checked" initialValue={false}>
             <Checkbox>确认详细设计后自动执行编码任务</Checkbox>

@@ -50,7 +50,9 @@ class RequirementAgentServiceTest {
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         service = new RequirementAgentService(requirementDao, agentService, skillService, projectService,
-                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport);
+                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
+                mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
+                mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test

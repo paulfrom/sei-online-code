@@ -40,6 +40,9 @@ class ProjectServiceTest {
     private PlanService planService;
     private ProjectLifecycleService lifecycleService;
     private WorkspaceManager workspaceManager;
+    private AgentMemoryTemplateService agentMemoryTemplateService;
+    private MemoryJobService memoryJobService;
+    private MemorySeedTemplateService memorySeedTemplateService;
     private ProjectService projectService;
 
     @BeforeEach
@@ -48,7 +51,11 @@ class ProjectServiceTest {
         planService = mock(PlanService.class);
         lifecycleService = mock(ProjectLifecycleService.class);
         workspaceManager = mock(WorkspaceManager.class);
-        projectService = new ProjectService(projectDao, planService, lifecycleService, workspaceManager);
+        agentMemoryTemplateService = mock(AgentMemoryTemplateService.class);
+        memoryJobService = mock(MemoryJobService.class);
+        memorySeedTemplateService = mock(MemorySeedTemplateService.class);
+        projectService = new ProjectService(projectDao, planService, lifecycleService, workspaceManager,
+                agentMemoryTemplateService, memoryJobService, memorySeedTemplateService);
     }
 
     @Disabled("新建项目需在 super.save 后获取 id，依赖 Spring 容器与数据库；本地无 Docker 时由集成测试覆盖")

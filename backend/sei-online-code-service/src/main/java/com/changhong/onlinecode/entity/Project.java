@@ -61,6 +61,15 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "auto_run_coding_task", nullable = false)
     private Boolean autoRunCodingTask = Boolean.FALSE;
 
+    /**
+     * 项目绑定的 seed 记忆模板 id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.1。
+     *
+     * <p>创建项目时若显式选择模板则保存其 id；未选择时解析并保存当时的全局默认模板 id，
+     * 避免后续默认模板切换改变本项目缺文件补齐来源。必须指向 ACTIVE 模板；已归档仍可沿用补齐。</p>
+     */
+    @Column(name = "memory_seed_template_id", length = 36)
+    private String memorySeedTemplateId;
+
     @Override
     @Transient
     public String getDisplay() {
