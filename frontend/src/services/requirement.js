@@ -32,3 +32,15 @@ export async function editPrd(id, prdContent) {
 export async function confirmPrd(id) {
   return request({ url: `${API}/requirement/${id}/confirmPrd`, method: 'POST' });
 }
+
+export async function addRequirementComment(id, { content, metadataJson }) {
+  return request({
+    url: `${API}/requirement/${id}/comments`,
+    method: 'POST',
+    data: { content, metadataJson },
+  });
+}
+
+export async function retryMr(id) {
+  return request({ url: `${API}/requirement/${id}/mr/retry`, method: 'POST' });
+}
