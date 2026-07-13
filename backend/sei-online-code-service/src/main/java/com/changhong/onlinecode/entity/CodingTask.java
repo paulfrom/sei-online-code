@@ -45,7 +45,7 @@ public class CodingTask extends BaseAuditableEntity {
     @Column(name = "requirement_id", nullable = false, length = 36)
     private String requirementId;
 
-    @Column(name = "detailed_design_id", nullable = false, length = 36)
+    @Column(name = "detailed_design_id", length = 36)
     private String detailedDesignId;
 
     @Column(name = "detailed_design_version", nullable = false)
@@ -64,6 +64,31 @@ public class CodingTask extends BaseAuditableEntity {
     @Convert(converter = com.changhong.onlinecode.entity.converter.StringListConverter.class)
     @Column(name = "file_scope", columnDefinition = "TEXT")
     private List<String> fileScope;
+
+    /** 任务所属区域：frontend / backend，用于 lane 并发控制。 */
+    @Column(name = "area", length = 32)
+    private String area;
+
+    /** 依赖的任务 key 列表（planTaskKey），用于 DAG 调度。 */
+    @Convert(converter = com.changhong.onlinecode.entity.converter.StringListConverter.class)
+    @Column(name = "depends_on", columnDefinition = "TEXT")
+    private List<String> dependsOn;
+
+    /** 所属执行计划 ID，用于任务分组与过期判定。 */
+    @Column(name = "execution_plan_id", length = 36)
+    private String executionPlanId;
+
+    /** 计划内任务 key。 */
+    @Column(name = "plan_task_key", length = 64)
+    private String planTaskKey;
+
+    /** 分配的开发代理名称：frontend-dev-agent / backend-dev-agent。 */
+    @Column(name = "assigned_agent", length = 64)
+    private String assignedAgent;
+
+    /** 自动化循环 ID，loopId 变化时任务标记为 STALE。 */
+    @Column(name = "loop_id", length = 64)
+    private String loopId;
 
     @Column(name = "failure_summary", columnDefinition = "TEXT")
     private String failureSummary;

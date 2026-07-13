@@ -43,6 +43,22 @@ public class PlatformConfig extends BaseAuditableEntity {
     @Column(name = "template_gitlab_url", length = 500)
     private String templateGitlabUrl;
 
+    /** 交付 GitLab API Base URL。 */
+    @Column(name = "gitlab_api_base_url", length = 500)
+    private String gitlabApiBaseUrl;
+
+    /** 交付 GitLab token。 */
+    @Column(name = "gitlab_token", length = 500)
+    private String gitlabToken;
+
+    /** 交付 GitLab Project ID 或 path。 */
+    @Column(name = "gitlab_project_id", length = 300)
+    private String gitlabProjectId;
+
+    /** 交付目标分支。 */
+    @Column(name = "gitlab_target_branch", length = 200)
+    private String gitlabTargetBranch;
+
     @Override
     @Transient
     public String getDisplay() {

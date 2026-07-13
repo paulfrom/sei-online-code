@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
@@ -41,12 +42,34 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "coding_task_id", length = 36)
     private String codingTaskId;
 
+    @Column(name = "requirement_id", length = 36)
+    private String requirementId;
+
     @Column(name = "run_no")
     private Integer runNo;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "trigger_source", length = 32)
     private TriggerSource triggerSource;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "run_type", length = 32)
+    private RunType runType;
+
+    @Column(name = "loop_id", length = 64)
+    private String loopId;
+
+    @Column(name = "cancel_requested", nullable = false)
+    private Boolean cancelRequested = Boolean.FALSE;
+
+    @Column(name = "invalidated_by_comment_id", length = 36)
+    private String invalidatedByCommentId;
+
+    @Column(name = "memory_context_id", length = 36)
+    private String memoryContextId;
+
+    @Column(name = "workspace_memory_id", length = 36)
+    private String workspaceMemoryId;
 
     @Column(name = "user_prompt", columnDefinition = "TEXT")
     private String userPrompt;

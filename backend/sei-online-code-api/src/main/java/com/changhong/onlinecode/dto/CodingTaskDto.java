@@ -43,6 +43,24 @@ public class CodingTaskDto extends BaseEntityDto {
     @Schema(description = "文件范围")
     private List<String> fileScope;
 
+    @Schema(description = "任务区域：frontend / backend")
+    private String area;
+
+    @Schema(description = "依赖任务 key 列表")
+    private List<String> dependsOn;
+
+    @Schema(description = "执行计划 ID")
+    private String executionPlanId;
+
+    @Schema(description = "计划任务 key")
+    private String planTaskKey;
+
+    @Schema(description = "分配代理")
+    private String assignedAgent;
+
+    @Schema(description = "循环 ID")
+    private String loopId;
+
     @Schema(description = "失败摘要")
     private String failureSummary;
 

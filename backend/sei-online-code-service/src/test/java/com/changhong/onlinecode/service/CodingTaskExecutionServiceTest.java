@@ -14,6 +14,8 @@ import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
+import com.changhong.onlinecode.dto.CodingTaskDto;
+import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,6 +39,8 @@ class CodingTaskExecutionServiceTest {
     private FailureInfoSupport failureInfoSupport;
     private MemoryJobService memoryJobService;
     private WorkspaceMemoryService workspaceMemoryService;
+    private AgentService agentService;
+    private CodingTaskScheduler codingTaskScheduler;
     private CodingTaskExecutionService service;
 
     @BeforeEach
@@ -45,6 +50,8 @@ class CodingTaskExecutionServiceTest {
         failureInfoSupport = new FailureInfoSupport();
         memoryJobService = mock(MemoryJobService.class);
         workspaceMemoryService = mock(WorkspaceMemoryService.class);
+        agentService = mock(AgentService.class);
+        codingTaskScheduler = mock(CodingTaskScheduler.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
@@ -52,7 +59,7 @@ class CodingTaskExecutionServiceTest {
                 mock(OverviewDesignService.class),
                 mock(DetailedDesignService.class),
                 mock(WorkspaceManager.class),
-                mock(AgentService.class),
+                agentService,
                 mock(CliRunnerRegistry.class),
                 failureInfoSupport,
                 mock(RequirementDesignContextService.class),
@@ -61,6 +68,7 @@ class CodingTaskExecutionServiceTest {
                 workspaceMemoryService,
                 mock(CodingTaskChangeCollector.class)
         );
+        service.setCodingTaskScheduler(codingTaskScheduler);
     }
 
     @Test
@@ -188,10 +196,89 @@ class CodingTaskExecutionServiceTest {
         verify(memoryJobService).submit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void finishRun_schedulerManaged_success_callsSchedulerAndDoesNotSubmitMemoryJob() throws Exception {
+        Run callbackRun = new Run();
+        callbackRun.setId("run5");
+        CodingTask callbackTask = new CodingTask();
+        callbackTask.setId("task5");
+
+        Run persistedRun = new Run();
+        persistedRun.setId("run5");
+        persistedRun.setState(RunState.RUNNING);
+        persistedRun.setTriggerSource(TriggerSource.AUTO);
+        CodingTask persistedTask = new CodingTask();
+        persistedTask.setId("task5");
+        persistedTask.setStatus(CodingTaskStatus.RUNNING);
+        persistedTask.setProjectId("proj-1");
+        persistedTask.setRequirementId("req-1");
+
+        when(runDao.findOne("run5")).thenReturn(persistedRun);
+        when(codingTaskDao.findOne("task5")).thenReturn(persistedTask);
+
+        invokeFinishRun(callbackRun, callbackTask, true, null, true);
+
+        assertEquals(RunState.SUCCEEDED, persistedRun.getState());
+        verify(codingTaskScheduler).onDevelopmentRunFinished("task5", true, null);
+        verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(codingTaskDao, never()).save(any(CodingTask.class));
+    }
+
+    @Test
+    void finishRun_schedulerManaged_failure_callsSchedulerWithReason() throws Exception {
+        Run callbackRun = new Run();
+        callbackRun.setId("run6");
+        CodingTask callbackTask = new CodingTask();
+        callbackTask.setId("task6");
+
+        Run persistedRun = new Run();
+        persistedRun.setId("run6");
+        persistedRun.setState(RunState.RUNNING);
+        CodingTask persistedTask = new CodingTask();
+        persistedTask.setId("task6");
+        persistedTask.setStatus(CodingTaskStatus.RUNNING);
+
+        when(runDao.findOne("run6")).thenReturn(persistedRun);
+        when(codingTaskDao.findOne("task6")).thenReturn(persistedTask);
+
+        invokeFinishRun(callbackRun, callbackTask, false, "compile error", true);
+
+        assertEquals(RunState.FAILED, persistedRun.getState());
+        verify(codingTaskScheduler).onDevelopmentRunFinished("task6", false, "compile error");
+        verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executePlanTask_agentNotFound_marksFailedAndTriggersScheduler() {
+        CodingTask task = new CodingTask();
+        task.setId("task7");
+        task.setRequirementId("req-7");
+        task.setProjectId("proj-7");
+        task.setStatus(CodingTaskStatus.BLOCKED);
+
+        when(codingTaskDao.findOne("task7")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task7")).thenReturn(java.util.Collections.emptyList());
+        when(agentService.findByName("missing-agent")).thenReturn(null);
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task7", "missing-agent", "prompt");
+
+        assertFalse(result.successful());
+        assertEquals("开发代理不存在: missing-agent", result.getMessage());
+        assertEquals(CodingTaskStatus.FAILED, task.getStatus());
+        assertEquals("开发代理未找到", task.getFailureSummary());
+        verify(codingTaskDao).save(task);
+        verify(codingTaskScheduler).schedule("req-7");
+    }
+
     private void invokeFinishRun(Run run, CodingTask task, boolean success, String reason) throws Exception {
+        invokeFinishRun(run, task, success, reason, false);
+    }
+
+    private void invokeFinishRun(Run run, CodingTask task, boolean success, String reason,
+                                 boolean schedulerManaged) throws Exception {
         Method method = CodingTaskExecutionService.class.getDeclaredMethod(
-                "finishRun", Run.class, CodingTask.class, boolean.class, String.class);
+                "finishRun", Run.class, CodingTask.class, boolean.class, String.class, boolean.class);
         method.setAccessible(true);
-        method.invoke(service, run, task, success, reason);
+        method.invoke(service, run, task, success, reason, schedulerManaged);
     }
 }

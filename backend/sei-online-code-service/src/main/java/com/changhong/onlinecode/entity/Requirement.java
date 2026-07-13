@@ -3,6 +3,7 @@ package com.changhong.onlinecode.entity;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
@@ -88,6 +89,34 @@ public class Requirement extends BaseAuditableEntity {
 
     @Column(name = "generation_token", length = 64)
     private String generationToken;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "automation_status", nullable = false, length = 32)
+    private RequirementAutomationStatus automationStatus = RequirementAutomationStatus.IDLE;
+
+    /**
+     * 当前自动化循环 ID，用于丢弃被中断 loop 的过期 agent 回调。
+     */
+    @Column(name = "active_loop_id", length = 64)
+    private String activeLoopId;
+
+    @Column(name = "accepted_at")
+    private Date acceptedAt;
+
+    @Column(name = "accepted_by_agent", length = 100)
+    private String acceptedByAgent;
+
+    @Column(name = "delivery_branch", length = 200)
+    private String deliveryBranch;
+
+    @Column(name = "delivery_commit_hash", length = 64)
+    private String deliveryCommitHash;
+
+    @Column(name = "delivery_mr_url", length = 500)
+    private String deliveryMrUrl;
+
+    @Column(name = "delivery_target_branch", length = 200)
+    private String deliveryTargetBranch;
 
     /**
      * 生成 PRD 时引用的 RequirementDesignContext id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.2、§15.1。

@@ -2,9 +2,15 @@ package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.RequirementApi;
 import com.changhong.onlinecode.dto.RequirementDto;
+import com.changhong.onlinecode.dto.RequirementCommentDto;
+import com.changhong.onlinecode.dto.request.CreateRequirementCommentRequest;
 import com.changhong.onlinecode.dto.request.EditPrdRequest;
 import com.changhong.onlinecode.dto.request.RegeneratePrdRequest;
+import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.service.RequirementAutomationService;
+import com.changhong.onlinecode.service.RequirementCommentService;
+import com.changhong.onlinecode.service.RequirementDeliveryService;
 import com.changhong.onlinecode.service.RequirementService;
 import com.changhong.sei.core.controller.BaseEntityController;
 import com.changhong.sei.core.dto.ResultData;
@@ -31,9 +37,18 @@ public class RequirementController extends BaseEntityController<Requirement, Req
         implements RequirementApi {
 
     private final RequirementService service;
+    private final RequirementAutomationService requirementAutomationService;
+    private final RequirementCommentService requirementCommentService;
+    private final RequirementDeliveryService requirementDeliveryService;
 
-    public RequirementController(RequirementService service) {
+    public RequirementController(RequirementService service,
+                                 RequirementAutomationService requirementAutomationService,
+                                 RequirementCommentService requirementCommentService,
+                                 RequirementDeliveryService requirementDeliveryService) {
         this.service = service;
+        this.requirementAutomationService = requirementAutomationService;
+        this.requirementCommentService = requirementCommentService;
+        this.requirementDeliveryService = requirementDeliveryService;
     }
 
     @Override
@@ -76,5 +91,26 @@ public class RequirementController extends BaseEntityController<Requirement, Req
             return ResultData.fail(result.getMessage());
         }
         return ResultData.success(service.convertToDto(result.getData()));
+    }
+
+    @Override
+    public ResultData<RequirementCommentDto> addComment(String id, CreateRequirementCommentRequest request) {
+        try {
+            RequirementComment comment = requirementAutomationService.handleHumanComment(
+                    id, request.getContent(), request.getMetadataJson());
+            return ResultData.success(requirementCommentService.convertToDto(comment));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    @Override
+    public ResultData<RequirementDto> retryMr(String id) {
+        try {
+            Requirement requirement = requirementDeliveryService.retry(id);
+            return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
     }
 }

@@ -42,6 +42,11 @@ public interface CodingTaskDao extends BaseEntityDao<CodingTask> {
     List<CodingTask> findByStatus(com.changhong.onlinecode.dto.enums.CodingTaskStatus status);
 
     /**
+     * 按需求 ID、loop id、任务 key 查询唯一任务（用于 remediation 时复用旧任务）。
+     */
+    CodingTask findByRequirementIdAndLoopIdAndPlanTaskKey(String requirementId, String loopId, String planTaskKey);
+
+    /**
      * 仅当任务仍处于期望状态时切换状态，用于补偿/执行抢占。
      *
      * @param id 任务 ID

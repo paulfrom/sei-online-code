@@ -66,6 +66,7 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
         created.setId(PlatformConfig.FIXED_ID);
         created.setWorkspaceRoot(null);
         created.setTemplateGitlabUrl("");
+        created.setGitlabTargetBranch("main");
         entityManager.persist(created);
         return created;
     }
@@ -79,17 +80,40 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<PlatformConfig> save(String workspaceRoot, String templateGitlabUrl) {
+        return save(workspaceRoot, templateGitlabUrl, null, null, null, null);
+    }
+
+    /**
+     * upsert 单例平台配置，包含 GitLab 交付配置。gitlabToken 为空时保留旧值。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<PlatformConfig> save(String workspaceRoot,
+                                                      String templateGitlabUrl,
+                                                      String gitlabApiBaseUrl,
+                                                      String gitlabToken,
+                                                      String gitlabProjectId,
+                                                      String gitlabTargetBranch) {
         PlatformConfig existing = dao.findOne(PlatformConfig.FIXED_ID);
         if (Objects.isNull(existing)) {
             PlatformConfig created = new PlatformConfig();
             created.setId(PlatformConfig.FIXED_ID);
             created.setWorkspaceRoot(workspaceRoot);
             created.setTemplateGitlabUrl(templateGitlabUrl);
+            created.setGitlabApiBaseUrl(gitlabApiBaseUrl);
+            created.setGitlabToken(gitlabToken);
+            created.setGitlabProjectId(gitlabProjectId);
+            created.setGitlabTargetBranch(isNotBlank(gitlabTargetBranch) ? gitlabTargetBranch : "main");
             entityManager.persist(created);
             return OperateResultWithData.operationSuccessWithData(created);
         }
         existing.setWorkspaceRoot(workspaceRoot);
         existing.setTemplateGitlabUrl(templateGitlabUrl);
+        existing.setGitlabApiBaseUrl(gitlabApiBaseUrl);
+        if (isNotBlank(gitlabToken)) {
+            existing.setGitlabToken(gitlabToken);
+        }
+        existing.setGitlabProjectId(gitlabProjectId);
+        existing.setGitlabTargetBranch(isNotBlank(gitlabTargetBranch) ? gitlabTargetBranch : "main");
         return super.save(existing);
     }
 

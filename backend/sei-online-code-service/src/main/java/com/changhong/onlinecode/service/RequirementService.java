@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.RequirementDto;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Requirement;
@@ -12,6 +13,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +36,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignMemoryValidationService designMemoryValidationService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private RequirementAutomationService requirementAutomationService;
 
     public RequirementService(RequirementDao dao,
                               @Lazy RequirementAgentService requirementAgentService,
@@ -49,6 +52,11 @@ public class RequirementService extends BaseEntityService<Requirement> {
         this.requirementDesignContextService = requirementDesignContextService;
         this.designMemoryValidationService = designMemoryValidationService;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired
+    public void setRequirementAutomationService(@Lazy RequirementAutomationService requirementAutomationService) {
+        this.requirementAutomationService = requirementAutomationService;
     }
 
     @Override
@@ -157,7 +165,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     }
 
     /**
-     * 确认 PRD，冻结并创建概览设计。
+     * 确认 PRD，冻结并启动 PM 自动化执行循环。
      *
      * @param id 需求 ID
      * @return 写操作结果
@@ -179,9 +187,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
             return OperateResultWithData.operationFailure(validation.getMessage());
         }
         requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
         OperateResultWithData<Requirement> result = super.save(requirement);
-        if (result.successful()) {
-            overviewDesignService.createGeneratingOverview(requirement);
+        if (result.successful() && requirementAutomationService != null) {
+            TransactionUtil.afterCommit(() -> requirementAutomationService.startInitialLoop(id));
         }
         return result;
     }
@@ -259,11 +268,19 @@ public class RequirementService extends BaseEntityService<Requirement> {
         dto.setTitle(requirement.getTitle());
         dto.setDescription(requirement.getDescription());
         dto.setStatus(requirement.getStatus());
+        dto.setAutomationStatus(requirement.getAutomationStatus());
         dto.setPrdVersion(requirement.getPrdVersion());
         dto.setPrdContent(requirement.getPrdContent());
         dto.setDesignContextId(requirement.getDesignContextId());
         dto.setMemoryValidationStatus(requirement.getMemoryValidationStatus());
         dto.setMemoryValidationResultJson(requirement.getMemoryValidationResultJson());
+        dto.setActiveLoopId(requirement.getActiveLoopId());
+        dto.setAcceptedAt(requirement.getAcceptedAt());
+        dto.setAcceptedByAgent(requirement.getAcceptedByAgent());
+        dto.setDeliveryBranch(requirement.getDeliveryBranch());
+        dto.setDeliveryCommitHash(requirement.getDeliveryCommitHash());
+        dto.setDeliveryMrUrl(requirement.getDeliveryMrUrl());
+        dto.setDeliveryTargetBranch(requirement.getDeliveryTargetBranch());
         dto.setFailureSummary(requirement.getFailureSummary());
         dto.setCreatedDate(requirement.getCreatedDate());
         dto.setLastEditedDate(requirement.getLastEditedDate());
