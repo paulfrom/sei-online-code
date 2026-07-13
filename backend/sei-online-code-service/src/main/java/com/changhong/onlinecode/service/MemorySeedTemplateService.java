@@ -95,6 +95,14 @@ public class MemorySeedTemplateService extends BaseEntityService<MemorySeedTempl
         template.setDecisionsTemplate(readSeedFile(BUILTIN_DEFAULT_CODE, FILE_DECISIONS));
         template.setModulesTemplate(readSeedFile(BUILTIN_DEFAULT_CODE, FILE_MODULES));
         template.setPublishedAt(new Date());
+        template.setCreatedDate(new Date());
+        template.setLastEditedDate(new Date());
+        template.setCreatorAccount("system");
+        template.setCreatorName("system");
+        template.setLastEditorId("system");
+        template.setLastEditorName("system");
+        template.setCreatorId("system");
+        template.setLastEditorAccount("system");
         // 固定主键：BaseEntityService.save 对预置主键会拒绝，首行走 persist
         template.setId(BUILTIN_DEFAULT_CODE + ":" + BUILTIN_DEFAULT_VERSION);
         entityManager.persist(template);
