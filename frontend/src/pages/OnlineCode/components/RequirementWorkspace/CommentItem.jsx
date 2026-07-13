@@ -199,5 +199,5 @@ const CommentItem: React.FC<CommentItemProps> = ({
   );
 };
 
-export default CommentItem;
+export default React.memo(CommentItem);
 export { COMMENT_META };

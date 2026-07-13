@@ -121,4 +121,4 @@ const LoopGroup: React.FC<LoopGroupProps> = ({
   );
 };
 
-export default LoopGroup;
+export default React.memo(LoopGroup);
