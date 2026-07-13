@@ -18,7 +18,10 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.sei.core.utils.TransactionUtil;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -52,6 +55,7 @@ public class RequirementAutomationService {
     private RequirementDesignContextService requirementDesignContextService;
     private RunDao runDao;
     private RequirementDeliveryService requirementDeliveryService;
+    private PmAgentClient pmAgentClient;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAutomationService(RequirementDao requirementDao,
@@ -68,12 +72,14 @@ public class RequirementAutomationService {
                                         RequirementDesignContextService requirementDesignContextService,
                                         RunDao runDao,
                                         RequirementDeliveryService requirementDeliveryService,
+                                        PmAgentClient pmAgentClient,
                                         ObjectMapper objectMapper) {
         this.executionPlanDao = executionPlanDao;
         this.requirementCommentService = requirementCommentService;
         this.requirementDesignContextService = requirementDesignContextService;
         this.runDao = runDao;
         this.requirementDeliveryService = requirementDeliveryService;
+        this.pmAgentClient = pmAgentClient;
         this.objectMapper = objectMapper;
     }
 
@@ -110,9 +116,11 @@ public class RequirementAutomationService {
         return comment;
     }
 
+    private static final int MAX_REMEDIATION_ROUNDS = 3;
+
     @Transactional(rollbackFor = Exception.class)
     public void onPlanTasksSettled(String requirementId) {
-        if (executionPlanDao == null) {
+        if (executionPlanDao == null || pmAgentClient == null || requirementCommentService == null) {
             return;
         }
         Requirement requirement = requirementDao.findOne(requirementId);
@@ -121,9 +129,7 @@ public class RequirementAutomationService {
         }
         ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                 requirementId, requirement.getActiveLoopId());
-        if (plan == null || plan.getStatus() == ExecutionPlanStatus.ACCEPTED
-                || plan.getStatus() == ExecutionPlanStatus.FAILED
-                || plan.getStatus() == ExecutionPlanStatus.INTERRUPTED) {
+        if (plan == null || isPlanTerminal(plan.getStatus())) {
             return;
         }
         List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirementId).stream()
@@ -138,15 +144,28 @@ public class RequirementAutomationService {
         plan.setStatus(ExecutionPlanStatus.ACCEPTING);
         executionPlanDao.save(plan);
 
-        boolean accepted = tasks.stream().allMatch(t -> t.getStatus() == CodingTaskStatus.SUCCEEDED);
-        appendComment(requirementId, requirement.getActiveLoopId(),
-                RequirementCommentAuthorType.TEST_AGENT, "test-agent", RequirementCommentType.VALIDATION_RESULT,
-                accepted ? "计划级验证通过：所有任务级验证均已通过。" : "计划级验证未通过：存在失败、阻塞或过期任务。",
-                validationMetadata(tasks));
-        if (accepted) {
+        List<PlanTask> planTasks = parsePlanTasks(plan.getPlanJson());
+        List<RequirementComment> previousComments = requirementCommentService.findByRequirementId(requirementId);
+        RequirementDesignContext context = requirementDesignContextService != null
+                ? requirementDesignContextService.findCurrentByRequirement(requirementId) : null;
+
+        PmAgentClient.PmAcceptanceResult result = pmAgentClient.reviewAcceptance(
+                requirement, plan, planTasks, previousComments, context);
+        if (result == null) {
+            appendComment(requirementId, requirement.getActiveLoopId(),
+                    RequirementCommentAuthorType.SYSTEM, "system", RequirementCommentType.FAILURE,
+                    "PM agent 验收评审失败：调用失败或返回 JSON 无法解析。", null);
+            plan.setStatus(ExecutionPlanStatus.FAILED);
+            requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
+            executionPlanDao.save(plan);
+            requirementDao.save(requirement);
+            return;
+        }
+
+        if (result.accepted()) {
             appendComment(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.PM_AGENT, "pm-agent", RequirementCommentType.ACCEPTANCE,
-                    "PM 验收通过，进入 GitLab MR 交付。", "{\"accepted\":true}");
+                    result.summary(), acceptanceMetadata(result, true));
             plan.setStatus(ExecutionPlanStatus.ACCEPTED);
             requirement.setAcceptedAt(new Date());
             requirement.setAcceptedByAgent("pm-agent");
@@ -156,45 +175,35 @@ public class RequirementAutomationService {
             if (requirementDeliveryService != null) {
                 TransactionUtil.afterCommit(() -> requirementDeliveryService.deliver(requirementId, plan.getId()));
             }
-        } else {
+            return;
+        }
+
+        long planCount = executionPlanDao.countByRequirementIdAndLoopId(requirementId, requirement.getActiveLoopId());
+        int remediationRound = (int) planCount - 1;
+        if (remediationRound >= MAX_REMEDIATION_ROUNDS) {
             appendComment(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.PM_AGENT, "pm-agent", RequirementCommentType.REMEDIATION,
-                    "PM 验收未通过；当前骨架停止在人工处理状态，后续可基于失败任务生成补救计划。",
-                    "{\"accepted\":false}");
+                    "PM 验收未通过，且已达到最多 " + MAX_REMEDIATION_ROUNDS
+                            + " 轮补救上限，转人工处理。\n\n" + result.summary(),
+                    acceptanceMetadata(result, false));
             plan.setStatus(ExecutionPlanStatus.NEEDS_REMEDIATION);
             requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
             executionPlanDao.save(plan);
             requirementDao.save(requirement);
-        }
-    }
-
-    /**
-     * PM 执行计划生成成功后的持久化入口。
-     *
-     * @param requirementId   需求 ID
-     * @param executionPlanId 执行计划 ID
-     * @param loopId          当前循环 ID
-     * @param projectId       项目 ID
-     * @param planTasks       计划任务列表
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void persistSuccess(String requirementId, String executionPlanId, String loopId,
-                               String projectId, List<PlanTask> planTasks) {
-        Requirement requirement = requirementDao.findOne(requirementId);
-        if (requirement == null) {
-            LOGGER.warn("persistSuccess: requirement not found {}", requirementId);
             return;
         }
-        requirement.setActiveLoopId(loopId);
-        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
-        requirementDao.save(requirement);
 
-        createCodingTasks(requirementId, executionPlanId, loopId, projectId, planTasks);
-        codingTaskScheduler.schedule(requirementId);
+        appendComment(requirementId, requirement.getActiveLoopId(),
+                RequirementCommentAuthorType.PM_AGENT, "pm-agent", RequirementCommentType.REMEDIATION,
+                result.summary(), acceptanceMetadata(result, false));
+        plan.setStatus(ExecutionPlanStatus.NEEDS_REMEDIATION);
+        executionPlanDao.save(plan);
+
+        startRemediationLoop(requirement, plan, context, previousComments, result);
     }
 
     private void startLoop(Requirement requirement, ExecutionPlanType planType, String summary) {
-        if (executionPlanDao == null || requirementCommentService == null) {
+        if (executionPlanDao == null || requirementCommentService == null || pmAgentClient == null) {
             LOGGER.warn("startLoop skipped because automation dependencies are not initialized");
             return;
         }
@@ -204,7 +213,20 @@ public class RequirementAutomationService {
         requirementDao.save(requirement);
 
         RequirementDesignContext context = prepareContext(requirement);
-        List<PlanTask> planTasks = defaultPlanTasks(requirement);
+        List<RequirementComment> previousComments = requirementCommentService.findByRequirementId(requirement.getId());
+        ExecutionPlan previousPlan = findLatestPreviousPlan(requirement.getId(), planType);
+
+        PmAgentClient.PmPlanResult planResult = pmAgentClient.generatePlan(
+                requirement, loopId, planType, context, previousComments, previousPlan);
+        if (planResult == null) {
+            requirement.setAutomationStatus(RequirementAutomationStatus.FAILED);
+            requirementDao.save(requirement);
+            appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.SYSTEM, "system",
+                    RequirementCommentType.FAILURE,
+                    "PM agent 执行计划生成失败：agent 调用失败或返回 JSON 无法解析。", null);
+            return;
+        }
+
         ExecutionPlan plan = new ExecutionPlan();
         plan.setRequirementId(requirement.getId());
         plan.setLoopId(loopId);
@@ -217,13 +239,13 @@ public class RequirementAutomationService {
             plan.setMemoryContextId(context.getId());
             plan.setWorkspaceMemoryId(context.getWorkspaceMemoryId());
         }
-        plan.setPlanJson(planJson(requirement, planTasks, planType));
+        plan.setPlanJson(planJson(requirement, planResult, planType));
         executionPlanDao.save(plan);
 
         appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
-                RequirementCommentType.EXECUTION_PLAN, summary + "\n\n" + renderTasks(planTasks),
+                RequirementCommentType.EXECUTION_PLAN, summary + "\n\n" + renderTasks(planResult.tasks()),
                 "{\"executionPlanId\":\"" + plan.getId() + "\",\"planType\":\"" + planType + "\"}");
-        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), planTasks);
+        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), planResult.tasks());
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
@@ -259,9 +281,15 @@ public class RequirementAutomationService {
     private void createCodingTasks(String requirementId, String executionPlanId, String loopId,
                                    String projectId, List<PlanTask> planTasks) {
         for (PlanTask planTask : planTasks) {
-            CodingTask task = new CodingTask();
-            task.setProjectId(projectId);
-            task.setRequirementId(requirementId);
+            CodingTask task = codingTaskDao.findByRequirementIdAndLoopIdAndPlanTaskKey(
+                    requirementId, loopId, planTask.taskKey());
+            if (task == null) {
+                task = new CodingTask();
+                task.setProjectId(projectId);
+                task.setRequirementId(requirementId);
+                task.setLoopId(loopId);
+                task.setDetailedDesignVersion(1);
+            }
             task.setExecutionPlanId(executionPlanId);
             task.setPlanTaskKey(planTask.taskKey());
             task.setTitle(planTask.title());
@@ -270,9 +298,9 @@ public class RequirementAutomationService {
             task.setArea(planTask.area());
             task.setDependsOn(planTask.dependsOn());
             task.setFileScope(planTask.fileScope());
-            task.setLoopId(loopId);
             task.setStatus(CodingTaskStatus.PENDING);
-            task.setDetailedDesignVersion(1);
+            task.setFailureSummary(null);
+            task.setFailureDetail(null);
             codingTaskDao.save(task);
         }
     }
@@ -308,6 +336,115 @@ public class RequirementAutomationService {
                 commentType, content, metadataJson);
     }
 
+    private ExecutionPlan findLatestPreviousPlan(String requirementId, ExecutionPlanType currentType) {
+        if (currentType == ExecutionPlanType.INITIAL) {
+            return null;
+        }
+        return executionPlanDao.findTopByRequirementIdOrderByVersionDesc(requirementId);
+    }
+
+    private void startRemediationLoop(Requirement requirement, ExecutionPlan currentPlan,
+                                      RequirementDesignContext context,
+                                      List<RequirementComment> previousComments,
+                                      PmAgentClient.PmAcceptanceResult acceptanceResult) {
+        String loopId = requirement.getActiveLoopId();
+        List<PlanTask> remediationTasks = acceptanceResult.remediationTasks();
+        if (remediationTasks == null || remediationTasks.isEmpty()) {
+            LOGGER.warn("pm-agent returned no remediation tasks for requirement={}", requirement.getId());
+            requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
+            requirementDao.save(requirement);
+            return;
+        }
+
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setRequirementId(requirement.getId());
+        plan.setLoopId(loopId);
+        plan.setVersion(nextPlanVersion(requirement.getId()));
+        plan.setPlanType(ExecutionPlanType.REMEDIATION);
+        plan.setStatus(ExecutionPlanStatus.READY);
+        plan.setSummary("PM 补救计划（基于验收反馈）");
+        plan.setCreatedByAgent("pm-agent");
+        if (context != null) {
+            plan.setMemoryContextId(context.getId());
+            plan.setWorkspaceMemoryId(context.getWorkspaceMemoryId());
+        }
+        plan.setPlanJson(planJson(requirement,
+                new PmAgentClient.PmPlanResult(currentPlan.getSummary(), remediationTasks,
+                        acceptanceResult.findings(), List.of()),
+                ExecutionPlanType.REMEDIATION));
+        executionPlanDao.save(plan);
+
+        appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
+                RequirementCommentType.EXECUTION_PLAN, "PM 生成补救执行计划。\n\n" + renderTasks(remediationTasks),
+                "{\"executionPlanId\":\"" + plan.getId() + "\",\"planType\":\"REMEDIATION\"}");
+        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), remediationTasks);
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        executionPlanDao.save(plan);
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        requirementDao.save(requirement);
+        TransactionUtil.afterCommit(() -> codingTaskScheduler.schedule(requirement.getId()));
+    }
+
+    private List<PlanTask> parsePlanTasks(String planJson) {
+        if (planJson == null || planJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(planJson);
+            JsonNode tasksNode = root.path("tasks");
+            if (!tasksNode.isArray()) {
+                return List.of();
+            }
+            List<PlanTask> tasks = new ArrayList<>();
+            for (JsonNode taskNode : tasksNode) {
+                String taskKey = taskNode.path("taskKey").asText(null);
+                String title = taskNode.path("title").asText(null);
+                String description = taskNode.path("description").asText("");
+                String agent = taskNode.path("agent").asText(null);
+                String area = taskNode.path("area").asText(null);
+                List<String> dependsOn = readStringList(taskNode.path("dependsOn"));
+                List<String> fileScope = readStringList(taskNode.path("fileScope"));
+                if (taskKey == null || title == null || agent == null || area == null) {
+                    continue;
+                }
+                tasks.add(new PlanTask(taskKey, title, description, agent, area, dependsOn, fileScope));
+            }
+            return tasks;
+        } catch (Exception e) {
+            LOGGER.warn("parsePlanTasks failed: planJson={}", planJson, e);
+            return List.of();
+        }
+    }
+
+    private List<String> readStringList(JsonNode node) {
+        List<String> result = new ArrayList<>();
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (item.isTextual()) {
+                    result.add(item.asText());
+                }
+            }
+        }
+        return result;
+    }
+
+    private String acceptanceMetadata(PmAgentClient.PmAcceptanceResult result, boolean accepted) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "accepted", accepted,
+                    "findings", result.findings() == null ? List.of() : result.findings()));
+        } catch (Exception e) {
+            return "{\"accepted\":" + accepted + "}";
+        }
+    }
+
+    private boolean isPlanTerminal(ExecutionPlanStatus status) {
+        return status == ExecutionPlanStatus.ACCEPTED
+                || status == ExecutionPlanStatus.FAILED
+                || status == ExecutionPlanStatus.INTERRUPTED
+                || status == ExecutionPlanStatus.NEEDS_REMEDIATION;
+    }
+
     private int nextPlanVersion(String requirementId) {
         ExecutionPlan latest = executionPlanDao.findTopByRequirementIdOrderByVersionDesc(requirementId);
         return latest == null ? 1 : Objects.requireNonNullElse(latest.getVersion(), 0) + 1;
@@ -336,12 +473,12 @@ public class RequirementAutomationService {
         return tasks;
     }
 
-    private String planJson(Requirement requirement, List<PlanTask> tasks, ExecutionPlanType planType) {
+    private String planJson(Requirement requirement, PmAgentClient.PmPlanResult planResult, ExecutionPlanType planType) {
         try {
             Map<String, Object> root = new LinkedHashMap<>();
-            root.put("goal", requirement.getTitle());
+            root.put("goal", planResult.goal());
             root.put("planType", planType.name());
-            root.put("tasks", tasks.stream().map(task -> {
+            root.put("tasks", planResult.tasks().stream().map(task -> {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("taskKey", task.taskKey());
                 item.put("title", task.title());
@@ -353,10 +490,14 @@ public class RequirementAutomationService {
                 item.put("acceptanceCriteria", List.of("开发执行成功", "任务级验证通过"));
                 return item;
             }).toList());
-            root.put("risks", List.of("当前 PM 计划为服务端可执行骨架，复杂拆分仍需 PM agent JSON 直连增强"));
-            root.put("validation", Map.of("commands", List.of("full-stack")));
+            root.put("risks", planResult.risks().isEmpty() ? List.of() : planResult.risks());
+            List<Map<String, String>> commands = planResult.validationCommands().stream()
+                    .map(cmd -> Map.of("area", cmd.area(), "command", cmd.command()))
+                    .toList();
+            root.put("validation", Map.of("commands", commands));
             return objectMapper.writeValueAsString(root);
         } catch (Exception e) {
+            LOGGER.warn("planJson serialize failed", e);
             return "{\"goal\":\"" + requirement.getTitle() + "\",\"tasks\":[]}";
         }
     }

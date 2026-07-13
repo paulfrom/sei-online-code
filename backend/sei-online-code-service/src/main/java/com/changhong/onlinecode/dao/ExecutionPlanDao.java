@@ -17,4 +17,6 @@ public interface ExecutionPlanDao extends BaseEntityDao<ExecutionPlan> {
     ExecutionPlan findTopByRequirementIdOrderByVersionDesc(String requirementId);
 
     ExecutionPlan findTopByRequirementIdAndLoopIdOrderByVersionDesc(String requirementId, String loopId);
+
+    long countByRequirementIdAndLoopId(String requirementId, String loopId);
 }
