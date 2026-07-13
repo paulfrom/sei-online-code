@@ -40,7 +40,7 @@ const routes: any[] = [
           {
             path: '/online-code/requirement',
             name: 'onlineCodeRequirement',
-            title: 'menu.onlineCodeRequirement',
+            title: 'menu.onlineCodeRequirementDetail',
             component: './OnlineCode/RequirementDetail',
           },
           {
