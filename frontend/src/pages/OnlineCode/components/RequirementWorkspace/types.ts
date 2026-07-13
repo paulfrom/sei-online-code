@@ -160,6 +160,7 @@ export interface RightTabsProps {
   tasks: CodingTaskDto[];
   runs: RunDto[];
   delivery: DeliverySummary;
+  comments: RequirementCommentDto[];
   onRunLog: (run: RunDto) => void;
   onRun: (t: CodingTaskDto) => Promise<void>;
   onRerun: (t: CodingTaskDto, p: string) => Promise<void>;

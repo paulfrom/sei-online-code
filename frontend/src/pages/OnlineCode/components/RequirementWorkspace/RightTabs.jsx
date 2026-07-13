@@ -5,7 +5,10 @@
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Tabs } from '@ead/suid';
-import type { RightTabsProps, RightTab } from './types';
+import ExecutionPlanTab from './ExecutionPlanTab';
+import TaskTab from './TaskTab';
+import RunTab from './RunTab';
+import DeliveryTab from './DeliveryTab';
 
 const useStyles = createStyles(({ token, css }) => ({
   tabs: css`
@@ -16,26 +19,45 @@ const useStyles = createStyles(({ token, css }) => ({
     background: ${token.colorBgContainer};
     border: 1px solid ${token.colorBorderSecondary};
     border-radius: ${token.borderRadius}px;
-    & .ead-tabs-content {
+    & .ead-tabs-content-holder {
       flex: 1;
       min-height: 0;
+      overflow: auto;
+    }
+    & .ead-tabs-content {
+      height: 100%;
+    }
+    & .ead-tabs-nav {
+      padding: 0 ${token.paddingMD}px;
+      margin-bottom: 0;
+    }
+    & .ead-tabs-tabpane {
       padding: ${token.paddingMD}px;
+      height: 100%;
       overflow: auto;
     }
   `,
 }));
 
-export interface RightTabsRef {
-  switchTo: (tab: RightTab, taskKey?: string) => void;
-}
-
-const RightTabs = forwardRef<RightTabsRef, RightTabsProps>(
+/**
+ * @param {{
+ *   plan?: any, tasks: any[], runs: any[], delivery: any,
+ *   comments: any[], onRunLog?: (run: any) => void,
+ *   onRun?: (t: any) => Promise<void>, onRerun?: (t: any, p: string) => Promise<void>,
+ *   onStop: () => Promise<void>, onRetryMr?: () => Promise<void>,
+ *   autoStopEnabled: boolean, highlightTaskKey?: string | null,
+ *   onHighlightTaskConsumed?: () => void,
+ * }} props
+ * @param {React.Ref<{ switchTo: (tab: string, taskKey?: string) => void }>} ref
+ */
+const RightTabs = forwardRef(
   (
     {
       plan,
       tasks,
       runs,
       delivery,
+      comments,
       onRunLog,
       onRun,
       onRerun,
@@ -48,8 +70,8 @@ const RightTabs = forwardRef<RightTabsRef, RightTabsProps>(
     ref,
   ) => {
     const { styles } = useStyles();
-    const [activeTab, setActiveTab] = useState<RightTab>('plan');
-    const [pendingTaskKey, setPendingTaskKey] = useState<string | null | undefined>(highlightTaskKey);
+    const [activeTab, setActiveTab] = useState('plan');
+    const [pendingTaskKey, setPendingTaskKey] = useState(null);
 
     useImperativeHandle(ref, () => ({
       switchTo: (tab, taskKey) => {
@@ -60,59 +82,67 @@ const RightTabs = forwardRef<RightTabsRef, RightTabsProps>(
       },
     }));
 
-    const handleTabChange = (key: string) => {
-      setActiveTab(key as RightTab);
+    const consumeTaskHighlight = () => {
+      if (pendingTaskKey) {
+        setPendingTaskKey(null);
+      }
+      if (onHighlightTaskConsumed) onHighlightTaskConsumed();
+    };
+
+    const handleTabChange = (key) => {
+      setActiveTab(key);
       if (key !== 'task' && pendingTaskKey) {
         setPendingTaskKey(null);
-        onHighlightTaskConsumed?.();
+        if (onHighlightTaskConsumed) onHighlightTaskConsumed();
       }
     };
 
-    const consumeTaskHighlight = () => {
-      setPendingTaskKey(null);
-      onHighlightTaskConsumed?.();
+    const jumpToTask = (taskKey) => {
+      setActiveTab('task');
+      if (taskKey) setPendingTaskKey(taskKey);
+    };
+
+    const jumpToRun = (task) => {
+      setActiveTab('run');
+      if (onRunLog) onRunLog(task);
     };
 
     const tabItems = [
       {
-        key: 'plan' as RightTab,
+        key: 'plan',
         label: '执行计划',
-        children: (
-          <div>
-            <p>ExecutionPlanTab placeholder</p>
-            {plan && <p>{plan.summary || plan.planType}</p>}
-          </div>
-        ),
+        children: <ExecutionPlanTab plan={plan} tasks={tasks} onJumpTask={jumpToTask} />,
       },
       {
-        key: 'task' as RightTab,
+        key: 'task',
         label: '任务',
         children: (
-          <div>
-            <p>TaskTab placeholder</p>
-            {pendingTaskKey && <p>Highlight: {pendingTaskKey}</p>}
-            <p>Tasks: {tasks.length}</p>
-          </div>
+          <TaskTab
+            tasks={tasks}
+            onRun={onRun}
+            onRerun={onRerun}
+            onViewRun={jumpToRun}
+            onStop={onStop}
+            stopEnabled={autoStopEnabled}
+            highlightTaskKey={pendingTaskKey || highlightTaskKey}
+            onHighlightTaskConsumed={consumeTaskHighlight}
+          />
         ),
       },
       {
-        key: 'run' as RightTab,
+        key: 'run',
         label: '运行',
-        children: (
-          <div>
-            <p>RunTab placeholder</p>
-            <p>Runs: {runs.length}</p>
-          </div>
-        ),
+        children: <RunTab runs={runs} onOpenLog={onRunLog} />,
       },
       {
-        key: 'delivery' as RightTab,
+        key: 'delivery',
         label: '交付',
         children: (
-          <div>
-            <p>DeliveryTab placeholder</p>
-            <p>Status: {delivery.status}</p>
-          </div>
+          <DeliveryTab
+            delivery={delivery}
+            comments={comments}
+            onRetryMr={onRetryMr}
+          />
         ),
       },
     ];

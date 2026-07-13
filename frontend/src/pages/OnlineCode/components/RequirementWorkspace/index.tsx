@@ -1,170 +1,147 @@
 /**
- * Requirement workspace entry component.
+ * Requirement workspace container — PRD single-page collaboration surface.
  *
- * Displays a single requirement with tabbed panels for PRD, overview design,
- * detailed design, coding tasks and run history.
+ * Layout (spec §2/§3):
+ *   ┌──────────────────────────────────────┬──────────────────────┐
+ *   │  LeftColumn 75%                       │  RightColumn 25%     │
+ *   │  ┌──────────────────────────────────┐ │  ┌─────────────────┐ │
+ *   │  │ PrdSection                       │ │  │ AutomationStatus│ │
+ *   │  ├──────────────────────────────────┤ │  ├─────────────────┤ │
+ *   │  │ CommentStream                    │ │  │ RightTabs       │ │
+ *   │  │   (LoopGroup + CommentComposer)  │ │  │  plan/task/run/ │ │
+ *   │  └──────────────────────────────────┘ │  │  delivery       │ │
+ *   └──────────────────────────────────────┴──────────────────────┘
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { Button, Tabs, message } from '@ead/suid';
-import { ArrowLeftOutlined } from '@ead/suid-icons';
-// @ts-ignore JS service module has no declaration file
-import { findOneRequirement } from '@/services/requirement';
-// @ts-ignore JS service module has no declaration file
-import { findOneOverviewDesign } from '@/services/overviewDesign';
-// @ts-ignore JS service module has no declaration file
-import { findDetailedDesignsByOverview } from '@/services/detailedDesign';
-// @ts-ignore JS service module has no declaration file
-import { findCodingTasksByPage } from '@/services/codingTask';
-// @ts-ignore JS service module has no declaration file
-import { findRunsByCodingTask } from '@/services/run';
-import type {
-  CodingTaskDto,
-  DetailedDesignDto,
-  OverviewDesignDto,
-  RequirementDto,
-  RunDto,
-} from '@/services/onlineCodeTypes';
+import { Button, Drawer, message } from '@ead/suid';
+import { ArrowLeftOutlined, MenuOutlined } from '@ead/suid-icons';
+import { useRequirementWorkspace } from './useRequirementWorkspace';
 import { PageContainer, PageHeader, PageState } from '../PageLayout';
-import PrdPanel from './PrdPanel';
-import OverviewDesignPanel from './OverviewDesignPanel';
-import DetailedDesignPanel from './DetailedDesignPanel';
-import CodingTaskPanel from './CodingTaskPanel';
-import RunHistoryPanel from './RunHistoryPanel';
-import type { ResultData, WorkspaceTab } from './types';
+import PrdSection from './PrdSection';
+import CommentStream from './CommentStream';
+import AutomationStatusBar from './AutomationStatusBar';
+import RightTabs from './RightTabs';
+import RunLogDrawer from './RunLogDrawer';
+import type { RunDto } from './types';
 
-const useStyles = createStyles(() => ({
-  tabs: {
-    height: '100%',
-    '& .ead-tabs-content': { height: '100%' },
-    '& .ead-tabs-tabpane': { height: '100%' },
-  },
+const useStyles = createStyles(({ token, css }) => ({
+  layout: css`
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: ${token.marginMD}px;
+    overflow: hidden;
+  `,
+  leftColumn: css`
+    flex: 3;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: ${token.marginMD}px;
+    overflow: auto;
+  `,
+  rightColumn: css`
+    flex: 1;
+    min-width: 280px;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: ${token.marginMD}px;
+    overflow: hidden;
+  `,
+  prdSectionWrap: css`
+    flex-shrink: 0;
+  `,
+  commentStreamWrap: css`
+    flex: 1;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    background: ${token.colorBgContainer};
+    border: 1px solid ${token.colorBorderSecondary};
+    border-radius: ${token.borderRadius}px;
+    overflow: auto;
+  `,
+  drawerBtn: css`
+    position: fixed;
+    right: ${token.marginMD}px;
+    bottom: ${token.marginMD}px;
+    z-index: 1000;
+  `,
 }));
 
-export interface RequirementWorkspaceProps {
+interface RequirementWorkspaceProps {
   requirementId: string;
-  defaultTab?: WorkspaceTab;
 }
 
-const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({
-  requirementId,
-  defaultTab = 'prd',
-}) => {
+const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirementId }) => {
   const { styles } = useStyles();
-  const [loading, setLoading] = useState(true);
-  const [requirement, setRequirement] = useState<RequirementDto | null>(null);
-  const [overviewDesign, setOverviewDesign] = useState<OverviewDesignDto | null>(null);
-  const [detailedDesigns, setDetailedDesigns] = useState<DetailedDesignDto[]>([]);
-  const [codingTasks, setCodingTasks] = useState<CodingTaskDto[]>([]);
-  const [runs, setRuns] = useState<RunDto[]>([]);
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>(defaultTab);
+  const {
+    requirement,
+    comments,
+    executionPlan,
+    codingTasks,
+    runs,
+    delivery,
+    loading,
+    error,
+    activeLoopId,
+    planVersion,
+    actions,
+  } = useRequirementWorkspace(requirementId);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    const reqRes = (await findOneRequirement(requirementId)) as ResultData<RequirementDto>;
-    if (!reqRes.success || !reqRes.data) {
-      message.error(reqRes.message ?? '加载需求失败');
-      setLoading(false);
-      return;
-    }
-    const req = reqRes.data;
-    setRequirement(req);
-
-    const ovRes = (await findOneOverviewDesign(requirementId)) as ResultData<OverviewDesignDto>;
-    let overview: OverviewDesignDto | null = null;
-    if (ovRes.success && ovRes.data) {
-      overview = ovRes.data;
-      setOverviewDesign(overview);
-      const ddRes = (await findDetailedDesignsByOverview(overview.id)) as ResultData<
-        DetailedDesignDto[]
-      >;
-      if (ddRes.success && ddRes.data) {
-        setDetailedDesigns(ddRes.data);
-      } else {
-        setDetailedDesigns([]);
-      }
-    } else {
-      setOverviewDesign(null);
-      setDetailedDesigns([]);
-    }
-
-    const ctRes = (await findCodingTasksByPage({
-      filters: [{ fieldName: 'requirementId', value: requirementId, operator: 'EQ' }],
-    })) as ResultData<{ rows: CodingTaskDto[] }>;
-    const tasks = ctRes.success && ctRes.data ? ctRes.data.rows || [] : [];
-    setCodingTasks(tasks);
-
-    const runLists = await Promise.all(
-      tasks.map(async (task) => {
-        const res = (await findRunsByCodingTask(task.id)) as ResultData<RunDto[]>;
-        return res.success && res.data ? res.data : [];
-      }),
-    );
-    setRuns(runLists.flat().sort((a, b) => b.runNo - a.runNo));
-
-    setLoading(false);
-  }, [requirementId]);
+  const [drawerRun, setDrawerRun] = useState<RunDto | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  const [highlightTaskKey, setHighlightTaskKey] = useState<string | null>(null);
+  const rightTabsRef = useRef<any>(null);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    const onResize = () => setNarrow(typeof window !== 'undefined' && window.innerWidth < 1280);
+    onResize();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', onResize);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', onResize);
+      }
+    };
+  }, []);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     if (requirement?.projectId) {
       history.push(`/online-code/requirements?projectId=${requirement.projectId}`);
     } else {
       history.back();
     }
-  };
+  }, [requirement]);
 
-  const handleViewRuns = useCallback((task: CodingTaskDto) => {
-    setActiveTab('runs');
-    message.info(`已切换至运行历史：${task.title || task.id}`);
+  const handleRunLogOpen = useCallback((run: RunDto) => {
+    setDrawerRun(run);
+    setDrawerOpen(true);
   }, []);
 
-  const tabItems = useMemo(
-    () => [
-      {
-        key: 'prd' as WorkspaceTab,
-        label: 'PRD',
-        children: requirement ? <PrdPanel requirement={requirement} onRefresh={loadAll} /> : null,
-      },
-      {
-        key: 'overview' as WorkspaceTab,
-        label: '概览设计',
-        children: requirement ? (
-          <OverviewDesignPanel
-            requirementId={requirement.id}
-            overviewDesign={overviewDesign}
-            onRefresh={loadAll}
-          />
-        ) : null,
-      },
-      {
-        key: 'detailed' as WorkspaceTab,
-        label: '详细设计',
-        children: <DetailedDesignPanel detailedDesigns={detailedDesigns} onRefresh={loadAll} />,
-      },
-      {
-        key: 'coding' as WorkspaceTab,
-        label: '编码任务',
-        children: (
-          <CodingTaskPanel
-            codingTasks={codingTasks}
-            onRefresh={loadAll}
-            onViewRuns={handleViewRuns}
-          />
-        ),
-      },
-      {
-        key: 'runs' as WorkspaceTab,
-        label: '运行历史',
-        children: <RunHistoryPanel runs={runs} onRefresh={loadAll} />,
-      },
-    ],
-    [requirement, overviewDesign, detailedDesigns, codingTasks, runs, loadAll, handleViewRuns],
-  );
+  const handleRunLogClose = useCallback(() => {
+    setDrawerOpen(false);
+    setDrawerRun(null);
+  }, []);
+
+  const handleJumpPlan = useCallback(() => {
+    rightTabsRef.current?.switchTo?.('plan');
+  }, []);
+
+  const handleHighlightTask = useCallback((taskKey: string) => {
+    setHighlightTaskKey(taskKey);
+    rightTabsRef.current?.switchTo?.('task', taskKey);
+  }, []);
+
+  const handleHighlightTaskConsumed = useCallback(() => {
+    setHighlightTaskKey(null);
+  }, []);
 
   if (loading) {
     return (
@@ -179,10 +156,38 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({
     return (
       <PageContainer>
         <PageHeader title="需求工作区" subTitle="错误" />
-        <PageState error="需求不存在或加载失败" />
+        <PageState error={error || '需求不存在或加载失败'} />
       </PageContainer>
     );
   }
+
+  const autoStopEnabled = codingTasks.some((t) => t.status === 'RUNNING');
+
+  const rightColumn = (
+    <>
+      <AutomationStatusBar
+        status={requirement.automationStatus}
+        activeLoopId={activeLoopId}
+        planVersion={planVersion}
+      />
+      <RightTabs
+        ref={rightTabsRef}
+        plan={executionPlan}
+        tasks={codingTasks}
+        runs={runs}
+        delivery={delivery}
+        comments={comments}
+        onRunLog={handleRunLogOpen}
+        onRun={actions.runTask}
+        onRerun={actions.rerunTask}
+        onStop={actions.stopAutomation}
+        onRetryMr={actions.retryMr}
+        autoStopEnabled={autoStopEnabled}
+        highlightTaskKey={highlightTaskKey}
+        onHighlightTaskConsumed={handleHighlightTaskConsumed}
+      />
+    </>
+  );
 
   return (
     <PageContainer>
@@ -195,14 +200,59 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({
           </Button>
         }
       />
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <Tabs
-          activeKey={activeTab}
-          items={tabItems}
-          className={styles.tabs}
-          onChange={(key) => setActiveTab(key as WorkspaceTab)}
-        />
+      <div className={styles.layout}>
+        <div className={styles.leftColumn}>
+          <div className={styles.prdSectionWrap}>
+            <PrdSection
+              requirement={requirement}
+              onConfirm={actions.confirmPrd}
+              onEdit={actions.editPrd}
+              onRegenerate={actions.regeneratePrd}
+            />
+          </div>
+          <div className={styles.commentStreamWrap}>
+            <CommentStream
+              comments={comments}
+              activeLoopId={activeLoopId}
+              requirement={requirement}
+              onSend={actions.sendComment}
+              sending={false}
+              onJumpPlan={handleJumpPlan}
+              onHighlightTask={handleHighlightTask}
+            />
+          </div>
+        </div>
+
+        {!narrow && <div className={styles.rightColumn}>{rightColumn}</div>}
+
+        {narrow && (
+          <>
+            <Button
+              className={styles.drawerBtn}
+              icon={<MenuOutlined />}
+              onClick={() => setRightDrawerOpen(true)}
+              type="primary"
+            >
+              执行面板
+            </Button>
+            <Drawer
+              title="执行面板"
+              open={rightDrawerOpen}
+              onClose={() => setRightDrawerOpen(false)}
+              width={360}
+              styles={{ body: { display: 'flex', flexDirection: 'column' } }}
+            >
+              {rightColumn}
+            </Drawer>
+          </>
+        )}
       </div>
+
+      <RunLogDrawer
+        open={drawerOpen}
+        run={drawerRun}
+        onClose={handleRunLogClose}
+      />
     </PageContainer>
   );
 };
