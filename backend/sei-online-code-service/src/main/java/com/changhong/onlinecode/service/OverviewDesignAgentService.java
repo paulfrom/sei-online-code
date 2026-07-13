@@ -30,6 +30,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 /**
  * OverviewDesign 代理服务。
@@ -43,6 +44,11 @@ public class OverviewDesignAgentService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OverviewDesignAgentService.class);
     private static final String AGENT_NAME = "overview-design-agent";
+    private static final Pattern MODULE_TABLE_HEADER = Pattern.compile(
+            "\\|\\s*moduleId\\s*\\|\\s*moduleTitle\\s*\\|\\s*summary\\s*\\|",
+            Pattern.CASE_INSENSITIVE);
+    private static final List<String> ARCHITECTURE_SECTION_KEYWORDS = List.of(
+            "总体架构", "整体架构", "系统架构", "架构概览", "技术架构", "方案架构");
 
     private final OverviewDesignDao overviewDesignDao;
     private final RequirementDao requirementDao;
@@ -174,7 +180,7 @@ public class OverviewDesignAgentService {
                 + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
                 + "\n2. 文档必须包含一个模块清单表格，列名固定为：| moduleId | moduleTitle | summary |。"
                 + "\n3. 模块清单表格中的每一行代表一个后续需要单独生成详细设计的模块。"
-                + "\n4. 除模块清单外，还需补充总体架构、模块职责、关键流程、接口协作、数据边界、风险与约束。"
+                + "\n4. 除模块清单外，还需补充章节：总体架构、模块职责、关键流程、接口协作、数据边界、风险与约束。"
                 + "\n5. 必须包含模块与现有代码映射、新增/复用/调整模块说明、架构影响、接口/页面/数据影响范围、风险与待确认。";
     }
 
@@ -199,10 +205,10 @@ public class OverviewDesignAgentService {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("概览设计输出为空");
         }
-        if (!content.contains("| moduleId | moduleTitle | summary |")) {
+        if (!MODULE_TABLE_HEADER.matcher(content).find()) {
             throw new IllegalArgumentException("概览设计缺少模块清单表头");
         }
-        if (!content.contains("总体架构")) {
+        if (ARCHITECTURE_SECTION_KEYWORDS.stream().noneMatch(content::contains)) {
             throw new IllegalArgumentException("概览设计缺少总体架构章节");
         }
     }
