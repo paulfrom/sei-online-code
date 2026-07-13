@@ -8,6 +8,7 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.DetailedDesignStatus;
 import com.changhong.onlinecode.dto.enums.OverviewDesignStatus;
+import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
@@ -211,6 +212,10 @@ public class CompensationService {
         int filled = 0;
         int existed = 0;
         for (Requirement requirement : candidates) {
+            if (requirement.getAutomationStatus() != null
+                    && requirement.getAutomationStatus() != RequirementAutomationStatus.IDLE) {
+                continue;
+            }
             OverviewDesign overview = overviewDesignDao.findByRequirementId(requirement.getId());
             if (overview != null) {
                 existed++;

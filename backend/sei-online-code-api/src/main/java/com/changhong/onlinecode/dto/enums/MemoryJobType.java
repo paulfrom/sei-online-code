@@ -32,5 +32,8 @@ public enum MemoryJobType {
     MEMORY_UPDATE_AFTER_CODING_TASK,
 
     /** 记忆校验任务。 */
-    MEMORY_VALIDATE
+    MEMORY_VALIDATE,
+
+    /** Requirement 交付成功后的长期记忆回写。 */
+    MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY
 }

@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,11 +26,32 @@ public class RunDto extends BaseEntityDto {
     @Schema(description = "所属 CodingTask id")
     private String codingTaskId;
 
+    @Schema(description = "所属 Requirement id")
+    private String requirementId;
+
     @Schema(description = "Run 序号")
     private Integer runNo;
 
     @Schema(description = "触发来源")
     private TriggerSource triggerSource;
+
+    @Schema(description = "Run 类型")
+    private RunType runType;
+
+    @Schema(description = "自动化循环 ID")
+    private String loopId;
+
+    @Schema(description = "是否已请求取消")
+    private Boolean cancelRequested;
+
+    @Schema(description = "使本 Run 失效的人类评论 ID")
+    private String invalidatedByCommentId;
+
+    @Schema(description = "RequirementDesignContext ID")
+    private String memoryContextId;
+
+    @Schema(description = "WorkspaceMemory ID")
+    private String workspaceMemoryId;
 
     @Schema(description = "用户提示词")
     private String userPrompt;

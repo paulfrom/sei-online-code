@@ -5,9 +5,12 @@ import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -53,6 +56,8 @@ public class CodingTaskScheduler {
     private final ValidationCommandExecutor validationCommandExecutor;
     private final WorkspaceManager workspaceManager;
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
+    private RequirementCommentService requirementCommentService;
+    private RequirementAutomationService requirementAutomationService;
 
     public CodingTaskScheduler(CodingTaskDao codingTaskDao,
                                RequirementDao requirementDao,
@@ -64,6 +69,13 @@ public class CodingTaskScheduler {
         this.executionService = executionService;
         this.validationCommandExecutor = validationCommandExecutor;
         this.workspaceManager = workspaceManager;
+    }
+
+    @Autowired
+    public void setOptionalDependencies(RequirementCommentService requirementCommentService,
+                                        RequirementAutomationService requirementAutomationService) {
+        this.requirementCommentService = requirementCommentService;
+        this.requirementAutomationService = requirementAutomationService;
     }
 
     /**
@@ -178,6 +190,9 @@ public class CodingTaskScheduler {
             occupiedAreas.add(task.getArea());
             occupiedScopes.add(candidateScope);
         }
+        if (requirementAutomationService != null) {
+            requirementAutomationService.onPlanTasksSettled(requirementId);
+        }
     }
 
     /**
@@ -212,9 +227,11 @@ public class CodingTaskScheduler {
             task.setFailureDetail(failureReason);
             task.setLastFailedAt(new Date());
             codingTaskDao.save(task);
+            appendDevResult(task, false, failureReason);
             schedule(task.getRequirementId());
             return;
         }
+        appendDevResult(task, true, null);
         task.setStatus(CodingTaskStatus.VALIDATING);
         codingTaskDao.save(task);
 
@@ -225,14 +242,46 @@ public class CodingTaskScheduler {
             task.setStatus(CodingTaskStatus.SUCCEEDED);
             task.setFailureSummary(null);
             task.setFailureDetail(null);
+            appendValidationResult(task, result, true);
         } else {
             task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
             task.setFailureSummary("任务级验证失败");
             task.setFailureDetail("exitCode=" + result.getExitCode() + "\n" + result.getStdout() + "\n" + result.getStderr());
             task.setLastFailedAt(new Date());
+            appendValidationResult(task, result, false);
         }
         codingTaskDao.save(task);
         schedule(task.getRequirementId());
+    }
+
+    private void appendDevResult(CodingTask task, boolean success, String failureReason) {
+        if (requirementCommentService == null) {
+            return;
+        }
+        RequirementCommentAuthorType authorType = "frontend".equals(task.getArea())
+                ? RequirementCommentAuthorType.FRONTEND_AGENT
+                : "backend".equals(task.getArea())
+                ? RequirementCommentAuthorType.BACKEND_AGENT
+                : RequirementCommentAuthorType.SYSTEM;
+        requirementCommentService.append(task.getRequirementId(), task.getLoopId(), authorType,
+                task.getAssignedAgent(), RequirementCommentType.DEV_RESULT,
+                success ? "开发任务完成：" + task.getPlanTaskKey()
+                        : "开发任务失败：" + task.getPlanTaskKey() + "\n" + Objects.toString(failureReason, ""),
+                "{\"taskId\":\"" + task.getId() + "\",\"success\":" + success + "}");
+    }
+
+    private void appendValidationResult(CodingTask task,
+                                        ValidationCommandExecutor.ValidationResult result,
+                                        boolean success) {
+        if (requirementCommentService == null) {
+            return;
+        }
+        requirementCommentService.append(task.getRequirementId(), task.getLoopId(),
+                RequirementCommentAuthorType.TEST_AGENT, "test-agent", RequirementCommentType.VALIDATION_RESULT,
+                (success ? "任务级验证通过：" : "任务级验证失败：") + task.getPlanTaskKey(),
+                "{\"taskId\":\"" + task.getId() + "\",\"area\":\"" + task.getArea()
+                        + "\",\"exitCode\":" + result.getExitCode()
+                        + ",\"durationMs\":" + result.getDuration().toMillis() + "}");
     }
 
     private String buildPrompt(CodingTask task) {

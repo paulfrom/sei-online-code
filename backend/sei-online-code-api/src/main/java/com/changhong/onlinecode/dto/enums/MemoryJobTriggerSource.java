@@ -35,5 +35,8 @@ public enum MemoryJobTriggerSource {
     CODING_TASK_SUCCEEDED,
 
     /** 校验触发。 */
-    VALIDATION
+    VALIDATION,
+
+    /** Requirement MR 交付成功。 */
+    REQUIREMENT_DELIVERED
 }

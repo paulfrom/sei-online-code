@@ -213,7 +213,11 @@ public class WorkspaceManager {
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            generateFromTemplateArchive(resolveTemplateRepo(templateUrl), workspaceDir, project);
+            if (templateUrl.startsWith("file:")) {
+                generateFromTemplate(Path.of(java.net.URI.create(templateUrl)), workspaceDir, project);
+            } else {
+                generateFromTemplateArchive(resolveTemplateRepo(templateUrl), workspaceDir, project);
+            }
             LOGGER.info("workspace: 已从模板生成 dir={}, template={}", workspaceDir, templateUrl);
         } catch (IOException e) {
             deleteTree(workspaceDir);

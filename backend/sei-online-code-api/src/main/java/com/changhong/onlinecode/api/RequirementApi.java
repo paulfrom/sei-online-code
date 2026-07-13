@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.api;
 
 import com.changhong.onlinecode.dto.RequirementDto;
+import com.changhong.onlinecode.dto.RequirementCommentDto;
+import com.changhong.onlinecode.dto.request.CreateRequirementCommentRequest;
 import com.changhong.onlinecode.dto.request.EditPrdRequest;
 import com.changhong.onlinecode.dto.request.RegeneratePrdRequest;
 import com.changhong.sei.core.api.BaseEntityApi;
@@ -36,6 +38,15 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
                                           @RequestBody @Valid EditPrdRequest request);
 
     @PostMapping(path = "{id}/confirmPrd")
-    @Operation(summary = "确认 PRD", description = "确认后冻结 PRD 并创建概览设计")
+    @Operation(summary = "确认 PRD", description = "确认后冻结 PRD 并启动 PM 自动化执行循环")
     ResultData<RequirementDto> confirmPrd(@PathVariable("id") String id);
+
+    @PostMapping(path = "{id}/comments", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "追加 Requirement 评论", description = "人类评论会中断活跃自动化并触发 PM 重规划；已完成需求会启动 CHANGE_REQUEST loop")
+    ResultData<RequirementCommentDto> addComment(@PathVariable("id") String id,
+                                                 @RequestBody @Valid CreateRequirementCommentRequest request);
+
+    @PostMapping(path = "{id}/mr/retry")
+    @Operation(summary = "重试 GitLab MR 交付", description = "修复 GitLab 配置后重试交付，不重新执行开发或验收")
+    ResultData<RequirementDto> retryMr(@PathVariable("id") String id);
 }

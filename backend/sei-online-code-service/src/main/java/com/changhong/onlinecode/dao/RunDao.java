@@ -41,6 +41,11 @@ public interface RunDao extends BaseEntityDao<Run> {
      */
     List<Run> findByState(com.changhong.onlinecode.dto.enums.RunState state);
 
+    List<Run> findByRequirementIdAndState(String requirementId,
+                                          com.changhong.onlinecode.dto.enums.RunState state);
+
+    List<Run> findByRequirementIdAndLoopId(String requirementId, String loopId);
+
     /**
      * 仅当运行仍处于期望状态时切换状态，用于终态保护。
      *

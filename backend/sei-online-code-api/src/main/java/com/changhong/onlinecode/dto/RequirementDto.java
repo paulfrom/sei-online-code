@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,6 +35,9 @@ public class RequirementDto extends BaseEntityDto {
     @Schema(description = "PRD 状态")
     private RequirementStatus status;
 
+    @Schema(description = "自动化状态")
+    private RequirementAutomationStatus automationStatus;
+
     @Schema(description = "PRD 版本号")
     private Integer prdVersion;
 
@@ -51,6 +55,24 @@ public class RequirementDto extends BaseEntityDto {
 
     @Schema(description = "当前自动化循环 ID")
     private String activeLoopId;
+
+    @Schema(description = "验收时间")
+    private Date acceptedAt;
+
+    @Schema(description = "验收 agent")
+    private String acceptedByAgent;
+
+    @Schema(description = "交付分支")
+    private String deliveryBranch;
+
+    @Schema(description = "交付 commit hash")
+    private String deliveryCommitHash;
+
+    @Schema(description = "交付 MR URL")
+    private String deliveryMrUrl;
+
+    @Schema(description = "交付目标分支")
+    private String deliveryTargetBranch;
 
     @Schema(description = "失败摘要")
     private String failureSummary;

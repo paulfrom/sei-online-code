@@ -128,6 +128,7 @@ public class CodingTaskExecutionService {
 
         Run run = new Run();
         run.setCodingTaskId(id);
+        run.setRequirementId(task.getRequirementId());
         run.setRunNo(nextRunNo(id));
         run.setTriggerSource(prompt == null ? TriggerSource.AUTO : TriggerSource.USER_ACTION);
         run.setUserPrompt(prompt);
@@ -214,8 +215,10 @@ public class CodingTaskExecutionService {
 
         Run run = new Run();
         run.setCodingTaskId(codingTaskId);
+        run.setRequirementId(task.getRequirementId());
         run.setRunNo(nextRunNo(codingTaskId));
         run.setRunType(RunType.DEVELOPMENT);
+        run.setLoopId(task.getLoopId());
         run.setTriggerSource(TriggerSource.AUTO);
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
@@ -273,6 +276,20 @@ public class CodingTaskExecutionService {
                     run.getId(), task.getId());
             return;
         }
+        if (Boolean.TRUE.equals(persistedRun.getCancelRequested())) {
+            persistedRun.setState(RunState.CANCELLED);
+            persistedRun.setFinishedDate(now);
+            runDao.save(persistedRun);
+            persistedTask.setStatus(CodingTaskStatus.CANCELLED);
+            codingTaskDao.save(persistedTask);
+            return;
+        }
+        if (persistedRun.getLoopId() != null && persistedTask.getLoopId() != null
+                && !Objects.equals(persistedRun.getLoopId(), persistedTask.getLoopId())) {
+            persistedTask.setStatus(CodingTaskStatus.STALE);
+            codingTaskDao.save(persistedTask);
+            return;
+        }
         if (persistedRun.getState() != RunState.RUNNING || persistedTask.getStatus() != CodingTaskStatus.RUNNING) {
             LOGGER.info("finishRun skipped because run/task already settled. runId={}, runState={}, taskId={}, taskStatus={}",
                     persistedRun.getId(), persistedRun.getState(), persistedTask.getId(), persistedTask.getStatus());
@@ -300,7 +317,7 @@ public class CodingTaskExecutionService {
                 LOGGER.warn("scheduler-managed run finished but scheduler not injected, taskId={}", persistedTask.getId());
                 persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
                 codingTaskDao.save(persistedTask);
-                if (success) {
+                if (success && persistedTask.getExecutionPlanId() == null) {
                     submitMemoryUpdateJob(persistedTask, persistedRun);
                 }
             }
@@ -310,7 +327,7 @@ public class CodingTaskExecutionService {
         persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
         codingTaskDao.save(persistedTask);
 
-        if (success) {
+        if (success && persistedTask.getExecutionPlanId() == null) {
             submitMemoryUpdateJob(persistedTask, persistedRun);
         }
     }
