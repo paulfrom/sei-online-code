@@ -10,15 +10,10 @@ require('dayjs/locale/zh-cn');
 const { LANG } = constants;
 
 /**
- * Start the MSW mock worker before the app renders when MOCK is enabled
- * (`pnpm start:mock`). MSW-first (ADR-0002): all Phase 1 data is served by the
- * in-browser worker; there is no real backend this round.
+ * Umi runtime render hook. Kept as a passthrough; mock wiring has been
+ * removed (legacy MSW layer was deleted along with src/mocks).
  */
 export async function render(oldRender: () => void) {
-  if (process.env.MOCK === 'yes') {
-    const { startMockWorker } = await import('@/mocks/browser');
-    await startMockWorker();
-  }
   oldRender();
 }
 

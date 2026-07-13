@@ -94,7 +94,6 @@ const CodingTaskTab = ({ projectId }) => {
     },
     { title: '任务标题', dataIndex: 'title', width: 240 },
     { title: '状态', dataIndex: 'status', width: 120 },
-    { title: '详细设计版本', dataIndex: 'detailedDesignVersion', width: 120 },
     { title: '失败摘要', dataIndex: 'failureSummary', expandUnusedSpace: true },
     { title: '创建时间', dataIndex: 'createdDate', width: 170, dataType: 'datetime' },
   ];

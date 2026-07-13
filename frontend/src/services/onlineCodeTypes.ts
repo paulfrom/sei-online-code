@@ -28,55 +28,6 @@ export interface RequirementDto {
   lastEditedDate: string;
 }
 
-/** Overview design lifecycle states (contract §3.2). */
-export type OverviewDesignStatus =
-  | 'GENERATING'
-  | 'DRAFT'
-  | 'CONFIRMED'
-  | 'FAILED';
-
-/** High-level overview design derived from a requirement. */
-export interface OverviewDesignDto {
-  id: string;
-  projectId: string;
-  requirementId: string;
-  status: OverviewDesignStatus;
-  version: number;
-  content?: string | null;
-  designContextId?: string | null;
-  memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
-  memoryValidationResultJson?: string | null;
-  failureSummary?: string | null;
-  createdDate: string;
-  lastEditedDate: string;
-}
-
-/** Detailed design lifecycle states (contract §3.3). */
-export type DetailedDesignStatus =
-  | 'GENERATING'
-  | 'REVIEW'
-  | 'CONFIRMED'
-  | 'FAILED';
-
-/** Module-scoped detailed design. */
-export interface DetailedDesignDto {
-  id: string;
-  projectId: string;
-  requirementId: string;
-  overviewDesignId: string;
-  moduleId: string;
-  moduleTitle: string;
-  status: DetailedDesignStatus;
-  version: number;
-  content?: string | null;
-  designContextId?: string | null;
-  memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
-  memoryValidationResultJson?: string | null;
-  failureSummary?: string | null;
-  createdDate: string;
-  lastEditedDate: string;
-}
-
 /** Coding task lifecycle states (contract §3.4). */
 export type CodingTaskStatus =
   | 'PENDING'

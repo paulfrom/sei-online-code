@@ -7,8 +7,6 @@
  */
 import { request } from '@ead/suid-utils-react';
 import { PROJECT_SERVER_PATH } from '@/utils/constants';
-import type { PlanDto } from './plan';
-import type { FailureInfoFields } from './plan';
 
 /**
  * API base. In Phase 1 MSW intercepts by path suffix (`*​/...`), so any
@@ -67,31 +65,6 @@ export interface ProjectDto {
   currentSpecId: string | null;
   createdDate: string;
   lastEditedDate: string;
-}
-
-export interface SpecDto extends FailureInfoFields {
-  id: string;
-  projectId: string;
-  version: number;
-  state: 'GENERATING' | 'DRAFT' | 'SPEC_REVIEW' | 'CONFIRMED' | 'FAILED';
-  moduleId?: string | null;
-  moduleTitle?: string | null;
-  moduleSummary?: string | null;
-  pages: Array<{ key: string; title: string; route: string; description: string }>;
-  components: Array<{ key: string; type: string; page: string; description: string }>;
-  entities: Array<{
-    key: string;
-    fields: Array<{ name: string; type: string; description: string }>;
-  }>;
-  apiContract: Array<{
-    method: string;
-    path: string;
-    requestShape: string;
-    responseShape: string;
-    description: string;
-  }>;
-  modifyHint?: string | null;
-  createdDate: string;
 }
 
 /** SkillConfig — origin-bearing config (Phase 4, multica dim d: source→config JSONB). */
@@ -186,48 +159,6 @@ export async function findOneProject(id: string): Promise<ResultData<ProjectDto>
   return request({ url: `${API}/project/findOne`, method: 'GET', params: { id } });
 }
 
-/** #4 deprecated compatibility endpoint: legacy refineSpec name now triggers Plan regeneration, not the Requirement workspace flow. */
-export async function refineSpec(projectId: string): Promise<ResultData<PlanDto>> {
-  return request({ url: `${API}/project/refineSpec`, method: 'POST', data: { projectId } });
-}
-
-/** #5 load a legacy Spec / current detailed design */
-export async function findOneSpec(id: string): Promise<ResultData<SpecDto>> {
-  return request({ url: `${API}/spec/findOne`, method: 'GET', params: { id } });
-}
-
-export async function findOneDetailedDesign(id: string): Promise<ResultData<SpecDto>> {
-  return findOneSpec(id);
-}
-
-/** #6 confirm legacy Spec / current detailed design → generate overview design */
-export async function confirmSpec(specId: string): Promise<ResultData<PlanDto>> {
-  return request({ url: `${API}/spec/confirm`, method: 'POST', data: { specId } });
-}
-
-export async function confirmDetailedDesign(specId: string): Promise<ResultData<PlanDto>> {
-  return confirmSpec(specId);
-}
-
-/** #R regenerate legacy Spec / current detailed design — version+1, immutable history */
-export async function regenerateSpec(
-  projectId: string,
-  modifyHint?: string,
-): Promise<ResultData<SpecDto>> {
-  return request({
-    url: `${API}/spec/${projectId}/regenerate`,
-    method: 'POST',
-    data: { modifyHint },
-  });
-}
-
-export async function regenerateDetailedDesign(
-  projectId: string,
-  modifyHint?: string,
-): Promise<ResultData<SpecDto>> {
-  return regenerateSpec(projectId, modifyHint);
-}
-
 // --- Phase 3: Skills + Custom Agents (contract eps #16–24) ---
 
 /** #16 import a skill; dedup by name (server returns computedHash) */
@@ -307,17 +238,6 @@ export async function attachAgentSkills(params: {
   skillIds: string[];
 }): Promise<ResultData<AgentDto>> {
   return request({ url: `${API}/agent/skills`, method: 'POST', data: params });
-}
-
-/** #30 detailed design version history for a project (legacy spec endpoint) */
-export async function findSpecsByProject(projectId: string): Promise<ResultData<SpecDto[]>> {
-  return request({ url: `${API}/spec/findByProject`, method: 'GET', params: { projectId } });
-}
-
-export async function findDetailedDesignsByProject(
-  projectId: string,
-): Promise<ResultData<SpecDto[]>> {
-  return findSpecsByProject(projectId);
 }
 
 // --- Phase 5: Config Surface + Workspace resolve (contract eps #31–33) ---

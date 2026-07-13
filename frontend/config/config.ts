@@ -70,7 +70,6 @@ export default defineConfig({
     '@': resolve(__dirname, './src'),
   },
   define: {
-    'process.env.MOCK': process.env.MOCK,
     'process.env.DEV_GATEWAY': '/api-gateway',
   },
   externals: {
