@@ -17,12 +17,18 @@ import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
 import { Button, Drawer, message } from '@ead/suid';
 import { ArrowLeftOutlined, MenuOutlined } from '@ead/suid-icons';
+// @ts-ignore JS module has no declaration file
 import { useRequirementWorkspace } from './useRequirementWorkspace';
 import { PageContainer, PageHeader, PageState } from '../PageLayout';
+// @ts-ignore JS module has no declaration file
 import PrdSection from './PrdSection';
+// @ts-ignore JS module has no declaration file
 import CommentStream from './CommentStream';
+// @ts-ignore JS module has no declaration file
 import AutomationStatusBar from './AutomationStatusBar';
+// @ts-ignore JS module has no declaration file
 import RightTabs from './RightTabs';
+// @ts-ignore JS module has no declaration file
 import RunLogDrawer from './RunLogDrawer';
 import type { RunDto } from './types';
 
@@ -161,7 +167,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     );
   }
 
-  const autoStopEnabled = codingTasks.some((t) => t.status === 'RUNNING');
+  const autoStopEnabled = codingTasks.some((t: { status?: string }) => t.status === 'RUNNING');
 
   const rightColumn = (
     <>
