@@ -14,6 +14,7 @@ import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -27,6 +28,7 @@ import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,6 +66,7 @@ public class CodingTaskExecutionService {
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final CodingTaskChangeCollector codingTaskChangeCollector;
+    private CodingTaskScheduler codingTaskScheduler;
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
@@ -93,6 +96,14 @@ public class CodingTaskExecutionService {
         this.memoryJobService = memoryJobService;
         this.workspaceMemoryService = workspaceMemoryService;
         this.codingTaskChangeCollector = codingTaskChangeCollector;
+    }
+
+    /**
+     * 延迟注入调度器，打破 CodingTaskScheduler ↔ CodingTaskExecutionService 循环依赖。
+     */
+    @Lazy
+    public void setCodingTaskScheduler(CodingTaskScheduler codingTaskScheduler) {
+        this.codingTaskScheduler = codingTaskScheduler;
     }
 
     /**
@@ -153,10 +164,92 @@ public class CodingTaskExecutionService {
         final Run trackedRun = run;
         future.thenAccept(result -> {
             boolean success = result != null && !result.contains("FAILED");
-            finishRun(trackedRun, task, success, success ? null : "执行返回失败结果");
+            finishRun(trackedRun, task, success, success ? null : "执行返回失败结果", false);
         }).exceptionally(e -> {
             LOGGER.error("coding-task execute failed taskId={}", id, e);
-            finishRun(trackedRun, task, false, rootMessage(e));
+            finishRun(trackedRun, task, false, rootMessage(e), false);
+            return null;
+        });
+
+        CodingTaskDto dto = new CodingTaskDto();
+        dto.setId(task.getId());
+        dto.setStatus(task.getStatus());
+        return ResultData.success(dto);
+    }
+
+    /**
+     * 调度器调用的计划任务执行入口。
+     *
+     * @param codingTaskId 任务 ID
+     * @param agentName    开发代理名称
+     * @param prompt       提示词
+     * @return 结果
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResultData<CodingTaskDto> executePlanTask(String codingTaskId, String agentName, String prompt) {
+        CodingTask task = codingTaskDao.findOne(codingTaskId);
+        if (Objects.isNull(task)) {
+            return ResultData.fail("编码任务不存在: " + codingTaskId);
+        }
+        if (hasActiveRun(codingTaskId)) {
+            return ResultData.fail("任务已有正在执行的 Run");
+        }
+
+        Agent agent = agentService.findByName(agentName);
+        if (agent == null) {
+            LOGGER.error("coding-task plan agent not found taskId={}, agentName={}", codingTaskId, agentName);
+            task.setStatus(CodingTaskStatus.FAILED);
+            task.setFailureSummary("开发代理未找到");
+            task.setFailureDetail("agentName=" + agentName);
+            task.setLastFailedAt(new Date());
+            codingTaskDao.save(task);
+            if (codingTaskScheduler != null) {
+                codingTaskScheduler.schedule(task.getRequirementId());
+            }
+            return ResultData.fail("开发代理不存在: " + agentName);
+        }
+
+        task.setStatus(CodingTaskStatus.RUNNING);
+        codingTaskDao.save(task);
+
+        Run run = new Run();
+        run.setCodingTaskId(codingTaskId);
+        run.setRunNo(nextRunNo(codingTaskId));
+        run.setRunType(RunType.DEVELOPMENT);
+        run.setTriggerSource(TriggerSource.AUTO);
+        run.setUserPrompt(prompt);
+        run.setState(RunState.RUNNING);
+        run.setStartedDate(new Date());
+        runDao.save(run);
+
+        WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
+        run.setWorktreePath(workspace.getPath());
+        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.getPath()));
+        runDao.save(run);
+
+        AgentBriefWriter.writeBrief(workspace.getPath(), agent.getCliTool(),
+                agent.getName(), agent.getInstructions(),
+                agent.getModel(),
+                agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
+                null);
+
+        CliRunner runner = cliRunnerRegistry.resolve(agent.getCliTool());
+        CompletableFuture<String> future = runner.execute(
+                task.getRequirementId(),
+                task.getId(),
+                run.getId(),
+                prompt,
+                workspace.getPath(),
+                agent.getModel(),
+                agent.getMcpConfig());
+
+        final Run trackedRun = run;
+        future.thenAccept(result -> {
+            boolean success = result != null && !result.contains("FAILED");
+            finishRun(trackedRun, task, success, success ? null : "执行返回失败结果", true);
+        }).exceptionally(e -> {
+            LOGGER.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
+            finishRun(trackedRun, task, false, rootMessage(e), true);
             return null;
         });
 
@@ -167,6 +260,11 @@ public class CodingTaskExecutionService {
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {
+        finishRun(run, task, success, failureReason, false);
+    }
+
+    private void finishRun(Run run, CodingTask task, boolean success, String failureReason,
+                           boolean schedulerManaged) {
         Date now = new Date();
         Run persistedRun = runDao.findOne(run.getId());
         CodingTask persistedTask = codingTaskDao.findOne(task.getId());
@@ -193,8 +291,23 @@ public class CodingTaskExecutionService {
             failureInfoSupport.markCodingTaskFailure(persistedTask, "编码执行失败",
                     failureReason, persistedRun.getTriggerSource(), now);
         }
-        persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
         runDao.save(persistedRun);
+
+        if (schedulerManaged) {
+            if (codingTaskScheduler != null) {
+                codingTaskScheduler.onDevelopmentRunFinished(persistedTask.getId(), success, failureReason);
+            } else {
+                LOGGER.warn("scheduler-managed run finished but scheduler not injected, taskId={}", persistedTask.getId());
+                persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
+                codingTaskDao.save(persistedTask);
+                if (success) {
+                    submitMemoryUpdateJob(persistedTask, persistedRun);
+                }
+            }
+            return;
+        }
+
+        persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
         codingTaskDao.save(persistedTask);
 
         if (success) {

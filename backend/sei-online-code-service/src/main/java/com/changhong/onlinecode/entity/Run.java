@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
@@ -47,6 +48,10 @@ public class Run extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "trigger_source", length = 32)
     private TriggerSource triggerSource;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "run_type", length = 32)
+    private RunType runType;
 
     @Column(name = "user_prompt", columnDefinition = "TEXT")
     private String userPrompt;

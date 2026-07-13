@@ -90,6 +90,12 @@ public class Requirement extends BaseAuditableEntity {
     private String generationToken;
 
     /**
+     * 当前自动化循环 ID，用于丢弃被中断 loop 的过期 agent 回调。
+     */
+    @Column(name = "active_loop_id", length = 64)
+    private String activeLoopId;
+
+    /**
      * 生成 PRD 时引用的 RequirementDesignContext id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.2、§15.1。
      */
     @Column(name = "design_context_id", length = 36)

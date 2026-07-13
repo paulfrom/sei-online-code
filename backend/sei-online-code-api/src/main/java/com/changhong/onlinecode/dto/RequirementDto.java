@@ -49,6 +49,9 @@ public class RequirementDto extends BaseEntityDto {
     @Schema(description = "记忆校验结果（JSON 字符串）")
     private String memoryValidationResultJson;
 
+    @Schema(description = "当前自动化循环 ID")
+    private String activeLoopId;
+
     @Schema(description = "失败摘要")
     private String failureSummary;
 

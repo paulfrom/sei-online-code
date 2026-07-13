@@ -16,15 +16,24 @@ public enum CodingTaskStatus {
     /** 执行中。 */
     RUNNING,
 
+    /** 验证中。 */
+    VALIDATING,
+
     /** 成功。 */
     SUCCEEDED,
 
     /** 失败。 */
     FAILED,
 
+    /** 验证失败。 */
+    VALIDATION_FAILED,
+
     /** 已取消。 */
     CANCELLED,
 
-    /** 已过期（详细设计版本升级）。 */
+    /** 阻塞（依赖未满足或冲突）。 */
+    BLOCKED,
+
+    /** 已过期（详细设计版本升级或 loopId 变化）。 */
     STALE
 }
