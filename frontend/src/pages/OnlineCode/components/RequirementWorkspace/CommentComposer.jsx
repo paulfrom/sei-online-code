@@ -25,10 +25,6 @@ import {
   SendOutlined,
 } from '@ead/suid-icons';
 import MarkdownEditor from '../MarkdownEditor';
-import type {
-  CommentComposerProps,
-  RequirementAutomationStatus,
-} from './types';
 
 /**
  * User-facing warning copy keyed off `requirement.automationStatus` (the four
@@ -41,7 +37,7 @@ import type {
  * so the text does not vary across them. The `COMPLETED` slot uses the change-request
  * copy and is gated together with the active states through a single lookup.
  */
-const INTERRUPT_WARNING: Record<string, string> = {
+const INTERRUPT_WARNING = {
   PLANNING: '发送评论将中断当前自动化并触发 PM 重规划',
   DEVELOPING: '发送评论将中断当前自动化并触发 PM 重规划',
   VALIDATING: '发送评论将中断当前自动化并触发 PM 重规划',
@@ -52,7 +48,7 @@ const INTERRUPT_WARNING: Record<string, string> = {
 /** Warning copy used when `requirement.automationStatus === 'COMPLETED'`. */
 const COMPLETED_WARNING = INTERRUPT_WARNING.COMPLETED;
 
-const ACTIVE_AUTOMATION: RequirementAutomationStatus[] = [
+const ACTIVE_AUTOMATION = [
   'PLANNING',
   'DEVELOPING',
   'VALIDATING',
@@ -64,9 +60,7 @@ const ACTIVE_AUTOMATION: RequirementAutomationStatus[] = [
  * Returns `normal` (no warning, direct send) for every state that is neither
  * an active automation nor a delivered requirement.
  */
-function resolveMode(
-  automationStatus: RequirementAutomationStatus | null | undefined,
-): { warning: string | null; completed: boolean; dangerous: boolean } {
+function resolveMode(automationStatus) {
   if (automationStatus === 'COMPLETED') {
     return { warning: COMPLETED_WARNING, completed: true, dangerous: true };
   }
@@ -80,7 +74,7 @@ function resolveMode(
   return { warning: null, completed: false, dangerous: false };
 }
 
-const CommentComposer: React.FC<CommentComposerProps> = ({
+const CommentComposer = ({
   requirement,
   onSend,
   sending,
@@ -89,7 +83,7 @@ const CommentComposer: React.FC<CommentComposerProps> = ({
   const { warning, completed, dangerous } = resolveMode(requirement.automationStatus);
   const canSend = content.trim().length > 0 && !sending;
 
-  const doSend = async (next: string) => {
+  const doSend = async (next) => {
     try {
       await onSend(next);
       setContent('');

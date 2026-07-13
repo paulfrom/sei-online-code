@@ -6,7 +6,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Drawer, Descriptions, Tag } from '@ead/suid';
 import { subscribeRunLog } from '@/utils/run-log-socket';
-import type { RunLogDrawerProps } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
   logArea: css`

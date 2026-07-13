@@ -22,7 +22,6 @@ import {
 } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { runCodingTask, rerunCodingTask } from '@/services/codingTask';
-import type { ResultData } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`

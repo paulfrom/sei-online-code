@@ -4,7 +4,6 @@
 import React, { useMemo, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { FilterView, Table, Tag } from '@ead/suid';
-import type { RunTabProps } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`

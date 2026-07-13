@@ -14,7 +14,6 @@ import {
   ReloadOutlined,
   SaveOutlined,
 } from '@ead/suid-icons';
-import type { PrdSectionProps, RequirementStatus } from './types';
 import MarkdownEditor from '../MarkdownEditor';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -39,14 +38,14 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
 }));
 
-const STATUS_META: Record<RequirementStatus, { color: string; label: string }> = {
+const STATUS_META = {
   PRD_GENERATING: { color: 'processing', label: 'PRD 生成中' },
   PRD_REVIEW: { color: 'gold', label: 'PRD 待确认' },
   PRD_CONFIRMED: { color: 'green', label: 'PRD 已确认' },
   FAILED: { color: 'error', label: '失败' },
 };
 
-const PrdSection: React.FC<PrdSectionProps> = ({
+const PrdSection = ({
   requirement,
   onConfirm,
   onEdit,

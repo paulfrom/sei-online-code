@@ -29,23 +29,10 @@ import {
   UserOutlined,
   WarningOutlined,
 } from '@ead/suid-icons';
-import type {
-  CommentItemProps,
-  RequirementCommentAuthorType,
-  RequirementCommentType,
-} from './types';
 
 const { Text, Paragraph } = Typography;
 
-type IconType = React.ComponentType<{ style?: React.CSSProperties }>;
-
-interface CommentMeta {
-  color: string;
-  label: string;
-  icon: IconType;
-}
-
-const COMMENT_META: Record<RequirementCommentType, CommentMeta> = {
+const COMMENT_META = {
   HUMAN_FEEDBACK:        { color: 'blue',   label: '用户反馈', icon: UserOutlined },
   EXECUTION_PLAN:        { color: 'geekblue',label: '执行计划', icon: ProfileOutlined },
   DEV_RESULT:            { color: 'cyan',   label: '开发结果', icon: FileDoneOutlined },
@@ -63,7 +50,7 @@ const COMMENT_META: Record<RequirementCommentType, CommentMeta> = {
 };
 
 /** Short label rendered next to the author tag for agent/system authors. */
-const AUTHOR_LABEL: Record<RequirementCommentAuthorType, string> = {
+const AUTHOR_LABEL = {
   HUMAN: '用户',
   PM_AGENT: 'PM',
   FRONTEND_AGENT: '前端',
@@ -79,12 +66,12 @@ const URL_RE = /https?:\/\/\S+/g;
  * Minimal implementation per brief: only URLs become links; file paths are
  * left as-is. Returns a React node array so React can key the fragments.
  */
-function renderContent(content: string | null | undefined): React.ReactNode {
+function renderContent(content) {
   if (!content) return null;
-  const parts: React.ReactNode[] = [];
+  const parts = [];
   let last = 0;
   URL_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
+  let m;
   let i = 0;
   // eslint-disable-next-line no-cond-assign
   while ((m = URL_RE.exec(content)) !== null) {
@@ -104,17 +91,17 @@ function renderContent(content: string | null | undefined): React.ReactNode {
 }
 
 /** Tolerant JSON.parse for agent-produced metadataJson; returns {} on failure. */
-function parseMetadata(metadataJson?: string | null): Record<string, unknown> {
+function parseMetadata(metadataJson) {
   if (!metadataJson) return {};
   try {
     const parsed = JSON.parse(metadataJson);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
   }
 }
 
-const CommentItem: React.FC<CommentItemProps> = ({
+const CommentItem = ({
   comment,
   onJumpPlan,
   onHighlightTask,
@@ -132,7 +119,7 @@ const CommentItem: React.FC<CommentItemProps> = ({
 
   // DEV_RESULT: surface a "view task" action when metadataJson carries a taskKey.
   const devTaskKey = comment.commentType === 'DEV_RESULT'
-    ? (typeof metadata.taskKey === 'string' ? (metadata.taskKey as string) : null)
+    ? (typeof metadata.taskKey === 'string' ? metadata.taskKey : null)
     : null;
 
   return (

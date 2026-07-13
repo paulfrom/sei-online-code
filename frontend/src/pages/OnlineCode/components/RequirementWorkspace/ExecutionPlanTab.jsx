@@ -4,12 +4,6 @@
 import React, { useMemo } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Card, Collapse, Descriptions, Space, Table, Tag } from '@ead/suid';
-import type {
-  CodingTaskStatus,
-  ExecutionPlanDto,
-  ExecutionPlanTask,
-} from '@/services/onlineCodeTypes';
-import type { ExecutionPlanTabProps } from './types';
 import { parsePlanJson } from './parsePlanJson';
 
 const useStyles = createStyles(({ token, css }) => ({

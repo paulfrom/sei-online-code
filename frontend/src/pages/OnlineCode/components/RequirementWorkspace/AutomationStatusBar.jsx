@@ -5,7 +5,6 @@
 import React from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Tag } from '@ead/suid';
-import type { AutomationStatusBarProps, RequirementAutomationStatus } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
   bar: css`
@@ -27,7 +26,7 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
 }));
 
-const AUTOMATION_STATUS_META: Record<RequirementAutomationStatus, { color: string; label: string }> = {
+const AUTOMATION_STATUS_META = {
   IDLE: { color: 'default', label: '闲置' },
   PLANNING: { color: 'processing', label: '规划中' },
   DEVELOPING: { color: 'processing', label: '开发中' },
@@ -40,9 +39,9 @@ const AUTOMATION_STATUS_META: Record<RequirementAutomationStatus, { color: strin
   FAILED: { color: 'error', label: '失败' },
 };
 
-const shorten = (id?: string | null) => (id ? id.slice(0, 8) : '-');
+const shorten = (id) => (id ? id.slice(0, 8) : '-');
 
-const AutomationStatusBar: React.FC<AutomationStatusBarProps> = ({ status, activeLoopId, planVersion }) => {
+const AutomationStatusBar = ({ status, activeLoopId, planVersion }) => {
   const { styles } = useStyles();
   const meta = status ? AUTOMATION_STATUS_META[status] : { color: 'default', label: '-' };
 

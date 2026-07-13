@@ -35,15 +35,6 @@ import {
 } from '@/services/codingTask';
 // @ts-ignore JS service module has no declaration file
 import { findRunsByCodingTask } from '@/services/run';
-import type {
-  RequirementDto,
-  RequirementCommentDto,
-  ExecutionPlanDto,
-  CodingTaskDto,
-  RunDto,
-  DeliverySummary,
-  ResultData,
-} from './types';
 
 const FAST_STATUSES = new Set([
   'PLANNING',

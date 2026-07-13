@@ -24,26 +24,16 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import LoopGroup from './LoopGroup';
 import CommentComposer from './CommentComposer';
-import type {
-  CommentStreamProps,
-  RequirementCommentDto,
-} from './types';
 
 /** Normalised key for comments that predate the loop concept. */
 const NO_LOOP = '(no-loop)';
 
-interface LoopGroupData {
-  loopId: string;
-  comments: RequirementCommentDto[];
-  active: boolean;
-}
-
-const planVersionOf = (c: RequirementCommentDto): number | null => {
+const planVersionOf = (c) => {
   if (!c.metadataJson) return null;
   try {
     const parsed = JSON.parse(c.metadataJson);
     return parsed && typeof parsed === 'object' && 'planVersion' in parsed
-      ? Number((parsed as { planVersion: unknown }).planVersion)
+      ? Number(parsed.planVersion)
       : null;
   } catch {
     return null;
@@ -57,11 +47,8 @@ const planVersionOf = (c: RequirementCommentDto): number | null => {
  * `createdDate` ascending order (LoopGroup re-sorts too, but we keep the
  * sort local so the active-group placement logic reads from a canonical list).
  */
-function groupComments(
-  comments: RequirementCommentDto[],
-  activeLoopId: string | null | undefined,
-): LoopGroupData[] {
-  const groups = new Map<string, RequirementCommentDto[]>();
+function groupComments(comments, activeLoopId) {
+  const groups = new Map();
   for (const c of comments) {
     const key = c.loopId ?? NO_LOOP;
     const list = groups.get(key);
@@ -69,7 +56,7 @@ function groupComments(
     else groups.set(key, [c]);
   }
   const activeKey = activeLoopId ?? NO_LOOP;
-  const result: LoopGroupData[] = [];
+  const result = [];
   for (const [loopId, list] of groups) {
     const sorted = [...list].sort((a, b) =>
       a.createdDate.localeCompare(b.createdDate),
@@ -86,7 +73,7 @@ function groupComments(
   return result;
 }
 
-const CommentStream: React.FC<CommentStreamProps> = ({
+const CommentStream = ({
   comments,
   activeLoopId,
   requirement,
@@ -95,7 +82,7 @@ const CommentStream: React.FC<CommentStreamProps> = ({
   onJumpPlan,
   onHighlightTask,
 }) => {
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef(null);
   const groups = useMemo(
     () => groupComments(comments, activeLoopId),
     [comments, activeLoopId],

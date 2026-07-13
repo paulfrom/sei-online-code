@@ -26,14 +26,7 @@ import {
   StopOutlined,
   WarningOutlined,
 } from '@ead/suid-icons';
-import type { LoopGroupProps, RequirementCommentDto } from './types';
 import CommentItem from './CommentItem';
-
-interface LoopStatusMeta {
-  color: string;
-  label: string;
-  icon: React.ComponentType<{ style?: React.CSSProperties }>;
-}
 
 /**
  * Infer the terminal status of a loop from its comment types.
@@ -41,9 +34,8 @@ interface LoopStatusMeta {
  * matching signal wins so a loop that both failed and was later accepted
  * reports as 验收.
  */
-function inferStatus(comments: RequirementCommentDto[], active: boolean): LoopStatusMeta {
-  const has = (t: RequirementCommentDto['commentType']) =>
-    comments.some((c) => c.commentType === t);
+function inferStatus(comments, active) {
+  const has = (t) => comments.some((c) => c.commentType === t);
   if (has('ACCEPTANCE')) {
     return { color: 'green', label: '已验收', icon: CheckCircleOutlined };
   }
@@ -61,7 +53,7 @@ function inferStatus(comments: RequirementCommentDto[], active: boolean): LoopSt
 
 const PANEL_KEY = 'loop';
 
-const LoopGroup: React.FC<LoopGroupProps> = ({
+const LoopGroup = ({
   loopId,
   comments,
   active,

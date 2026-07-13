@@ -7,7 +7,6 @@ import { Button, Card, Collapse, Descriptions, Space, Tag, message } from '@ead/
 import { RedoOutlined } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { retryMr } from '@/services/requirement';
-import type { DeliveryTabProps } from './types';
 
 const useStyles = createStyles(({ token, css }) => ({
   mrUrl: css`
