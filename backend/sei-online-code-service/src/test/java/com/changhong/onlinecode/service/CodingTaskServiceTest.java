@@ -23,7 +23,6 @@ class CodingTaskServiceTest {
 
     private CodingTaskDao codingTaskDao;
     private RunDao runDao;
-    private ProjectService projectService;
     private CodingTaskExecutionService executionService;
     private CodingTaskService service;
 
@@ -31,9 +30,8 @@ class CodingTaskServiceTest {
     void setUp() {
         codingTaskDao = mock(CodingTaskDao.class);
         runDao = mock(RunDao.class);
-        projectService = mock(ProjectService.class);
         executionService = mock(CodingTaskExecutionService.class);
-        service = new CodingTaskService(codingTaskDao, runDao, projectService, executionService);
+        service = new CodingTaskService(codingTaskDao, runDao, executionService);
     }
 
     @Test
@@ -142,8 +140,6 @@ class CodingTaskServiceTest {
         task.setId("task-" + status.name());
         task.setProjectId("proj-1");
         task.setRequirementId("req-1");
-        task.setDetailedDesignId("dd-1");
-        task.setDetailedDesignVersion(1);
         task.setStatus(status);
         task.setTitle("测试任务");
         return task;

@@ -26,14 +26,6 @@ public interface CodingTaskDao extends BaseEntityDao<CodingTask> {
     List<CodingTask> findByRequirementId(String requirementId);
 
     /**
-     * 按详细设计 ID 查询所有编码任务。
-     *
-     * @param detailedDesignId 详细设计 ID
-     * @return 编码任务列表
-     */
-    List<CodingTask> findByDetailedDesignId(String detailedDesignId);
-
-    /**
      * 按状态查询编码任务。
      *
      * @param status 状态

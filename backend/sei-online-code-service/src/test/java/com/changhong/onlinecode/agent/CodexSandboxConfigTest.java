@@ -193,6 +193,8 @@ class CodexSandboxConfigTest {
 
     @Test
     void linkSharedHome_symlinksAuthJsonFromSharedHome() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().contains("windows"),
+                "Windows 无符号链接权限时实现按契约回退文件复制");
         Path sharedHome = Files.createTempDirectory("codex-shared-test-");
         try {
             Files.writeString(sharedHome.resolve("auth.json"), "{\"tokens\":\"abc\"}");
@@ -211,6 +213,8 @@ class CodexSandboxConfigTest {
 
     @Test
     void linkSharedHome_symlinksSessionsAndPluginsCacheDirs() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().contains("windows"),
+                "Windows 无符号链接权限时目录共享为 best-effort");
         Path sharedHome = Files.createTempDirectory("codex-shared-test-");
         try {
             CodexSandboxConfig.linkSharedHome(codexHome, sharedHome,
@@ -265,6 +269,8 @@ class CodexSandboxConfigTest {
 
     @Test
     void linkSharedHome_idempotentAcrossInvokes() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().contains("windows"),
+                "Windows 文件链接回退为复制，幂等语义由内容测试覆盖");
         Path sharedHome = Files.createTempDirectory("codex-shared-test-");
         try {
             Files.writeString(sharedHome.resolve("auth.json"), "{}");

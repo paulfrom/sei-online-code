@@ -4,9 +4,7 @@ import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
-import com.changhong.onlinecode.entity.DetailedDesign;
 import com.changhong.onlinecode.entity.FeatureDesign;
-import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Spec;
@@ -44,14 +42,6 @@ public class FailureInfoSupport {
         return canRetry(requirement.getRetryCount(), requirement.getNextRetryAt(), now);
     }
 
-    public boolean canRetry(OverviewDesign overview, Date now) {
-        return canRetry(overview.getRetryCount(), overview.getNextRetryAt(), now);
-    }
-
-    public boolean canRetry(DetailedDesign design, Date now) {
-        return canRetry(design.getRetryCount(), design.getNextRetryAt(), now);
-    }
-
     public boolean canRetry(CodingTask task, Date now) {
         return canRetry(task.getRetryCount(), task.getNextRetryAt(), now);
     }
@@ -86,18 +76,6 @@ public class FailureInfoSupport {
         requirement.setRetryCount(defaultRetryCount(requirement.getRetryCount()) + 1);
         requirement.setLastRetryAt(now);
         requirement.setLastTriggerSource(source);
-    }
-
-    public void markRetrying(OverviewDesign overview, TriggerSource source, Date now) {
-        overview.setRetryCount(defaultRetryCount(overview.getRetryCount()) + 1);
-        overview.setLastRetryAt(now);
-        overview.setLastTriggerSource(source);
-    }
-
-    public void markRetrying(DetailedDesign design, TriggerSource source, Date now) {
-        design.setRetryCount(defaultRetryCount(design.getRetryCount()) + 1);
-        design.setLastRetryAt(now);
-        design.setLastTriggerSource(source);
     }
 
     public void markRetrying(CodingTask task, TriggerSource source, Date now) {
@@ -148,24 +126,6 @@ public class FailureInfoSupport {
         requirement.setLastFailedAt(now);
         requirement.setNextRetryAt(nextRetryAt(requirement.getRetryCount(), now));
         requirement.setLastTriggerSource(source);
-    }
-
-    public void markOverviewDesignFailure(OverviewDesign overview, String summary, String detail,
-                                          TriggerSource source, Date now) {
-        overview.setFailureSummary(summary);
-        overview.setFailureDetail(detail);
-        overview.setLastFailedAt(now);
-        overview.setNextRetryAt(nextRetryAt(overview.getRetryCount(), now));
-        overview.setLastTriggerSource(source);
-    }
-
-    public void markDetailedDesignFailure(DetailedDesign design, String summary, String detail,
-                                          TriggerSource source, Date now) {
-        design.setFailureSummary(summary);
-        design.setFailureDetail(detail);
-        design.setLastFailedAt(now);
-        design.setNextRetryAt(nextRetryAt(design.getRetryCount(), now));
-        design.setLastTriggerSource(source);
     }
 
     public void markCodingTaskFailure(CodingTask task, String summary, String detail,
@@ -219,24 +179,6 @@ public class FailureInfoSupport {
         requirement.setLastRetryAt(null);
         requirement.setRetryCount(0);
         requirement.setNextRetryAt(null);
-    }
-
-    public void clearOverviewDesignFailure(OverviewDesign overview) {
-        overview.setFailureSummary(null);
-        overview.setFailureDetail(null);
-        overview.setLastFailedAt(null);
-        overview.setLastRetryAt(null);
-        overview.setRetryCount(0);
-        overview.setNextRetryAt(null);
-    }
-
-    public void clearDetailedDesignFailure(DetailedDesign design) {
-        design.setFailureSummary(null);
-        design.setFailureDetail(null);
-        design.setLastFailedAt(null);
-        design.setLastRetryAt(null);
-        design.setRetryCount(0);
-        design.setNextRetryAt(null);
     }
 
     public void clearCodingTaskFailure(CodingTask task) {

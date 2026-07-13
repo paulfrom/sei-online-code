@@ -49,4 +49,13 @@ public class CliRunnerRegistry {
     public String defaultTool() {
         return DEFAULT_TOOL;
     }
+
+    /** Cancel a run without requiring the caller to know which vendor owns it. */
+    public boolean cancel(String runId) {
+        boolean cancelled = false;
+        for (CliRunner runner : runners.values()) {
+            cancelled |= runner.cancel(runId);
+        }
+        return cancelled;
+    }
 }

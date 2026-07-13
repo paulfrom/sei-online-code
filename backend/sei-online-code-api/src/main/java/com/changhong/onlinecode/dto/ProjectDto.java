@@ -51,8 +51,8 @@ public class ProjectDto extends BaseEntityDto {
     @Schema(description = "项目工作区路径")
     private String workspacePath;
 
-    @Schema(description = "确认详细设计后是否自动执行编码任务", example = "false")
-    private Boolean autoRunCodingTask;
+    @Schema(description = "验证命令配置 JSON")
+    private String validationConfig;
 
     @Schema(description = "项目绑定的 seed 记忆模板 id；为空则解析当前全局默认模板并绑定。必须指向 ACTIVE 模板")
     private String memorySeedTemplateId;

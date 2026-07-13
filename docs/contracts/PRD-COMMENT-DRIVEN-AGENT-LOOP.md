@@ -6,7 +6,7 @@ This contract replaces the user-visible overview/detailed-design confirmation ch
 
 `Requirement(PRD) -> PM ExecutionPlan -> frontend/backend CodingTask -> DEV_RESULT comments -> validation -> PM acceptance -> GitLab MR delivery`
 
-Legacy overview/detailed-design tables may remain for compatibility, but new PRD confirmation must not create new `OverviewDesign` or `DetailedDesign` rows.
+Legacy overview/detailed-design APIs, agents, code, and tables are removed. Historical Flyway migrations remain immutable; the replacement migration drops their runtime schema.
 
 ## Agents
 
@@ -18,11 +18,7 @@ Built-in agents:
 - `backend-dev-agent`, bound to `builtin:eadp-backend`
 - `test-agent`
 
-Legacy agents may remain:
-
-- `overview-design-agent`
-- `detailed-design-agent`
-- `dev-agent`
+`dev-agent` may remain only for unrelated legacy task compatibility; the PRD loop never resolves it.
 
 ## Requirement
 

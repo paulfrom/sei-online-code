@@ -31,7 +31,6 @@ public class RequirementService extends BaseEntityService<Requirement> {
 
     private final RequirementDao dao;
     private final RequirementAgentService requirementAgentService;
-    private final OverviewDesignService overviewDesignService;
     private final RequirementDesignContextDao requirementDesignContextDao;
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignMemoryValidationService designMemoryValidationService;
@@ -40,14 +39,12 @@ public class RequirementService extends BaseEntityService<Requirement> {
 
     public RequirementService(RequirementDao dao,
                               @Lazy RequirementAgentService requirementAgentService,
-                              @Lazy OverviewDesignService overviewDesignService,
                               RequirementDesignContextDao requirementDesignContextDao,
                               RequirementDesignContextService requirementDesignContextService,
                               DesignMemoryValidationService designMemoryValidationService,
                               com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.dao = dao;
         this.requirementAgentService = requirementAgentService;
-        this.overviewDesignService = overviewDesignService;
         this.requirementDesignContextDao = requirementDesignContextDao;
         this.requirementDesignContextService = requirementDesignContextService;
         this.designMemoryValidationService = designMemoryValidationService;

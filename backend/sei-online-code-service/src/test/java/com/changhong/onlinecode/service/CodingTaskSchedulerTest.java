@@ -3,12 +3,14 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -40,6 +42,7 @@ class CodingTaskSchedulerTest {
     private CodingTaskExecutionService executionService;
     private ValidationCommandExecutor validationCommandExecutor;
     private WorkspaceManager workspaceManager;
+    private RunDao runDao;
     private CodingTaskScheduler scheduler;
 
     private final AtomicInteger savedTasks = new AtomicInteger(0);
@@ -51,8 +54,10 @@ class CodingTaskSchedulerTest {
         executionService = mock(CodingTaskExecutionService.class);
         validationCommandExecutor = mock(ValidationCommandExecutor.class);
         workspaceManager = mock(WorkspaceManager.class);
+        runDao = mock(RunDao.class);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
-                validationCommandExecutor, workspaceManager);
+                validationCommandExecutor, workspaceManager, runDao, mock(CodingTaskChangeCollector.class));
+        when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
             savedTasks.incrementAndGet();
@@ -218,7 +223,6 @@ class CodingTaskSchedulerTest {
         task.setLoopId("loop-1");
         task.setTitle(planTaskKey);
         task.setDescription("desc");
-        task.setDetailedDesignVersion(1);
         task.setAssignedAgent("frontend".equals(area) ? "frontend-dev-agent" : "backend-dev-agent");
         return task;
     }

@@ -3,8 +3,10 @@ package com.changhong.onlinecode.agent;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link CliRunnerRegistry} 单元测试。
@@ -47,5 +49,22 @@ class CliRunnerRegistryTest {
     @Test
     void defaultTool_isClaude() {
         assertEquals("claude", registry.defaultTool());
+    }
+
+    @Test
+    void cancel_routesToOwningRunner() {
+        CliRunner cancellable = new CliRunner() {
+            public String tool() { return "fake"; }
+            public CompletableFuture<String> execute(String i, String p, String c, String m, String mc) {
+                return CompletableFuture.completedFuture(null);
+            }
+            public CompletableFuture<String> execute(String i, String t, String r, String p, String c, String m, String mc) {
+                return CompletableFuture.completedFuture(null);
+            }
+            public boolean cancel(String runId) { return "run-1".equals(runId); }
+        };
+        CliRunnerRegistry cancellableRegistry = new CliRunnerRegistry(List.of(cancellable));
+
+        assertTrue(cancellableRegistry.cancel("run-1"));
     }
 }

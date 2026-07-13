@@ -44,4 +44,9 @@ public interface CliRunner {
      */
     CompletableFuture<String> execute(String iterationId, String taskId, String runId,
                                       String prompt, String cwd, String model, String mcpConfig);
+
+    /** Best-effort cancellation for a process associated with the Run id. */
+    default boolean cancel(String runId) {
+        return false;
+    }
 }

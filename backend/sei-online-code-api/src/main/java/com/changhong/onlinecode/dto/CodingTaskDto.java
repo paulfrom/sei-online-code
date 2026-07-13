@@ -25,12 +25,6 @@ public class CodingTaskDto extends BaseEntityDto {
     @Schema(description = "需求 ID")
     private String requirementId;
 
-    @Schema(description = "详细设计 ID")
-    private String detailedDesignId;
-
-    @Schema(description = "详细设计版本")
-    private Integer detailedDesignVersion;
-
     @Schema(description = "状态")
     private CodingTaskStatus status;
 

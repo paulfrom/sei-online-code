@@ -58,8 +58,9 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "workspace_path", length = 500)
     private String workspacePath;
 
-    @Column(name = "auto_run_coding_task", nullable = false)
-    private Boolean autoRunCodingTask = Boolean.FALSE;
+    /** Project-level validation command configuration JSON. */
+    @Column(name = "validation_config", columnDefinition = "TEXT")
+    private String validationConfig;
 
     /**
      * 项目绑定的 seed 记忆模板 id。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.1。

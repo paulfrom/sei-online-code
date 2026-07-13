@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
@@ -19,6 +20,7 @@ import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.sei.core.utils.TransactionUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -56,6 +58,8 @@ public class RequirementAutomationService {
     private RunDao runDao;
     private RequirementDeliveryService requirementDeliveryService;
     private PmAgentClient pmAgentClient;
+    private CliRunnerRegistry cliRunnerRegistry;
+    private ValidationLoopService validationLoopService;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAutomationService(RequirementDao requirementDao,
@@ -81,6 +85,16 @@ public class RequirementAutomationService {
         this.requirementDeliveryService = requirementDeliveryService;
         this.pmAgentClient = pmAgentClient;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired
+    public void setCliRunnerRegistry(CliRunnerRegistry cliRunnerRegistry) {
+        this.cliRunnerRegistry = cliRunnerRegistry;
+    }
+
+    @Autowired
+    public void setValidationLoopService(ValidationLoopService validationLoopService) {
+        this.validationLoopService = validationLoopService;
     }
 
     /**
@@ -139,6 +153,11 @@ public class RequirementAutomationService {
             return;
         }
 
+        requirement.setAutomationStatus(RequirementAutomationStatus.VALIDATING);
+        requirementDao.save(requirement);
+        if (validationLoopService != null) {
+            validationLoopService.validatePlan(requirement, plan);
+        }
         requirement.setAutomationStatus(RequirementAutomationStatus.ACCEPTING);
         requirementDao.save(requirement);
         plan.setStatus(ExecutionPlanStatus.ACCEPTING);
@@ -267,6 +286,9 @@ public class RequirementAutomationService {
                 run.setCancelRequested(Boolean.TRUE);
                 run.setInvalidatedByCommentId(comment.getId());
                 runDao.save(run);
+                if (cliRunnerRegistry != null) {
+                    cliRunnerRegistry.cancel(run.getId());
+                }
             }
         }
         requirement.setAutomationStatus(RequirementAutomationStatus.INTERRUPTED);
@@ -288,7 +310,6 @@ public class RequirementAutomationService {
                 task.setProjectId(projectId);
                 task.setRequirementId(requirementId);
                 task.setLoopId(loopId);
-                task.setDetailedDesignVersion(1);
             }
             task.setExecutionPlanId(executionPlanId);
             task.setPlanTaskKey(planTask.taskKey());

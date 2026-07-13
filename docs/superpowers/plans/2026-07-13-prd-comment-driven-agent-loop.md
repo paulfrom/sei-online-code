@@ -41,13 +41,7 @@ Seed or rename built-in agents to these stable names:
 - `backend-dev-agent`: implements backend tasks, must bind `builtin:eadp-backend`.
 - `test-agent`: interprets validation command results and writes task-level or plan-level validation reports.
 
-Keep legacy agents temporarily for compatibility:
-
-- `overview-design-agent`
-- `detailed-design-agent`
-- `dev-agent`
-
-New orchestration must not depend on legacy overview/detailed design agents.
+Remove `overview-design-agent` and `detailed-design-agent` with the retired design flow. `dev-agent` may remain only for unrelated legacy task compatibility; new orchestration never resolves it.
 
 ---
 
@@ -133,7 +127,7 @@ Fields:
 
 ### CodingTask
 
-Reuse existing `CodingTask`, but allow creation from `ExecutionPlan` instead of `DetailedDesign`.
+Reuse existing `CodingTask`, but create it exclusively from `ExecutionPlan`.
 
 Add fields:
 
@@ -142,7 +136,7 @@ Add fields:
 - `assignedAgent`
 - `loopId`
 
-For compatibility, keep `detailedDesignId` nullable.
+Remove the obsolete `detailedDesignId` and `detailedDesignVersion` fields.
 
 Status set:
 
@@ -279,11 +273,11 @@ Delivery is part of completion.
 
 ### Task 1: Contract First
 
-- [ ] Create or update API contract for PRD comment driven loop.
-- [ ] Define `RequirementCommentDto`, `ExecutionPlanDto`, request DTOs, enums, and transition rules.
-- [ ] Document interrupt semantics and stale-result invalidation.
-- [ ] Document direct replacement of overview/detailed-design flow after PRD confirmation.
-- [ ] Document GitLab delivery, MR retry, CHANGE_REQUEST loop, validation, memory integration, and max remediation rounds.
+- [x] Create or update API contract for PRD comment driven loop.
+- [x] Define `RequirementCommentDto`, `ExecutionPlanDto`, request DTOs, enums, and transition rules.
+- [x] Document interrupt semantics and stale-result invalidation.
+- [x] Document direct replacement of overview/detailed-design flow after PRD confirmation.
+- [x] Document GitLab delivery, MR retry, CHANGE_REQUEST loop, validation, memory integration, and max remediation rounds.
 
 Verification:
 
@@ -293,13 +287,13 @@ rg "RequirementComment|ExecutionPlan|INTERRUPTED|frontend-dev-agent|backend-dev-
 
 ### Task 2: Persistence Model
 
-- [ ] Add `RequirementComment` entity, DAO, DTO, API, controller, and service.
-- [ ] Add `ExecutionPlan` entity, DAO, DTO, API, controller, and service.
-- [ ] Add migrations for new tables and new nullable columns on `Requirement`, `CodingTask`, and `Run`.
-- [ ] Add `automationStatus`, `activeLoopId`, delivery metadata, and completion metadata to `Requirement`.
-- [ ] Add `executionPlanId`, `planTaskKey`, `assignedAgent`, and `loopId` to `CodingTask`.
-- [ ] Add `runType`, `loopId`, cancellation fields, and memory context references to `Run`.
-- [ ] Keep tenant isolation out of the model.
+- [x] Add `RequirementComment` entity, DAO, DTO, API, controller, and service.
+- [x] Add `ExecutionPlan` entity, DAO, DTO, API, controller, and service.
+- [x] Add migrations for new tables and new nullable columns on `Requirement`, `CodingTask`, and `Run`.
+- [x] Add `automationStatus`, `activeLoopId`, delivery metadata, and completion metadata to `Requirement`.
+- [x] Add `executionPlanId`, `planTaskKey`, `assignedAgent`, and `loopId` to `CodingTask`.
+- [x] Add `runType`, `loopId`, cancellation fields, and memory context references to `Run`.
+- [x] Keep tenant isolation out of the model.
 
 Verification:
 
@@ -310,10 +304,10 @@ rg "oc_requirement_comment|oc_execution_plan|active_loop_id|assigned_agent|run_t
 
 ### Task 3: Agent Seeds
 
-- [ ] Seed `pm-agent`, `frontend-dev-agent`, `backend-dev-agent`, and `test-agent`.
-- [ ] Bind `frontend-dev-agent` to `builtin:suid`.
-- [ ] Bind `backend-dev-agent` to `builtin:eadp-backend`.
-- [ ] Keep existing seed ids stable and add new migrations instead of editing old migration files.
+- [x] Seed `pm-agent`, `frontend-dev-agent`, `backend-dev-agent`, and `test-agent`.
+- [x] Bind `frontend-dev-agent` to `builtin:suid`.
+- [x] Bind `backend-dev-agent` to `builtin:eadp-backend`.
+- [x] Keep existing seed ids stable and add new migrations instead of editing old migration files.
 
 Verification:
 
@@ -323,16 +317,16 @@ rg "pm-agent|frontend-dev-agent|backend-dev-agent|test-agent|builtin:suid|builti
 
 ### Task 4: PM Orchestrator
 
-- [ ] Add `RequirementAutomationService`.
-- [ ] Change PRD confirmation so it starts the PM automation loop instead of creating overview design.
-- [ ] On PRD confirmation, create a new loop id, prepare requirement context from existing memory services, and call `pm-agent` to produce `ExecutionPlan`.
-- [ ] Parse PM JSON strictly and fail with `RequirementComment(FAILURE)` when invalid.
-- [ ] Persist PM execution plan and write an `EXECUTION_PLAN` comment.
-- [ ] Create coding tasks from plan tasks.
-- [ ] Start tasks after transaction commit.
-- [ ] Enforce DAG dependencies, fileScope conflict checks, and lane concurrency of frontend=1/backend=1.
-- [ ] Generate new `ExecutionPlan` versions for PM remediation while retaining the same `loopId`.
-- [ ] Start a `CHANGE_REQUEST` loop when a completed requirement receives a human comment.
+- [x] Add `RequirementAutomationService`.
+- [x] Change PRD confirmation so it starts the PM automation loop instead of creating overview design.
+- [x] On PRD confirmation, create a new loop id, prepare requirement context from existing memory services, and call `pm-agent` to produce `ExecutionPlan`.
+- [x] Parse PM JSON strictly and fail with `RequirementComment(FAILURE)` when invalid.
+- [x] Persist PM execution plan and write an `EXECUTION_PLAN` comment.
+- [x] Create coding tasks from plan tasks.
+- [x] Start tasks after transaction commit.
+- [x] Enforce DAG dependencies, fileScope conflict checks, and lane concurrency of frontend=1/backend=1.
+- [x] Generate new `ExecutionPlan` versions for PM remediation while retaining the same `loopId`.
+- [x] Start a `CHANGE_REQUEST` loop when a completed requirement receives a human comment.
 
 Verification:
 
@@ -343,12 +337,12 @@ rg "createGeneratingOverview|RequirementAutomationService|CHANGE_REQUEST|depends
 
 ### Task 5: Agent-Specific Development Execution
 
-- [ ] Change coding execution to resolve `task.assignedAgent` instead of always `dev-agent`.
-- [ ] Build prompts from PRD + execution plan task + previous comments + failure context + requirement memory context + workspace diff summary.
-- [ ] Write `DEV_RESULT` comments on success and failure.
-- [ ] Include changed files, run state, failure reason, and remediation hints in comment metadata.
-- [ ] Do not submit long-term memory jobs for coding tasks created from this PRD agent loop.
-- [ ] Mark dependent tasks `BLOCKED` when upstream tasks fail or fail validation.
+- [x] Change coding execution to resolve `task.assignedAgent` instead of always `dev-agent`.
+- [x] Build prompts from PRD + execution plan task + previous comments + failure context + requirement memory context + workspace diff summary.
+- [x] Write `DEV_RESULT` comments on success and failure.
+- [x] Include changed files, run state, failure reason, and remediation hints in comment metadata.
+- [x] Do not submit long-term memory jobs for coding tasks created from this PRD agent loop.
+- [x] Mark dependent tasks `BLOCKED` when upstream tasks fail or fail validation.
 
 Verification:
 
@@ -359,13 +353,13 @@ rg "assignedAgent|DEV_RESULT|frontend-dev-agent|backend-dev-agent|VALIDATION_FAI
 
 ### Task 6: Validation Loop
 
-- [ ] Add validation command execution service using `Run.runType = VALIDATION_COMMAND`.
-- [ ] Resolve validation commands from execution plan, project config, then built-in defaults.
-- [ ] Trigger task-level validation after each successful development task.
-- [ ] Trigger plan-level validation after all runnable tasks and task-level validations settle.
-- [ ] Call `test-agent` with validation command facts and write `VALIDATION_RESULT`.
-- [ ] Set task status to `SUCCEEDED` only after task-level validation passes.
-- [ ] Set task status to `VALIDATION_FAILED` when task-level validation fails.
+- [x] Add validation command execution service using `Run.runType = VALIDATION_COMMAND`.
+- [x] Resolve validation commands from execution plan, project config, then built-in defaults.
+- [x] Trigger task-level validation after each successful development task.
+- [x] Trigger plan-level validation after all runnable tasks and task-level validations settle.
+- [x] Call `test-agent` with validation command facts and write `VALIDATION_RESULT`.
+- [x] Set task status to `SUCCEEDED` only after task-level validation passes.
+- [x] Set task status to `VALIDATION_FAILED` when task-level validation fails.
 
 Verification:
 
@@ -376,13 +370,13 @@ rg "VALIDATION_COMMAND|TEST_REVIEW|VALIDATION_RESULT|test-agent|validationConfig
 
 ### Task 7: PM Acceptance Loop
 
-- [ ] Detect when all coding tasks and validations in the current plan version are terminal.
-- [ ] Call `pm-agent` for acceptance review.
-- [ ] PM output must be structured as `accepted: boolean`, `summary`, `findings[]`, `remediationTasks[]`.
-- [ ] PM acceptance prompt must use plan-level `VALIDATION_RESULT` as primary input.
-- [ ] If accepted, mark execution plan `ACCEPTED` and move requirement to `DELIVERING`.
-- [ ] If not accepted, write `REMEDIATION` comment, create a new `ExecutionPlan` version, and keep the same loop unless a human interrupt occurred.
-- [ ] Enforce max 3 remediation rounds, then write explanation and set `WAITING_HUMAN`.
+- [x] Detect when all coding tasks and validations in the current plan version are terminal.
+- [x] Call `pm-agent` for acceptance review.
+- [x] PM output must be structured as `accepted: boolean`, `summary`, `findings[]`, `remediationTasks[]`.
+- [x] PM acceptance prompt must use plan-level `VALIDATION_RESULT` as primary input.
+- [x] If accepted, mark execution plan `ACCEPTED` and move requirement to `DELIVERING`.
+- [x] If not accepted, write `REMEDIATION` comment, create a new `ExecutionPlan` version, and keep the same loop unless a human interrupt occurred.
+- [x] Enforce max 3 remediation rounds, then write explanation and set `WAITING_HUMAN`.
 
 Verification:
 
@@ -393,14 +387,14 @@ rg "ACCEPTANCE|REMEDIATION|NEEDS_REMEDIATION|WAITING_HUMAN|DELIVERING|max" backe
 
 ### Task 8: Human Comment Interrupt and Change Request
 
-- [ ] Add `POST /requirement/{id}/comments`.
-- [ ] If `authorType = HUMAN` and automation is active, invoke interrupt flow.
-- [ ] Treat every active-flow human comment as a change signal; do not classify comment intent.
-- [ ] Mark active runs as cancel requested and/or cancelled.
-- [ ] Rotate `activeLoopId` before starting PM re-plan.
-- [ ] Ensure old futures cannot update current entities because loop id no longer matches.
-- [ ] Rebuild requirement context snapshot from existing memory/context services after human comments.
-- [ ] If requirement is already `COMPLETED`, start a `CHANGE_REQUEST` loop instead of interrupting the completed loop.
+- [x] Add `POST /requirement/{id}/comments`.
+- [x] If `authorType = HUMAN` and automation is active, invoke interrupt flow.
+- [x] Treat every active-flow human comment as a change signal; do not classify comment intent.
+- [x] Mark active runs as cancel requested and/or cancelled.
+- [x] Rotate `activeLoopId` before starting PM re-plan.
+- [x] Ensure old futures cannot update current entities because loop id no longer matches.
+- [x] Rebuild requirement context snapshot from existing memory/context services after human comments.
+- [x] If requirement is already `COMPLETED`, start a `CHANGE_REQUEST` loop instead of interrupting the completed loop.
 
 Verification:
 
@@ -411,10 +405,10 @@ rg "cancelRequested|invalidatedByCommentId|activeLoopId|INTERRUPTED|CHANGE_REQUE
 
 ### Task 9: Runner Cancellation
 
-- [ ] Extend `CliRunner` with optional cancellation API or introduce `ManagedCliRun`.
-- [ ] Track process handles by `runId`.
-- [ ] Implement best-effort process kill for Claude and Codex runners.
-- [ ] Keep logical cancellation as the source of truth even if process kill fails.
+- [x] Extend `CliRunner` with optional cancellation API or introduce `ManagedCliRun`.
+- [x] Track process handles by `runId`.
+- [x] Implement best-effort process kill for Claude and Codex runners.
+- [x] Keep logical cancellation as the source of truth even if process kill fails.
 
 Verification:
 
@@ -425,14 +419,14 @@ rg "cancel" backend/sei-online-code-service/src/main/java/com/changhong/onlineco
 
 ### Task 10: GitLab Delivery
 
-- [ ] Add delivery service for commit, push, and GitLab MR create/update.
-- [ ] Add GitLab platform config fields for API base URL and token, reusing existing config patterns where possible.
-- [ ] On PM acceptance, run delivery with `Run.runType = DELIVERY`.
-- [ ] Source branch format: `feature/req-{requirementId-short}-{loopId-short}`.
-- [ ] Reuse opened MR for the source branch; create a new MR only when none exists.
-- [ ] On closed/merged MR for the branch, fail first version delivery and write `MR_FAILED`.
-- [ ] Add `POST /requirement/{id}/mr/retry`.
-- [ ] On MR success, write `MR_CREATED` or `MR_UPDATED`, set requirement `COMPLETED`, then submit memory update job.
+- [x] Add delivery service for commit, push, and GitLab MR create/update.
+- [x] Add GitLab platform config fields for API base URL and token, reusing existing config patterns where possible.
+- [x] On PM acceptance, run delivery with `Run.runType = DELIVERY`.
+- [x] Source branch format: `feature/req-{requirementId-short}-{loopId-short}`.
+- [x] Reuse opened MR for the source branch; create a new MR only when none exists.
+- [x] On closed/merged MR for the branch, fail first version delivery and write `MR_FAILED`.
+- [x] Add `POST /requirement/{id}/mr/retry`.
+- [x] On MR success, write `MR_CREATED` or `MR_UPDATED`, set requirement `COMPLETED`, then submit memory update job.
 
 Verification:
 
@@ -443,12 +437,12 @@ rg "MR_CREATED|MR_UPDATED|MR_FAILED|DELIVERY|mr/retry|GitLab" backend/sei-online
 
 ### Task 11: Requirement Delivery Memory Update
 
-- [ ] Add `MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY`.
-- [ ] Submit it only after GitLab MR creation/update succeeds.
-- [ ] Include requirement id, loop id, execution plan id, MR URL, branch, commit hash, changed files, final validation result, and acceptance comment id.
-- [ ] Do not mark requirement incomplete if memory update fails.
-- [ ] Write `MEMORY_UPDATED` or `MEMORY_UPDATE_FAILED` comments.
-- [ ] Ensure task-level memory update is skipped for tasks created from execution plans.
+- [x] Add `MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY`.
+- [x] Submit it only after GitLab MR creation/update succeeds.
+- [x] Include requirement id, loop id, execution plan id, MR URL, branch, commit hash, changed files, final validation result, and acceptance comment id.
+- [x] Do not mark requirement incomplete if memory update fails.
+- [x] Write `MEMORY_UPDATED` or `MEMORY_UPDATE_FAILED` comments.
+- [x] Ensure task-level memory update is skipped for tasks created from execution plans.
 
 Verification:
 

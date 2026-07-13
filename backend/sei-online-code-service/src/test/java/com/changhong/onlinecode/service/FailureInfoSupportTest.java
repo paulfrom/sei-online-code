@@ -1,9 +1,6 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
-import com.changhong.onlinecode.entity.DetailedDesign;
-import com.changhong.onlinecode.entity.OverviewDesign;
 import com.changhong.onlinecode.entity.Requirement;
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +8,6 @@ import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,35 +43,6 @@ class FailureInfoSupportTest {
         requirement.setNextRetryAt(new Date(System.currentTimeMillis() + 60_000L));
 
         assertFalse(support.canRetry(requirement, new Date()));
-    }
-
-    @Test
-    void markRetrying_incrementsCountAndSetsLastRetryAt() {
-        OverviewDesign overview = new OverviewDesign();
-        overview.setRetryCount(0);
-        Date now = new Date();
-
-        support.markRetrying(overview, TriggerSource.SCHEDULED_COMPENSATION, now);
-
-        assertEquals(1, overview.getRetryCount());
-        assertEquals(now, overview.getLastRetryAt());
-        assertEquals(TriggerSource.SCHEDULED_COMPENSATION, overview.getLastTriggerSource());
-    }
-
-    @Test
-    void markDetailedDesignFailure_setsFailureInfoAndBackoff() {
-        DetailedDesign design = new DetailedDesign();
-        design.setRetryCount(1);
-        Date now = new Date();
-
-        support.markDetailedDesignFailure(design, "summary", "detail", TriggerSource.SCHEDULED_COMPENSATION, now);
-
-        assertEquals("summary", design.getFailureSummary());
-        assertEquals("detail", design.getFailureDetail());
-        assertEquals(now, design.getLastFailedAt());
-        assertEquals(TriggerSource.SCHEDULED_COMPENSATION, design.getLastTriggerSource());
-        assertNotNull(design.getNextRetryAt());
-        assertTrue(design.getNextRetryAt().after(now));
     }
 
     @Test

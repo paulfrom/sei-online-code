@@ -85,7 +85,6 @@ class ProjectServiceTest {
         assertEquals("proj-1", result.getData().getId());
         assertNotNull(result.getData().getWorkspacePath());
         assertTrue(result.getData().getWorkspacePath().contains("proj-1"));
-        assertEquals(Boolean.FALSE, result.getData().getAutoRunCodingTask());
         verify(planService, never()).regenerate(anyString(), any());
     }
 
@@ -96,7 +95,6 @@ class ProjectServiceTest {
         Project entity = new Project();
         entity.setName("测试项目");
         entity.setWorkspacePath("/custom/workspace/proj-2");
-        entity.setAutoRunCodingTask(Boolean.TRUE);
         when(projectDao.save(any(Project.class))).thenAnswer(inv -> inv.getArgument(0));
 
         // 执行
@@ -105,7 +103,6 @@ class ProjectServiceTest {
         // 验证
         assertTrue(result.successful());
         assertEquals("/custom/workspace/proj-2", result.getData().getWorkspacePath());
-        assertEquals(Boolean.TRUE, result.getData().getAutoRunCodingTask());
         verify(workspaceManager, never()).resolve(anyString());
     }
 

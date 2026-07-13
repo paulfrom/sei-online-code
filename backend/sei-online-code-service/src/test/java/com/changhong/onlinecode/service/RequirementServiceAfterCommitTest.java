@@ -29,8 +29,7 @@ class RequirementServiceAfterCommitTest {
     void spawnPrd_deferredUntilAfterCommit() {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementAgentService agent = mock(RequirementAgentService.class);
-        OverviewDesignService overviewDesignService = mock(OverviewDesignService.class);
-        RequirementService service = new RequirementService(dao, agent, overviewDesignService,
+        RequirementService service = new RequirementService(dao, agent,
                 mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
                 mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
 
@@ -54,8 +53,7 @@ class RequirementServiceAfterCommitTest {
     void spawnPrd_runsImmediatelyWhenNoTransaction() {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementAgentService agent = mock(RequirementAgentService.class);
-        OverviewDesignService overviewDesignService = mock(OverviewDesignService.class);
-        RequirementService service = new RequirementService(dao, agent, overviewDesignService,
+        RequirementService service = new RequirementService(dao, agent,
                 mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
                 mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
 

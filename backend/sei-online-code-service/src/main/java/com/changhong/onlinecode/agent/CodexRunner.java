@@ -21,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
@@ -50,6 +52,7 @@ public class CodexRunner implements CliRunner {
 
     /** codex 可执行文件路径，允许由环境变量覆盖，缺省为 PATH 中的 "codex"。 */
     private final String executable;
+    private final ConcurrentMap<String, Process> activeProcesses = new ConcurrentHashMap<>();
 
     public CodexRunner() {
         String env = System.getenv("CODEX_EXECUTABLE_PATH");
@@ -117,6 +120,9 @@ public class CodexRunner implements CliRunner {
         try {
             emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
+            if (runId != null) {
+                activeProcesses.put(runId, process);
+            }
 
             Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream());
             stderrPump.start();
@@ -161,6 +167,9 @@ public class CodexRunner implements CliRunner {
                 emit(iterationId, taskId, runId, "system", "DONE", "PREVIEW");
                 return output.isBlank() ? null : output;
             } finally {
+                if (runId != null) {
+                    activeProcesses.remove(runId);
+                }
                 stopProcess(process);
                 stderrPump.join(5_000);
                 if (stdoutPump != null) {
@@ -185,6 +194,19 @@ public class CodexRunner implements CliRunner {
             }
         }
         return null;
+    }
+
+    @Override
+    public boolean cancel(String runId) {
+        Process process = activeProcesses.get(runId);
+        if (process == null) {
+            return false;
+        }
+        process.destroy();
+        if (process.isAlive()) {
+            process.destroyForcibly();
+        }
+        return true;
     }
 
     String stripFences(String text) {

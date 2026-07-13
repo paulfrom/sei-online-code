@@ -6,8 +6,6 @@ import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.CodingTask;
-import com.changhong.onlinecode.entity.DetailedDesign;
-import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
@@ -32,16 +30,13 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
 
     private final CodingTaskDao dao;
     private final RunDao runDao;
-    private final ProjectService projectService;
     private final CodingTaskExecutionService executionService;
 
     public CodingTaskService(CodingTaskDao dao,
                              RunDao runDao,
-                             ProjectService projectService,
                              @Lazy CodingTaskExecutionService executionService) {
         this.dao = dao;
         this.runDao = runDao;
-        this.projectService = projectService;
         this.executionService = executionService;
     }
 
@@ -60,31 +55,6 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         return dao.findByRequirementId(requirementId).stream()
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
-    }
-
-    /**
-     * 从详细设计创建任务。
-     *
-     * @param design 详细设计
-     * @return 任务
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public CodingTask createFromDetailedDesign(DetailedDesign design) {
-        CodingTask task = new CodingTask();
-        task.setProjectId(design.getProjectId());
-        task.setRequirementId(design.getRequirementId());
-        task.setDetailedDesignId(design.getId());
-        task.setDetailedDesignVersion(design.getVersion());
-        task.setStatus(CodingTaskStatus.PENDING);
-        task.setTitle(firstNonBlank(design.getModuleTitle(), "未命名模块"));
-        task.setDescription(design.getContent());
-        dao.save(task);
-
-        Project project = projectService.findOne(design.getProjectId());
-        if (project != null && Boolean.TRUE.equals(project.getAutoRunCodingTask())) {
-            executionService.execute(task.getId(), null);
-        }
-        return task;
     }
 
     /**
@@ -154,9 +124,11 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
                 .findFirst()
                 .orElse(null);
         if (active != null) {
+            active.setCancelRequested(Boolean.TRUE);
             active.setState(RunState.CANCELLED);
             active.setFinishedDate(new Date());
             runDao.save(active);
+            executionService.cancelRun(active.getId());
         }
         task.setStatus(CodingTaskStatus.CANCELLED);
         OperateResultWithData<CodingTask> result = super.save(task);
@@ -176,8 +148,6 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         dto.setId(task.getId());
         dto.setProjectId(task.getProjectId());
         dto.setRequirementId(task.getRequirementId());
-        dto.setDetailedDesignId(task.getDetailedDesignId());
-        dto.setDetailedDesignVersion(task.getDetailedDesignVersion());
         dto.setStatus(task.getStatus());
         dto.setTitle(task.getTitle());
         dto.setDescription(task.getDescription());
@@ -188,12 +158,4 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         return dto;
     }
 
-    private static String firstNonBlank(String... candidates) {
-        for (String candidate : candidates) {
-            if (candidate != null && !candidate.isBlank()) {
-                return candidate;
-            }
-        }
-        return "";
-    }
 }

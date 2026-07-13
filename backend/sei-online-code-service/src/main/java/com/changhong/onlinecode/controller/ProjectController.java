@@ -100,7 +100,7 @@ public class ProjectController extends BaseEntityController<Project, ProjectDto>
         dto.setProjectVersion(project.getProjectVersion());
         dto.setPackageName(project.getPackageName());
         dto.setWorkspacePath(project.getWorkspacePath());
-        dto.setAutoRunCodingTask(project.getAutoRunCodingTask());
+        dto.setValidationConfig(project.getValidationConfig());
         dto.setMemorySeedTemplateId(project.getMemorySeedTemplateId());
         dto.setState(projectStateService.resolvePreBuildState(project.getId()));
         dto.setCurrentSpecId(project.getCurrentSpecId());

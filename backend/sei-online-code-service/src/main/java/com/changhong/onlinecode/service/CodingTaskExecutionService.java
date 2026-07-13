@@ -5,10 +5,9 @@ import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
+import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
-import com.changhong.onlinecode.dto.DetailedDesignDto;
-import com.changhong.onlinecode.dto.OverviewDesignDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
@@ -18,6 +17,7 @@ import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
+import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
@@ -50,13 +50,11 @@ import java.util.concurrent.CompletableFuture;
 public class CodingTaskExecutionService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskExecutionService.class);
-    private static final String AGENT_NAME = "dev-agent";
-
     private final CodingTaskDao codingTaskDao;
     private final RunDao runDao;
     private final RequirementService requirementService;
-    private final OverviewDesignService overviewDesignService;
-    private final DetailedDesignService detailedDesignService;
+    private final ExecutionPlanDao executionPlanDao;
+    private final RequirementCommentService requirementCommentService;
     private final WorkspaceManager workspaceManager;
     private final AgentService agentService;
     private final CliRunnerRegistry cliRunnerRegistry;
@@ -71,8 +69,8 @@ public class CodingTaskExecutionService {
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
                                       RequirementService requirementService,
-                                      OverviewDesignService overviewDesignService,
-                                      DetailedDesignService detailedDesignService,
+                                      ExecutionPlanDao executionPlanDao,
+                                      RequirementCommentService requirementCommentService,
                                       WorkspaceManager workspaceManager,
                                       AgentService agentService,
                                       CliRunnerRegistry cliRunnerRegistry,
@@ -85,8 +83,8 @@ public class CodingTaskExecutionService {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
         this.requirementService = requirementService;
-        this.overviewDesignService = overviewDesignService;
-        this.detailedDesignService = detailedDesignService;
+        this.executionPlanDao = executionPlanDao;
+        this.requirementCommentService = requirementCommentService;
         this.workspaceManager = workspaceManager;
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
@@ -104,6 +102,17 @@ public class CodingTaskExecutionService {
     @Lazy
     public void setCodingTaskScheduler(CodingTaskScheduler codingTaskScheduler) {
         this.codingTaskScheduler = codingTaskScheduler;
+    }
+
+    /** Requests logical cancellation and best-effort process termination. */
+    public boolean cancelRun(String runId) {
+        Run run = runDao.findOne(runId);
+        if (run == null) {
+            return false;
+        }
+        run.setCancelRequested(Boolean.TRUE);
+        runDao.save(run);
+        return cliRunnerRegistry.cancel(runId);
     }
 
     /**
@@ -141,7 +150,7 @@ public class CodingTaskExecutionService {
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.getPath()));
         runDao.save(run);
 
-        Agent agent = agentService.findByName(AGENT_NAME);
+        Agent agent = agentService.findByName(task.getAssignedAgent());
         String fullPrompt = buildExecutionPrompt(task, prompt);
 
         if (agent != null) {
@@ -241,7 +250,7 @@ public class CodingTaskExecutionService {
                 task.getRequirementId(),
                 task.getId(),
                 run.getId(),
-                prompt,
+                buildExecutionPrompt(task, prompt),
                 workspace.getPath(),
                 agent.getModel(),
                 agent.getMcpConfig());
@@ -363,18 +372,26 @@ public class CodingTaskExecutionService {
 
     private String buildExecutionPrompt(CodingTask task, String userPrompt) {
         Requirement requirement = requirementService.findOne(task.getRequirementId());
-        OverviewDesignDto overview = overviewDesignService.findByRequirementId(task.getRequirementId());
-        DetailedDesignDto detailedDesign = detailedDesignService.findOneDto(task.getDetailedDesignId());
+        ExecutionPlan plan = task.getExecutionPlanId() == null ? null : executionPlanDao.findOne(task.getExecutionPlanId());
         RequirementDesignContext context = resolveContext(requirement);
         String designContextSection = designContextPromptAssembler.assemble(context);
 
         StringBuilder sb = new StringBuilder();
         sb.append("PRD：").append(requirement == null ? "" : requirement.getPrdContent()).append('\n');
-        sb.append("概览设计：").append(overview == null ? "" : overview.getContent()).append('\n');
-        sb.append("详细设计：").append(detailedDesign == null ? "" : detailedDesign.getContent()).append('\n');
+        sb.append("执行计划：").append(plan == null ? "" : plan.getPlanJson()).append('\n');
         sb.append("\n").append(designContextSection).append("\n");
         sb.append("编码任务：").append(task.getTitle()).append('\n');
         sb.append("任务描述：").append(task.getDescription()).append('\n');
+        if (task.getFileScope() != null) {
+            sb.append("文件范围：").append(task.getFileScope()).append('\n');
+        }
+
+        if (requirementCommentService != null) {
+            sb.append("历史评论：\n");
+            requirementCommentService.findByRequirementId(task.getRequirementId()).forEach(comment ->
+                    sb.append('[').append(comment.getAuthorType()).append('/').append(comment.getCommentType())
+                            .append("] ").append(Objects.toString(comment.getContent(), "")).append('\n'));
+        }
 
         Run lastFailed = findLastFailedRun(task.getId());
         if (lastFailed != null && lastFailed.getFailureReason() != null) {
@@ -383,7 +400,15 @@ public class CodingTaskExecutionService {
         if (userPrompt != null && !userPrompt.isBlank()) {
             sb.append("用户补充提示：").append(userPrompt).append('\n');
         }
-        sb.append("请在已解析的工作区中按上述设计执行编码，只修改任务范围内的文件。");
+        WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
+        if (workspace != null) {
+            com.changhong.onlinecode.service.memory.CodingTaskChangeResult changes =
+                    codingTaskChangeCollector.collect(workspace.getPath(), null);
+            if (changes.isSuccess()) {
+                sb.append("当前工作区差异：").append(Objects.toString(changes.getDiffSummary(), "")).append('\n');
+            }
+        }
+        sb.append("请在已解析的工作区中按上述上下文执行编码，只修改任务范围内的文件。");
         return sb.toString();
     }
 

@@ -73,9 +73,6 @@ public class ProjectService extends BaseEntityService<Project> {
         if (Objects.isNull(entity.getState())) {
             entity.setState(LifecycleState.DRAFTING);
         }
-        if (Objects.isNull(entity.getAutoRunCodingTask())) {
-            entity.setAutoRunCodingTask(Boolean.FALSE);
-        }
         // seed 模板解析与绑定（契约 §9.1）：显式选择必须指向 ACTIVE 模板；未选择时解析并保存当前全局默认 id，
         // 避免后续默认模板切换改变本项目缺文件补齐来源。编辑场景已绑定 id 不重复解析。
         String boundId = resolveSeedTemplateBinding(entity);

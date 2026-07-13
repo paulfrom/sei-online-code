@@ -47,6 +47,9 @@ public class MemoryJob extends BaseAuditableEntity {
     @Column(name = "requirement_id", length = 36)
     private String requirementId;
 
+    @Column(name = "loop_id", length = 64)
+    private String loopId;
+
     /** 关联 CodingTask，可空。 */
     @Column(name = "coding_task_id", length = 36)
     private String codingTaskId;
@@ -81,6 +84,10 @@ public class MemoryJob extends BaseAuditableEntity {
     /** 增量回写基准 WorkspaceMemory id。 */
     @Column(name = "base_workspace_memory_id", length = 36)
     private String baseWorkspaceMemoryId;
+
+    /** Traceability payload for requirement-level delivery memory jobs. */
+    @Column(name = "payload_json", columnDefinition = "TEXT")
+    private String payloadJson;
 
     /** 幂等键。 */
     @Column(name = "idempotency_key", nullable = false, length = 200)

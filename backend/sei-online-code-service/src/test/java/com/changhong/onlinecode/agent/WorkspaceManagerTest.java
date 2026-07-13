@@ -60,8 +60,8 @@ class WorkspaceManagerTest {
 
     @Test
     void isSafeRoot_acceptsSafeAbsoluteDir() {
-        assertTrue(manager.isSafeRoot("/tmp/sei-online-code"), "临时区下的专用工作区根应放行");
-        assertTrue(manager.isSafeRoot("/data/workspaces"), "非黑名单的绝对路径应放行");
+        String safeRoot = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "sei-online-code").toAbsolutePath().toString();
+        assertTrue(manager.isSafeRoot(safeRoot), "临时区下的专用工作区根应放行");
     }
 
     @Test

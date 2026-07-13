@@ -34,6 +34,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -160,6 +162,8 @@ public class RequirementDeliveryService {
             runCommand(workspace, "git", "commit", "-m", "feat: deliver requirement " + shortId(requirement.getId()));
         }
         String commitHash = runCommand(workspace, "git", "rev-parse", "HEAD").stdout().trim();
+        List<String> changedFiles = runCommand(workspace, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+                .stdout().lines().filter(line -> !line.isBlank()).toList();
         runCommand(workspace, "git", "push", "-u", "origin", branch);
 
         GitLabApi gitLabApi = new GitLabApi(config.getGitlabApiBaseUrl().trim(), config.getGitlabToken().trim());
@@ -182,7 +186,7 @@ public class RequirementDeliveryService {
                     .withTargetBranch(targetBranch);
             MergeRequest updated = gitLabApi.getMergeRequestApi()
                     .updateMergeRequest(projectId, mr.getIid(), params);
-            return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(), false);
+            return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(), false, changedFiles);
         }
 
         boolean closedOrMergedExists = gitLabApi.getMergeRequestApi()
@@ -194,7 +198,7 @@ public class RequirementDeliveryService {
 
         MergeRequest created = gitLabApi.getMergeRequestApi()
                 .createMergeRequest(projectId, branch, targetBranch, title, description, null);
-        return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true);
+        return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true, changedFiles);
     }
 
     private void submitDeliveryMemoryJob(Requirement requirement,
@@ -215,18 +219,55 @@ public class RequirementDeliveryService {
                     plan.getId(),
                     run.getId(),
                     baseMemoryId);
-            requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
-                    RequirementCommentAuthorType.SYSTEM, "memory",
-                    submitted.successful() ? RequirementCommentType.MEMORY_UPDATED
-                            : RequirementCommentType.MEMORY_UPDATE_FAILED,
-                    submitted.successful() ? "Requirement 交付后记忆更新任务已提交。"
-                            : "Requirement 交付后记忆更新任务提交失败：" + submitted.getMessage(),
-                    "{\"mrUrl\":\"" + result.mrUrl() + "\"}");
+            if (submitted.successful() && submitted.getData() != null) {
+                MemoryJob job = submitted.getData();
+                job.setLoopId(requirement.getActiveLoopId());
+                com.changhong.onlinecode.entity.RequirementComment validationComment =
+                        latestComment(requirement.getId(), RequirementCommentType.VALIDATION_RESULT);
+                com.changhong.onlinecode.entity.RequirementComment acceptanceComment =
+                        latestComment(requirement.getId(), RequirementCommentType.ACCEPTANCE);
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("requirementId", requirement.getId());
+                payload.put("loopId", requirement.getActiveLoopId());
+                payload.put("executionPlanId", plan.getId());
+                payload.put("mrUrl", result.mrUrl());
+                payload.put("branch", result.branch());
+                payload.put("commitHash", result.commitHash());
+                payload.put("changedFiles", result.changedFiles());
+                payload.put("finalValidationResult", validationComment == null ? null : validationComment.getContent());
+                payload.put("validationCommentId", validationComment == null ? null : validationComment.getId());
+                payload.put("acceptanceCommentId", acceptanceComment == null ? null : acceptanceComment.getId());
+                job.setPayloadJson(toJson(payload));
+                memoryJobService.save(job);
+            }
+            if (submitted.notSuccessful()) {
+                requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
+                        RequirementCommentAuthorType.SYSTEM, "memory",
+                        RequirementCommentType.MEMORY_UPDATE_FAILED,
+                        "Requirement 交付后记忆更新任务提交失败：" + submitted.getMessage(),
+                        "{\"mrUrl\":\"" + result.mrUrl() + "\"}");
+            }
         } catch (Exception e) {
             requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.SYSTEM, "memory",
                     RequirementCommentType.MEMORY_UPDATE_FAILED,
                     "Requirement 交付后记忆更新任务提交异常：" + e.getMessage(), null);
+        }
+    }
+
+    private com.changhong.onlinecode.entity.RequirementComment latestComment(
+            String requirementId, RequirementCommentType type) {
+        return requirementCommentService.findByRequirementId(requirementId).stream()
+                .filter(comment -> comment.getCommentType() == type)
+                .reduce((left, right) -> right)
+                .orElse(null);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("交付记忆载荷序列化失败", e);
         }
     }
 
@@ -246,6 +287,9 @@ public class RequirementDeliveryService {
     }
 
     private String branchName(Requirement requirement) {
+        if (!isBlank(requirement.getDeliveryBranch())) {
+            return requirement.getDeliveryBranch();
+        }
         return "feature/req-" + shortId(requirement.getId()) + "-" + shortId(requirement.getActiveLoopId());
     }
 
@@ -260,7 +304,8 @@ public class RequirementDeliveryService {
         return value == null || value.isBlank();
     }
 
-    private record DeliveryResult(String branch, String commitHash, String targetBranch, String mrUrl, boolean created) {
+    private record DeliveryResult(String branch, String commitHash, String targetBranch, String mrUrl,
+                                  boolean created, List<String> changedFiles) {
     }
 
     private record CommandResult(int exitCode, String stdout, Duration duration) {

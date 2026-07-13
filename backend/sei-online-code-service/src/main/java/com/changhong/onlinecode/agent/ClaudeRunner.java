@@ -20,6 +20,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * ClaudeRunner 骨架（B7）。参考 multica {@code server/pkg/agent/claude.go}。
@@ -46,6 +48,7 @@ public class ClaudeRunner implements CliRunner {
     private final String executable;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ConcurrentMap<String, Process> activeProcesses = new ConcurrentHashMap<>();
 
     public ClaudeRunner() {
         this(defaultExecutable());
@@ -118,6 +121,9 @@ public class ClaudeRunner implements CliRunner {
             }
             emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
+            if (runId != null) {
+                activeProcesses.put(runId, process);
+            }
 
             // stderr 独立线程读取，避免与 stdout 相互阻塞（参考 claude.go 的双 goroutine）。
             Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream());
@@ -144,6 +150,9 @@ public class ClaudeRunner implements CliRunner {
             Thread.currentThread().interrupt();
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
         } finally {
+            if (runId != null) {
+                activeProcesses.remove(runId);
+            }
             if (mcpConfigFile != null) {
                 try {
                     Files.deleteIfExists(mcpConfigFile);
@@ -154,6 +163,19 @@ public class ClaudeRunner implements CliRunner {
             }
         }
         return null;
+    }
+
+    @Override
+    public boolean cancel(String runId) {
+        Process process = activeProcesses.get(runId);
+        if (process == null) {
+            return false;
+        }
+        process.destroy();
+        if (process.isAlive()) {
+            process.destroyForcibly();
+        }
+        return true;
     }
 
     /**

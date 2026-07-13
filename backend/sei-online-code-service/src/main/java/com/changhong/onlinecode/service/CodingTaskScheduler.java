@@ -3,13 +3,18 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
+import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,20 +60,27 @@ public class CodingTaskScheduler {
     private final CodingTaskExecutionService executionService;
     private final ValidationCommandExecutor validationCommandExecutor;
     private final WorkspaceManager workspaceManager;
+    private final RunDao runDao;
+    private final CodingTaskChangeCollector changeCollector;
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
     private RequirementCommentService requirementCommentService;
     private RequirementAutomationService requirementAutomationService;
+    private ValidationLoopService validationLoopService;
 
     public CodingTaskScheduler(CodingTaskDao codingTaskDao,
                                RequirementDao requirementDao,
                                @Lazy CodingTaskExecutionService executionService,
                                ValidationCommandExecutor validationCommandExecutor,
-                               WorkspaceManager workspaceManager) {
+                               WorkspaceManager workspaceManager,
+                               RunDao runDao,
+                               CodingTaskChangeCollector changeCollector) {
         this.codingTaskDao = codingTaskDao;
         this.requirementDao = requirementDao;
         this.executionService = executionService;
         this.validationCommandExecutor = validationCommandExecutor;
         this.workspaceManager = workspaceManager;
+        this.runDao = runDao;
+        this.changeCollector = changeCollector;
     }
 
     @Autowired
@@ -76,6 +88,11 @@ public class CodingTaskScheduler {
                                         RequirementAutomationService requirementAutomationService) {
         this.requirementCommentService = requirementCommentService;
         this.requirementAutomationService = requirementAutomationService;
+    }
+
+    @Autowired
+    public void setValidationLoopService(ValidationLoopService validationLoopService) {
+        this.validationLoopService = validationLoopService;
     }
 
     /**
@@ -235,6 +252,23 @@ public class CodingTaskScheduler {
         task.setStatus(CodingTaskStatus.VALIDATING);
         codingTaskDao.save(task);
 
+        if (validationLoopService != null) {
+            ValidationLoopService.ValidationOutcome outcome = validationLoopService.validateTask(task);
+            if (outcome.passed()) {
+                task.setStatus(CodingTaskStatus.SUCCEEDED);
+                task.setFailureSummary(null);
+                task.setFailureDetail(null);
+            } else {
+                task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
+                task.setFailureSummary("任务级验证失败");
+                task.setFailureDetail("详见 VALIDATION_RESULT 评论及 Run 记录");
+                task.setLastFailedAt(new Date());
+            }
+            codingTaskDao.save(task);
+            schedule(task.getRequirementId());
+            return;
+        }
+
         String command = resolveValidationCommand(task);
         Path workspace = resolveWorkspace(task.getProjectId());
         ValidationCommandExecutor.ValidationResult result = validationCommandExecutor.execute(workspace, command);
@@ -263,11 +297,24 @@ public class CodingTaskScheduler {
                 : "backend".equals(task.getArea())
                 ? RequirementCommentAuthorType.BACKEND_AGENT
                 : RequirementCommentAuthorType.SYSTEM;
+        Run run = runDao.findByCodingTaskId(task.getId()).stream()
+                .reduce((left, right) -> Objects.requireNonNullElse(left.getRunNo(), 0)
+                        > Objects.requireNonNullElse(right.getRunNo(), 0) ? left : right)
+                .orElse(null);
+        CodingTaskChangeResult changes = run == null ? null
+                : changeCollector.collect(run.getWorktreePath(), run.getBaseCommit());
+        String changedFiles = changes != null && changes.isSuccess()
+                ? String.join(",", changes.getChangedFiles()) : "";
         requirementCommentService.append(task.getRequirementId(), task.getLoopId(), authorType,
                 task.getAssignedAgent(), RequirementCommentType.DEV_RESULT,
                 success ? "开发任务完成：" + task.getPlanTaskKey()
                         : "开发任务失败：" + task.getPlanTaskKey() + "\n" + Objects.toString(failureReason, ""),
-                "{\"taskId\":\"" + task.getId() + "\",\"success\":" + success + "}");
+                "{\"taskId\":\"" + task.getId() + "\",\"success\":" + success
+                        + ",\"runId\":\"" + (run == null ? "" : run.getId())
+                        + "\",\"runState\":\"" + (run == null ? "" : run.getState())
+                        + "\",\"changedFiles\":\"" + changedFiles
+                        + "\",\"failureReason\":\"" + Objects.toString(failureReason, "")
+                        + "\",\"remediationHint\":\"" + (success ? "" : "根据失败日志修复后重试") + "\"}");
     }
 
     private void appendValidationResult(CodingTask task,

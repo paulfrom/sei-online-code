@@ -21,7 +21,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * CodingTask 实体。每个详细设计对应一个编码任务。
+ * CodingTask 实体。任务由 ExecutionPlan 创建。
  *
  * @author sei-online-code
  */
@@ -31,7 +31,6 @@ import java.util.List;
 @Table(name = "oc_coding_task", indexes = {
         @Index(name = "idx_coding_task_project", columnList = "project_id"),
         @Index(name = "idx_coding_task_requirement", columnList = "requirement_id"),
-        @Index(name = "idx_coding_task_detailed_design", columnList = "detailed_design_id"),
         @Index(name = "idx_coding_task_status", columnList = "status")
 })
 @Access(AccessType.FIELD)
@@ -44,12 +43,6 @@ public class CodingTask extends BaseAuditableEntity {
 
     @Column(name = "requirement_id", nullable = false, length = 36)
     private String requirementId;
-
-    @Column(name = "detailed_design_id", length = 36)
-    private String detailedDesignId;
-
-    @Column(name = "detailed_design_version", nullable = false)
-    private Integer detailedDesignVersion;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)

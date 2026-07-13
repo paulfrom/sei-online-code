@@ -28,12 +28,14 @@ class ConfigServiceTest {
     @Test
     void trimsWhitespaceFromConfigWorkspaceRoot() {
         PlatformConfig config = new PlatformConfig();
+        String expected = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "sei-online-code", "project", "data")
+                .toAbsolutePath().toString();
         // 复现线上输入：前导换行+空格、尾部空格
-        config.setWorkspaceRoot("\n  /home/paul/project/sei-online-code/project/data  ");
+        config.setWorkspaceRoot("\n  " + expected + "  ");
 
         String resolved = service.resolveWorkspaceRoot(config);
 
-        assertEquals("/home/paul/project/sei-online-code/project/data", resolved,
+        assertEquals(expected, resolved,
                 "config.workspaceRoot 的前后空白须被 trim");
         // trim 后须能通过 isSafeRoot（证明修复闭环：原脏值会被 isSafeRoot 误拒）
         assertTrue(new WorkspaceManager(null, null, null).isSafeRoot(resolved),
@@ -42,12 +44,14 @@ class ConfigServiceTest {
 
     @Test
     void trimsWhitespaceFromEnvWorkspaceRoot() throws Exception {
-        setEnvWorkspaceRoot("\n  /home/paul/project/sei-online-code/project/data  ");
+        String expected = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "sei-online-code", "project", "data")
+                .toAbsolutePath().toString();
+        setEnvWorkspaceRoot("\n  " + expected + "  ");
 
         // config 无 workspaceRoot → 走 env 分支
         String resolved = service.resolveWorkspaceRoot(new PlatformConfig());
 
-        assertEquals("/home/paul/project/sei-online-code/project/data", resolved,
+        assertEquals(expected, resolved,
                 "env oc.workspace.root 的前后空白须被 trim");
         assertTrue(new WorkspaceManager(null, null, null).isSafeRoot(resolved),
                 "trim 后的绝对路径须通过 isSafeRoot");

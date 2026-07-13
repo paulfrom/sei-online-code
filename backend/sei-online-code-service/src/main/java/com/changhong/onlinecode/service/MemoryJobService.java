@@ -4,6 +4,8 @@ import com.changhong.onlinecode.dao.MemoryJobDao;
 import com.changhong.onlinecode.dto.enums.MemoryJobStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
@@ -12,6 +14,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +45,12 @@ public class MemoryJobService extends BaseEntityService<MemoryJob> {
     private static final int DEFAULT_MAX_RETRY = 3;
 
     private final MemoryJobDao dao;
+    private RequirementCommentService requirementCommentService;
+
+    @Autowired
+    public void setRequirementCommentService(RequirementCommentService requirementCommentService) {
+        this.requirementCommentService = requirementCommentService;
+    }
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -154,6 +163,15 @@ public class MemoryJobService extends BaseEntityService<MemoryJob> {
         job.setNewWorkspaceMemoryId(newWorkspaceMemoryId);
         job.setFinishedAt(new Date());
         dao.save(job);
+        if (job.getJobType() == MemoryJobType.MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY
+                && requirementCommentService != null) {
+            requirementCommentService.append(job.getRequirementId(), job.getLoopId(),
+                    RequirementCommentAuthorType.SYSTEM, "memory",
+                    RequirementCommentType.MEMORY_UPDATED,
+                    "Requirement 交付后记忆更新完成。",
+                    "{\"memoryJobId\":\"" + job.getId() + "\",\"workspaceMemoryId\":\""
+                            + Objects.toString(newWorkspaceMemoryId, "") + "\"}");
+        }
     }
 
     /**
@@ -199,6 +217,15 @@ public class MemoryJobService extends BaseEntityService<MemoryJob> {
             LOGGER.warn("memory-job: 重试耗尽进入 FAILED jobId={}", jobId);
         }
         dao.save(job);
+        if (job.getStatus() == MemoryJobStatus.FAILED
+                && job.getJobType() == MemoryJobType.MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY
+                && requirementCommentService != null) {
+            requirementCommentService.append(job.getRequirementId(), job.getLoopId(),
+                    RequirementCommentAuthorType.SYSTEM, "memory",
+                    RequirementCommentType.MEMORY_UPDATE_FAILED,
+                    "Requirement 交付后记忆更新失败：" + failureSummary,
+                    "{\"memoryJobId\":\"" + job.getId() + "\"}");
+        }
     }
 
     /**
