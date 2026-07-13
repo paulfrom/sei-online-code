@@ -133,6 +133,8 @@ export interface LoopGroupProps {
   comments: RequirementCommentDto[];
   active: boolean;
   planVersion?: number | null;
+  onJumpPlan?: () => void;
+  onHighlightTask?: (taskKey: string) => void;
 }
 
 export interface CommentItemProps {
