@@ -114,7 +114,7 @@ public class ClaudeRunner implements CliRunner {
         StringBuilder output = new StringBuilder();
         try {
             mcpConfigFile = writeMcpConfigFile(mcpConfig);
-            List<String> args = buildArgs(prompt, model, mcpConfigFile);
+            List<String> args = buildArgs(prompt, model, mcpConfigFile, cwd);
             ProcessBuilder pb = new ProcessBuilder(args);
             if (cwd != null && !cwd.isBlank()) {
                 pb.directory(new java.io.File(cwd));
@@ -218,13 +218,21 @@ public class ClaudeRunner implements CliRunner {
      * @param mcpConfigFile MCP 配置临时文件（null → 不注入）
      * @return 命令行参数
      */
-    private List<String> buildArgs(String prompt, String model, Path mcpConfigFile) {
+    List<String> buildArgs(String prompt, String model, Path mcpConfigFile, String cwd) {
         List<String> args = new ArrayList<>();
         args.add(executable);
         args.add("-p");
         args.add(prompt);
         args.add("--output-format");
         args.add("json");
+        if (cwd != null && !cwd.isBlank()) {
+            args.add("--add-dir");
+            args.add(Path.of(cwd).toAbsolutePath().normalize().toString());
+        }
+        args.add("--permission-mode");
+        args.add("bypassPermissions");
+        args.add("--allowedTools");
+        args.add("Read,Glob,Grep,LS,Edit,MultiEdit,Write,Bash");
         if (model != null && !model.isBlank()) {
             args.add("--model");
             args.add(model);

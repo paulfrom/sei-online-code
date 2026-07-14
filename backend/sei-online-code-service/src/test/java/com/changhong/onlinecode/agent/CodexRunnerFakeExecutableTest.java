@@ -82,6 +82,17 @@ class CodexRunnerFakeExecutableTest {
         assertTrue(result.contains("args = [\"mcp-server-fetch\"]"), result);
     }
 
+    @Test
+    void execute_sandboxConfigIncludesCurrentWorkdirWritableRoot() throws Exception {
+        CodexRunner runner = new CodexRunner(fakeAppServerSnapshotConfig().toString());
+
+        String result = runner.execute("fake-it", "p", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS);
+
+        assertTrue(result.contains("sandbox_mode = \"workspace-write\""), result);
+        assertTrue(result.contains("writable_roots = [\"" + workdir.toAbsolutePath().normalize() + "\"]"), result);
+    }
+
     private Path fakeAppServerHappy() throws IOException {
         return installScript(appServerScript("""
                 emit_delta PO

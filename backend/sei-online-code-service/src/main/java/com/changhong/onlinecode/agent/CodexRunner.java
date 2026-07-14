@@ -96,7 +96,9 @@ public class CodexRunner implements CliRunner {
         Path codexHome = null;
         try {
             codexHome = Files.createTempDirectory("codex-home-");
-            CodexSandboxConfig.write(codexHome, LOGGER);
+            Path writableRoot = (cwd == null || cwd.isBlank())
+                    ? null : Path.of(cwd).toAbsolutePath().normalize();
+            CodexSandboxConfig.write(codexHome, writableRoot, LOGGER);
             CodexSandboxConfig.linkSharedHome(codexHome, LOGGER);
             CodexSandboxConfig.seedUserSkills(codexHome, LOGGER);
             CodexSandboxConfig.writeMcpBlock(codexHome, mcpConfig, LOGGER);

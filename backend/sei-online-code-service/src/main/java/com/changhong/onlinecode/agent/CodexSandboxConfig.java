@@ -67,12 +67,24 @@ public final class CodexSandboxConfig {
      * @throws IOException 读写 config.toml 失败
      */
     public static void write(Path codexHome, Logger logger) throws IOException {
+        write(codexHome, null, logger);
+    }
+
+    /**
+     * 在给定 codex-home 下写/重写托管沙箱块，并显式授权当前项目工作区为可写根。
+     *
+     * @param codexHome    per-run CODEX_HOME 目录（不存在则创建）
+     * @param writableRoot 项目工作区根目录；非 darwin 的 workspace-write 模式下写入 writable_roots
+     * @param logger       日志器（darwin 回退时 warn）
+     * @throws IOException 读写 config.toml 失败
+     */
+    public static void write(Path codexHome, Path writableRoot, Logger logger) throws IOException {
         Files.createDirectories(codexHome);
         Path config = codexHome.resolve("config.toml");
         String existing = Files.exists(config) ? Files.readString(config, StandardCharsets.UTF_8) : "";
         String stripped = stripManagedBlock(existing);
         stripped = stripSkillsConfig(stripped);
-        String block = buildBlock(logger);
+        String block = buildBlock(writableRoot, logger);
         String content = block + "\n" + stripped;
         Files.writeString(config, content, StandardCharsets.UTF_8);
     }
@@ -84,7 +96,7 @@ public final class CodexSandboxConfig {
         return lower.contains("mac") || lower.contains("darwin");
     }
 
-    private static String buildBlock(Logger logger) {
+    private static String buildBlock(Path writableRoot, Logger logger) {
         StringBuilder sb = new StringBuilder();
         sb.append(BEGIN_MARKER).append('\n');
         // PR2 #1/#2：禁用 memory（防跨任务记忆泄漏，multica#3130）与 multi_agent
@@ -103,6 +115,10 @@ public final class CodexSandboxConfig {
             sb.append("sandbox_mode = \"workspace-write\"\n");
             sb.append("[sandbox_workspace_write]\n");
             sb.append("network_access = true\n");
+            if (writableRoot != null) {
+                String root = writableRoot.toAbsolutePath().normalize().toString();
+                sb.append("writable_roots = [").append(codexTOMLBasicString(root)).append("]\n");
+            }
         }
         sb.append(END_MARKER);
         return sb.toString();

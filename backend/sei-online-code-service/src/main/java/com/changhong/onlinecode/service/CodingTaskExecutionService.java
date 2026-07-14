@@ -24,6 +24,8 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
+import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.slf4j.Logger;
@@ -65,6 +67,7 @@ public class CodingTaskExecutionService {
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final CodingTaskChangeCollector codingTaskChangeCollector;
+    private final WorkspaceChangeDetector workspaceChangeDetector;
     private final ApplicationEventPublisher eventPublisher;
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
@@ -82,6 +85,7 @@ public class CodingTaskExecutionService {
                                       MemoryJobService memoryJobService,
                                       WorkspaceMemoryService workspaceMemoryService,
                                       CodingTaskChangeCollector codingTaskChangeCollector,
+                                      WorkspaceChangeDetector workspaceChangeDetector,
                                       ApplicationEventPublisher eventPublisher) {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
@@ -98,6 +102,7 @@ public class CodingTaskExecutionService {
         this.memoryJobService = memoryJobService;
         this.workspaceMemoryService = workspaceMemoryService;
         this.codingTaskChangeCollector = codingTaskChangeCollector;
+        this.workspaceChangeDetector = workspaceChangeDetector;
         this.eventPublisher = eventPublisher;
     }
 
@@ -158,6 +163,7 @@ public class CodingTaskExecutionService {
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                     null);
         }
+        WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
         CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
                 agent == null ? null : agent.getCliTool(),
@@ -170,8 +176,8 @@ public class CodingTaskExecutionService {
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
-            boolean success = result != null && !result.contains("FAILED");
-            finishRun(trackedRun, task, success, success ? null : "执行返回失败结果", false);
+            CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
+            finishRun(trackedRun, task, decision.success(), decision.failureReason(), false);
         }).exceptionally(e -> {
             LOGGER.error("coding-task execute failed taskId={}", id, e);
             finishRun(trackedRun, task, false, rootMessage(e), false);
@@ -251,6 +257,7 @@ public class CodingTaskExecutionService {
                 agent.getModel(),
                 agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                 null);
+        WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
         CompletableFuture<String> future = cliRunnerRegistry.execute(workspace, agent.getCliTool(),
                 task.getRequirementId(),
@@ -262,8 +269,8 @@ public class CodingTaskExecutionService {
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
-            boolean success = result != null && !result.contains("FAILED");
-            finishRun(trackedRun, task, success, success ? null : "执行返回失败结果", true);
+            CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
+            finishRun(trackedRun, task, decision.success(), decision.failureReason(), true);
         }).exceptionally(e -> {
             LOGGER.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
             finishRun(trackedRun, task, false, rootMessage(e), true);
@@ -274,6 +281,36 @@ public class CodingTaskExecutionService {
         dto.setId(task.getId());
         dto.setStatus(task.getStatus());
         return ResultData.success(dto);
+    }
+
+    private CompletionDecision decideCompletion(Run run, String result,
+                                                WorkspaceChangeDetector.Snapshot baseline) {
+        if (result == null) {
+            return CompletionDecision.failed("执行返回空结果");
+        }
+        if (result.contains("FAILED")) {
+            return CompletionDecision.failed("执行返回失败结果");
+        }
+        List<String> changedFiles = workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath());
+        if (changedFiles.isEmpty()) {
+            return CompletionDecision.failed("开发代理未在指定工作区产生代码或文档变更");
+        }
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("coding-task: detected workspace changes runId={}, files={}",
+                    run.getId(), changedFiles);
+            return CompletionDecision.ok();
+        }
+        return CompletionDecision.ok();
+    }
+
+    private record CompletionDecision(boolean success, String failureReason) {
+        static CompletionDecision ok() {
+            return new CompletionDecision(true, null);
+        }
+
+        static CompletionDecision failed(String failureReason) {
+            return new CompletionDecision(false, failureReason);
+        }
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {
@@ -406,6 +443,8 @@ public class CodingTaskExecutionService {
             }
         }
         sb.append("请在已解析的工作区中按上述上下文执行编码，只修改任务范围内的文件。");
+        sb.append("本任务必须在工作区落地至少一个代码或文档文件变更；");
+        sb.append("仅分析、说明、报告完成但不修改文件会被系统判定为开发失败。");
         return sb.toString();
     }
 

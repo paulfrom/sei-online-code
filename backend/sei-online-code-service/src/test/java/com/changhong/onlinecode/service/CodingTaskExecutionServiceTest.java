@@ -12,11 +12,14 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.MemoryJob;
+import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
+import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
+import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
@@ -28,6 +31,7 @@ import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,7 +41,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 class CodingTaskExecutionServiceTest {
 
@@ -47,13 +54,17 @@ class CodingTaskExecutionServiceTest {
     private MemoryJobService memoryJobService;
     private WorkspaceMemoryService workspaceMemoryService;
     private AgentService agentService;
+    private RequirementService requirementService;
     private ApplicationEventPublisher eventPublisher;
     private ExecutionPlanDao executionPlanDao;
     private WorkspaceManager workspaceManager;
     private CliRunnerRegistry cliRunnerRegistry;
     private RunNumberService runNumberService;
     private CodingTaskChangeCollector changeCollector;
+    private WorkspaceChangeDetector workspaceChangeDetector;
     private CodingTaskExecutionService service;
+    @org.junit.jupiter.api.io.TempDir
+    Path tempDir;
 
     @BeforeEach
     void setUp() {
@@ -70,11 +81,13 @@ class CodingTaskExecutionServiceTest {
         runNumberService = mock(RunNumberService.class);
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         changeCollector = mock(CodingTaskChangeCollector.class);
+        workspaceChangeDetector = new WorkspaceChangeDetector();
+        requirementService = mock(RequirementService.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
                 runNumberService,
-                mock(RequirementService.class),
+                requirementService,
                 executionPlanDao,
                 mock(RequirementCommentService.class),
                 workspaceManager,
@@ -86,6 +99,7 @@ class CodingTaskExecutionServiceTest {
                 memoryJobService,
                 workspaceMemoryService,
                 changeCollector,
+                workspaceChangeDetector,
                 eventPublisher
         );
     }
@@ -332,6 +346,123 @@ class CodingTaskExecutionServiceTest {
         Run developmentRun = captor.getAllValues().get(0);
         assertEquals("context-1", developmentRun.getMemoryContextId());
         assertEquals("memory-1", developmentRun.getWorkspaceMemoryId());
+    }
+
+    @Test
+    void executePlanTask_runnerCompletesWithoutWorkspaceChanges_marksDevelopmentFailed() {
+        CodingTask task = new CodingTask();
+        task.setId("task-empty");
+        task.setRequirementId("req-empty");
+        task.setProjectId("project-empty");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-empty")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-empty")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-empty");
+            }
+            savedRun.set(run);
+            return run;
+        });
+        when(runDao.findOne("run-empty")).thenAnswer(invocation -> savedRun.get());
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(cliRunnerRegistry.workspace("project-empty")).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-1");
+        CodingTaskChangeResult noChanges = new CodingTaskChangeResult();
+        noChanges.setSuccess(true);
+        noChanges.setChangedFiles(java.util.List.of());
+        when(changeCollector.collect(tempDir.toString(), "base-1")).thenReturn(noChanges);
+        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("任务已完成"));
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals(RunState.FAILED, savedRun.get().getState());
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-empty", false, "开发代理未在指定工作区产生代码或文档变更"));
+    }
+
+    @Test
+    void executePlanTask_nonGitWorkspaceWithFileChange_marksDevelopmentSucceeded() throws Exception {
+        CodingTask task = new CodingTask();
+        task.setId("task-file-change");
+        task.setRequirementId("req-file-change");
+        task.setProjectId("project-file-change");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("claude");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-file-change")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-file-change")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-file-change");
+            }
+            savedRun.set(run);
+            return run;
+        });
+        when(runDao.findOne("run-file-change")).thenAnswer(invocation -> savedRun.get());
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(cliRunnerRegistry.workspace("project-file-change")).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
+        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Files.writeString(tempDir.resolve("generated.txt"), "hello");
+                    return CompletableFuture.completedFuture("DONE");
+                });
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-file-change", true, null));
+    }
+
+    @Test
+    void buildExecutionPrompt_requiresWorkspaceFileChange() throws Exception {
+        CodingTask task = new CodingTask();
+        task.setId("task-prompt");
+        task.setRequirementId("req-prompt");
+        task.setProjectId("project-prompt");
+        task.setTitle("title");
+        task.setDescription("desc");
+        Requirement requirement = new Requirement();
+        requirement.setId("req-prompt");
+        requirement.setPrdContent("prd");
+        when(requirementService.findOne("req-prompt")).thenReturn(requirement);
+
+        Method method = CodingTaskExecutionService.class.getDeclaredMethod(
+                "buildExecutionPrompt", CodingTask.class, String.class);
+        method.setAccessible(true);
+        String prompt = (String) method.invoke(service, task, null);
+
+        assertTrue(prompt.contains("必须在工作区落地至少一个代码或文档文件变更"));
+        assertTrue(prompt.contains("不修改文件会被系统判定为开发失败"));
     }
 
     private void invokeFinishRun(Run run, CodingTask task, boolean success, String reason) throws Exception {

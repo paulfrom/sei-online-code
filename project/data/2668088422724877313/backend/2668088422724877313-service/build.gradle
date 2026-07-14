@@ -28,6 +28,9 @@ dependencies {
     api("com.changhong.sei:sei-cloud-nacos-starter:$sei_version")
     // 第三方组件依赖包
     api("mysql:mysql-connector-java:$mysqlVersion")
+    // 数据库迁移
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-mysql")
 
     // 测试依赖包
     // compile("com.changhong.sei:sei-test-starter:$sei_version")

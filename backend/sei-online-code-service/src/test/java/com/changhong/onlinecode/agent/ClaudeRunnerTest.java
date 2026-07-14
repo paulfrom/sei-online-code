@@ -8,10 +8,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClaudeRunnerTest {
@@ -62,7 +63,28 @@ class ClaudeRunnerTest {
         String result = runner.execute("it", "p", tempDir.toString(), null, " ")
                 .get(60, TimeUnit.SECONDS);
 
-        assertEquals("-p p --output-format json", result);
+        assertFalse(result.contains("--mcp-config"));
+        assertFalse(result.contains("--strict-mcp-config"));
+        assertTrue(result.contains("--add-dir"));
+        assertTrue(result.contains("--permission-mode bypassPermissions"));
+    }
+
+    @Test
+    void buildArgs_grantsWorkspaceAndEditToolsForNonInteractiveCoding() {
+        ClaudeRunner runner = new ClaudeRunner("/tmp/fake-claude");
+
+        List<String> args = runner.buildArgs("p", null, null, tempDir.toString());
+
+        assertTrue(args.contains("--add-dir"));
+        assertTrue(args.contains(tempDir.toAbsolutePath().normalize().toString()));
+        assertTrue(args.contains("--permission-mode"));
+        assertTrue(args.contains("bypassPermissions"));
+        assertTrue(args.contains("--allowedTools"));
+        String joined = String.join(" ", args);
+        assertTrue(joined.contains("Edit"));
+        assertTrue(joined.contains("MultiEdit"));
+        assertTrue(joined.contains("Write"));
+        assertTrue(joined.contains("Bash"));
     }
 
     private Path installScript(String content, String name) throws Exception {

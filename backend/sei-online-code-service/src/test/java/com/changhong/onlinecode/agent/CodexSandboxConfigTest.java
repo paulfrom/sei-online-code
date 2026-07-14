@@ -60,6 +60,18 @@ class CodexSandboxConfigTest {
     }
 
     @Test
+    void write_nonDarwin_includesProjectWorkspaceWritableRoot() throws IOException {
+        System.setProperty("os.name", "Linux");
+        Path workspace = codexHome.resolve("workspace");
+
+        CodexSandboxConfig.write(codexHome, workspace, LoggerFactory.getLogger(CodexSandboxConfigTest.class));
+
+        String config = Files.readString(codexHome.resolve("config.toml"));
+        assertTrue(config.contains("writable_roots = [\"" + workspace.toAbsolutePath().normalize() + "\"]"),
+                "workspace-write 须显式授权项目工作区可写");
+    }
+
+    @Test
     void write_darwin_fallsBackToDangerFullAccess() throws IOException {
         System.setProperty("os.name", "Mac OS X");
 

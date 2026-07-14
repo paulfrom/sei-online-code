@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -66,6 +69,56 @@ class ClaudeRunnerRealClaudeTest {
         assertFalse(result.isBlank(), "result 文本不得为空");
         assertTrue(result.toLowerCase().contains("pong"),
                 "claude 应回声 PONG，实际: " + result);
+    }
+
+    @Test
+    void execute_writesSimpleFileInFirstDataWorkspaceUsingBash() throws Exception {
+        Path dataWorkspace = firstDataWorkspace();
+        Path target = dataWorkspace.resolve(".sei-online-code-claude-write-test.txt");
+        String marker = "claude-write-test-" + UUID.randomUUID();
+        Files.deleteIfExists(target);
+
+        String prompt = "In the current workspace, use the Bash tool to create or overwrite the file "
+                + target.getFileName()
+                + " with exactly this single line and no extra text: " + marker
+                + ". Do not modify any other file. After writing it, reply with DONE.";
+        try {
+            String result = runner.execute("real-claude-write-e2e", prompt,
+                            dataWorkspace.toString(), null, null)
+                    .get(180, TimeUnit.SECONDS);
+
+            assertNotNull(result, "claude 进程退出码非 0 或 result envelope 解析失败");
+            assertTrue(Files.exists(target), "Claude 必须在 project/data 第一个工作区写入测试文件: " + target);
+            assertTrue(Files.readString(target).trim().equals(marker),
+                    "测试文件内容必须等于 marker，实际: " + Files.readString(target));
+        } finally {
+            Files.deleteIfExists(target);
+        }
+    }
+
+    private Path firstDataWorkspace() throws IOException {
+        Path dataRoot = locateRepoRoot().resolve("project/data");
+        Assumptions.assumeTrue(Files.isDirectory(dataRoot), "project/data 不存在: " + dataRoot);
+        try (Stream<Path> stream = Files.list(dataRoot)) {
+            Path first = stream.filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith("."))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .findFirst()
+                    .orElse(null);
+            Assumptions.assumeTrue(first != null, "project/data 下没有工作区目录");
+            return first;
+        }
+    }
+
+    private Path locateRepoRoot() {
+        Path current = Path.of("").toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.isDirectory(current.resolve("project/data"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return Path.of("").toAbsolutePath().normalize();
     }
 
     /**
