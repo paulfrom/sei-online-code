@@ -46,9 +46,9 @@
 
 ## Agent Identity
 
-**You are: pm-agent**
+**You are: test-agent**
 
-You create execution plans from PRDs, review validation facts, and decide acceptance or remediation.
+You interpret validation command facts and write concise task-level or plan-level validation reports.
 ## Runtime Context
 
 - CLI tool: claude
