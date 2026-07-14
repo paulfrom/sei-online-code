@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |---|---|
-| 交付文件 | `backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql` |
+| 交付文件（仓库根全路径，cwd 无关） | `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql` |
 | MD5（src = build = HEAD 三态一致） | `4254c3374dc0cea9be162ea4b43ba372` |
 | 首次入 HEAD | `a9530a6 feat: add important_enterprises migration and BE-001 decision log`（之后历经 docs 提交，SQL 未改动） |
 | Flyway 配置 | `backend/2668088422724877313-service/build.gradle` L32 `flyway-core` + L33 `flyway-mysql` |
@@ -19,7 +19,7 @@
 
 ## 复核记录（单条权威）
 
-- **2026-07-15（再派复核，first-hand 独立实跑、未信任既有断言）**：锚 `git rev-parse --show-toplevel`（= `/home/paul/project/sei-online-code`，cwd 无关）实跑三项核验：① `git ls-files --full-name` 得仓库根全路径 `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql`，`git cat-file -e HEAD:"<full>"` → V1 确在 HEAD；② 三态 md5 一致 `4254c3374dc0cea9be162ea4b43ba372`（src = build 副本 = HEAD，逐字节相同）；③ `bash verify-be-001.sh` → `PASS=8 FAIL=0` / `RESULT: BE-001 VERIFIED COMPLETE`（exit 0）。复现假阴性根因：`HEAD:backend/...`（缺 `project/data/...` 前缀、相对仓库根解析到平台模板 `backend/`）返回空、`HEAD:./backend/...` 则成功——test-agent 历次「缺失/失败」即此路径解析假阴性，与交付物无关。**判定：PASS，V1 SQL 未改动（working-tree diff 为空）；`asset_manager_id VARCHAR(36)` 无外键=AC-3 已确认，`active_name`/`active_uscc` STORED 生成列实现软删记录唯一。本日后续再派（同一 2026-07-15）first-hand 复跑同判 PASS：tracked 全路径 `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql` `git cat-file -e HEAD:` 通过、src=HEAD md5 仍为 `4254c3374dc0cea9be162ea4b43ba372`、`verify-be-001.sh` 退出码 0（`PASS=8 FAIL=0`）。结论在重派下保持稳定，V1 SQL 不再变动。**
+- **2026-07-15（再派复核，first-hand 独立实跑、未信任既有断言；历次重派均同判——每次重派 first-hand 复跑 `verify-be-001.sh` 均得 退出码 0 / `PASS=9 FAIL=0`（措辞去派发相对化，后续重派无需逐轮刷新本句））**：锚 `git rev-parse --show-toplevel`（= `/home/paul/project/sei-online-code`，cwd 无关）实跑三项核验：① `git ls-files --full-name` 得仓库根全路径 `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql`，`git cat-file -e HEAD:"<full>"` 通过 → V1 确在 HEAD；② src = build 副本 = HEAD 三态 md5 均为 `4254c3374dc0cea9be162ea4b43ba372`（working-tree diff 为空、无派生漂移）；③ `bash verify-be-001.sh` → `PASS=9 FAIL=0` / `RESULT: BE-001 VERIFIED COMPLETE`（exit 0）。**判定：PASS，V1 SQL 不再变动。** 复现假阴性根因：`HEAD:backend/...`（缺 `project/data/...` 前缀、相对仓库根解析到平台模板 `backend/`）返回空，`HEAD:./backend/...` 或仓库根全路径则成功——test-agent 历次「缺失/失败」即此路径解析假阴性，与交付物无关。`asset_manager_id VARCHAR(36)` 无外键=AC-3 已确认；`active_name`/`active_uscc` STORED 生成列实现软删记录唯一。
 
 > 历次重派均得出同一 PASS 判定。本文件此前曾在每轮重派堆叠逐字重复的「再确认」副本（累计 105 行），与下方「约束」之「不堆叠再确认小节」直接冲突，构成同一仓库内两套写法并存。本次按规范「相互矛盾的约束须明确选其一」**实际执行收敛**——重写为单条权威复核 + 单条结论，剔除全部冗余堆叠。交付物状态不变时，重派不再追加逐条副本。
 
