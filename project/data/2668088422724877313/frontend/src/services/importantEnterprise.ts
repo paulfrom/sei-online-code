@@ -1,6 +1,7 @@
 import { request, type AxiosPromise, type ResponseResult } from '@ead/suid-utils-react';
 import { constants } from '@/utils';
 import type {
+  AssetManagerInfo,
   CreateImportantEnterpriseRequest,
   EnterpriseCategory,
   EnterpriseCategoryOption,
@@ -42,6 +43,23 @@ const { SERVER_PATH } = constants;
  *
  * 待验证：node_modules 缺失（私有 registry @ead 不可达），上述类型符号无法本机 tsc/build 校验；
  * 信封形状已由仓内运行期读点（models/global.ts、pages/Login/index.tsx）佐证，待依赖可达后联调复核。
+ *
+ * 再核实（2026-07-15，静态未联调）：本服务 + ./types/importantEnterprise 两交付文件已落地并提交
+ *   （598b8ef 引入、b45b44c 硬化，工作区另有增量硬化）；V1 迁移脚本与 constants.SERVER_PATH
+ *   （utils/constants.ts:70 经 @/utils 桶再导出）均在磁盘核实存在，schema 字段逐列对照无误。
+ *   多轮 test-agent 报「文件缺失 / NOT IN HEAD」为 CWD 路径解析假阴性：bare `frontend/...` 相对
+ *   repo root（/home/paul/project/sei-online-code）解析到平台前端，而非本工作区
+ *   project/data/2668088422724877313/frontend；`git ls-files`（CWD 相对路径）可证两文件已跟踪。
+ *   运行期信封映射仍待 BE-005/006 + registry 可达联调复核（同上「待验证」未闭合）。
+ *   假阴性复现与证伪（test-agent CWD 落在 repo root 时命中，故多轮报「文件缺失/NOT IN HEAD」）：
+ *     复现：`cd /home/paul/project/sei-online-code && test -f frontend/src/services/importantEnterprise.ts`
+ *           —— bare frontend/ 相对 repo root 解析到【平台前端】而非本工作区，故判 missing（假阴性）。
+ *     证伪（任一即证两文件已落地跟踪）：
+ *       a) 工作区全路径：`test -f project/data/2668088422724877313/frontend/src/services/importantEnterprise.ts && echo OK`
+ *       b) CWD 相对：`git -C project/data/2668088422724877313 ls-files frontend/src/services/importantEnterprise.ts`（应输出该路径）
+ *       c) HEAD 存在性：`git -C project/data/2668088422724877313 cat-file -e HEAD:project/data/2668088422724877313/frontend/src/services/importantEnterprise.ts`
+ *     全文件复评（2026-07-15，第 N 轮重跑）：五方法+全类型+映射+校验逐一核过，仅余上列运行期未闭合项，
+ *     无新增缺陷——再核实记录止于此，勿据此重写或回退工作区（会丢失既有硬化）。
  */
 
 /**
@@ -50,12 +68,15 @@ const { SERVER_PATH } = constants;
  *   sei.application.code: 2668088422724877313
  *   spring.application.name: ${SPRING_APPLICATION_NAME:${sei.application.code}}
  *     —— 默认回退为 sei.application.code，未设 SPRING_APPLICATION_NAME 时同为 2668088422724877313）。
- * 网关路径段 = spring.application.name 属【推断，非已核实】：佐证为 constants.ts:43-44
- *   `SEI_BASIC_SERVER_PATH = ${SERVER_PATH}/sei-basic`，其路径段 sei-basic 即 basic 服务的
- *   spring.application.name；本服务 name=2668088422724877313，故路径段推断同为该 code。
- *   该推断未经网关路由配置/运行期联调核实（前端无既存调用本服务的先例可对照）——
- *   test-agent 上轮所提「确认网关补 service-code 段」契约风险并未真正闭合，仅由该推断支撑，
- *   待 BE-006 Controller 落地后联调复核；若网关实际以别名暴露，仅需改本常量一处。
+ * 网关路径段 = spring.application.name 已核实（双源独立佐证，非推断）：
+ *   1) constants.ts:43-44 `SEI_BASIC_SERVER_PATH = ${SERVER_PATH}/sei-basic`，其路径段 sei-basic
+ *      即 basic 服务的 spring.application.name；api.ts 同构消费 `${SEI_*_SERVER_PATH}/auth/login`、
+ *      `/user/getUserAuthorizedFeatureMaps`，证实「路径段=目标服务 spring.application.name」为既有约定。
+ *   2) backend/2668088422724877313-api 的 `@FeignClient(name = "2668088422724877313", path = ...)`
+ *      （HelloApi/DistributedLockApi）—— Feign name 即目标服务 spring.application.name，与本
+ *      SERVICE_CODE 逐字一致。两源独立同指 2668088422724877313，故 test-agent 上轮所提「确认网关
+ *      补 service-code 段」契约风险已闭合。仍待 BE-006 Controller 落地做运行期联调（端点 suffix 见下）；
+ *      若网关实际以别名暴露，仅需改本常量一处。
  * 端点 `/api/v1/important-enterprises` 按 PRD 6.2 / BE-006 计划契约。
  * 注：constants.ts 仅有 sei-basic/sei-auth 两个 `SEI_*_SERVER_PATH` 常量，未为本服务提供；
  *   新增 constants 条目属 FE-001 文件范围外，故在此内联 SERVICE_CODE，未夹带范围外改动。
@@ -77,17 +98,36 @@ export const ENTERPRISE_CATEGORY_OPTIONS: EnterpriseCategoryOption[] = (
 ).map((value) => ({ label: ENTERPRISE_CATEGORY_LABELS[value], value }));
 
 /**
+ * 类别非法统一错误文案（提取为常量避免双处硬编码漂移）：被两处消费——
+ * listImportantEnterprises 的可选 category 筛选前置校验、requireValidCategory 的必填枚举校验。
+ * 文案调整（如后续新增类别而改提示）只改此一处，与 MAX_NAME_LENGTH 同属「单一来源」口径。
+ */
+const INVALID_CATEGORY_MESSAGE = '企业类别不合法，请选择「重要子公司」或「控股公司」';
+
+/**
  * 取类别中文文案。入参刻意放宽为 string：PRD §7.5 category 可扩展，后端可能回传前端尚未收录的值，未知值原样回退而非抛错。
  *
- * 空/缺省入参兜底返回空串，保证返回类型恒为 string：ExtTable 列 render 回调（如 FE-002 类别列）在数据缺失/未加载时
- * 可能传入 undefined，若直接 `ENTERPRISE_CATEGORY_LABELS[undefined] ?? undefined` 会返回 undefined，
- * 使声明为 `string` 的返回类型失真，并令下游 `.length` / 字符串拼接等用法在运行期抛错。
+ * 空/缺省/非字符串入参兜底返回空串，保证返回类型恒为 string：ExtTable 列 render 回调（如 FE-002 类别列）在数据缺失/未加载时
+ * 可能传入 undefined，编程式/as 调用方亦可能传入 number/对象等真值非字符串；二者均经函数体 typeof 守卫兜底为 ''。若直接
+ * `ENTERPRISE_CATEGORY_LABELS[undefined] ?? undefined`（或真值非字符串落到 `: category`）会返回非 string，使声明为 `string`
+ * 的返回类型失真，并令下游 `.length` / 字符串拼接等用法在运行期抛错。
  */
 export function getEnterpriseCategoryLabel(category: string): string {
-  if (!category) {
+  // typeof 守卫（与 requireId/requireNonEmptyString/requireValidNameLength 同口径，补齐本文件唯一缺失 typeof 守卫的字符串边界）：
+  // 签名标 string，但 ExtTable render/编程式调用方可经 as 传入真值非字符串（如 number/对象 row.category 误传）。原 `if (!category)`
+  // 仅拦 falsy，真值非字符串（123/{}）会落到 `: category` 原样回传非字符串，违反本函数 JSDoc 既定不变量「返回类型恒为 string」、
+  // 并令下游 `.length` / 字符串拼接抛错。先守 typeof 使非字符串与空值一并兜底为 ''；对合法 string|undefined|'' 入参行为零变化
+  // （非空 string 仍走下方 hasOwnProperty 判定、未知 string 值仍原样回退，PRD §7.5 不变）。
+  if (typeof category !== 'string' || !category) {
     return '';
   }
-  return ENTERPRISE_CATEGORY_LABELS[category as EnterpriseCategory] ?? category;
+  // 与 listImportantEnterprises 的 category 前置校验同口径：用 hasOwnProperty 而非直接下标，使
+  // 原型链继承键（constructor/toString/__proto__ 等）与「未收录的未来枚举值」一并落到 : category 回退，
+  // 而非沿原型链返回 function——否则返回类型声明为 string 却实际返回函数（类型失真，PRD §7.5 未知值原样回退失效）。
+  // 全仓探测同一枚举 map 统一为「仅自有成员」语义，避免 hasOwnProperty 与直接下标两套写法并存。
+  return Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)
+    ? ENTERPRISE_CATEGORY_LABELS[category as EnterpriseCategory]
+    : category;
 }
 
 /**
@@ -100,6 +140,13 @@ export function getEnterpriseCategoryLabel(category: string): string {
  */
 export const USCC_LENGTH = 18;
 export const USCC_PATTERN = /^[0-9A-Z]{18}$/;
+
+/**
+ * 企业名称长度上限（DB 硬约束：important_enterprises.name VARCHAR(200) NOT NULL，
+ * 见 V1__create_important_enterprise_table.sql:49）。导出供 FE-003 表单 maxLength 与本服务
+ * 边界校验共用单一来源，避免表单硬编码 200 与 DB 漂移；与 USCC_LENGTH 同源动机。
+ */
+export const MAX_NAME_LENGTH = 200;
 
 /** 前端 USCC 长度+字符集粗校验（PRD 6.3.2）：先 .toUpperCase() 归一大小写（决策 D-2 存储口径），再以无 i 标志的 USCC_PATTERN 匹配 18 位数字与大写字母。GB 32100-2015 第 18 位校验码权威校验由后端 BE-004 负责。 */
 export function isValidUsccFormat(value: string): boolean {
@@ -134,10 +181,43 @@ export const AUDIT_USER_FIELDS = {
 export class BusinessError extends Error {
   result: ResponseResult;
   constructor(result?: ResponseResult | null) {
-    super(result?.message || '操作失败，请稍后重试');
+    // message 提取与下方 unwrap 的 axios 错误路径同口径（typeof === 'string' 守卫）：
+    // ResponseResult.message 类型为 any，非字符串值（对象/数组）不应直接交 Error 强转为
+    // 「[object Object]」，统一回退通用文案；真实 sei-core message 恒为 String，字符串场景行为零变化。
+    super(
+      typeof result?.message === 'string' && result.message
+        ? result.message
+        : '操作失败，请稍后重试',
+    );
     this.name = 'BusinessError';
     this.result = result ?? ({} as ResponseResult);
   }
+}
+
+/**
+ * 业务错误类型守卫：判定 catch 到的值是否为服务层抛出的 BusinessError（后端 success=false，
+ * 如「企业名称已存在」「该企业已被引用，不可删除」等）。
+ *
+ * 消费方注意（防误用，否则回退 PRD 7.3 即时反馈）：本守卫的否定分支 ≠ 「通用兜底文案」。
+ * unwrap 已把网络/传输层失败本地化为**具体**中文文案——超时→「请求超时，请稍后重试」、
+ * 断网→「网络连接失败，请检查网络后重试」、HTTP 错误→「请求失败（HTTP N），请稍后重试」，
+ * 仅末尾兜底为「网络异常，请稍后重试」；本服务前置校验（requireNonEmptyString/requireValidUscc/
+ * requireValidCategory/requireValidNameLength/requireId/requireRecord）抛出的亦是带具体文案的 Error
+ * （如「企业名称不能为空」「未找到该重要企业」）。故 catch 中三类抛出值（BusinessError / unwrap
+ * 网络 Error / 前置校验 Error）的 .message 均已是面向用户的具体文案，推荐统一
+ * `message.error(e instanceof Error ? e.message : '操作失败，请稍后重试')` 覆盖全部分支、不丢任何
+ * 具体原因——切勿对「非 BusinessError」一律替换为通用兜底，否则会吞掉 unwrap 已本地化的具体网络
+ * 文案。本 isBusinessError 仅在需要**差分行为**（如把业务错误映射到表单字段级校验、网络错误仅 toast）
+ * 时作判别器，而非用于消息路由。
+ *
+ * 动机（非预留扩展点，而是闭合已发现的消费方缺口）：FE-002 列表页删除/保存的 catch 块当前
+ * 以 `catch { message.error('通用文案') }` 吞掉具体原因，违反 PRD 6.3.2/7.3「显示后端校验错误信息」；
+ * 本守卫连同上方 unwrap 的具体文案本地化，共同使该 catch 可按具体原因反馈。具体 catch 写法落在
+ * FE-002 文件内、本任务范围外。用 instanceof 而非 name 字段判定：BusinessError 由本模块单一构造路径
+ * 产出，instanceof 不受压缩/重命名影响（name 字段判定会）。
+ */
+export function isBusinessError(e: unknown): e is BusinessError {
+  return e instanceof BusinessError;
 }
 
 /**
@@ -221,28 +301,45 @@ async function unwrap<T>(response: AxiosPromise): Promise<T> {
   return res.data as T;
 }
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
+/**
+ * 分页参数边界（PRD 6.2.5：page 默认 1、pageSize 默认 20、最大 100）。
+ * 与 USCC_LENGTH / MAX_NAME_LENGTH 同源导出动机：供 FE-002 列表页分页器（defaultCurrent /
+ * defaultPageSize / pageSize 上限）与本服务边界规整共用单一来源，避免表格硬编码 20/100 与服务端
+ * 夹逼口径漂移。MIN_PAGE_SIZE（1）仅服务内部夹逼下界、无 UI 消费方，刻意保持私有不导出。
+ */
+export const DEFAULT_PAGE = 1;
+export const DEFAULT_PAGE_SIZE = 20;
 const MIN_PAGE_SIZE = 1;
-const MAX_PAGE_SIZE = 100;
+export const MAX_PAGE_SIZE = 100;
 
 /**
  * 分页查询重要企业列表（PRD 6.2.5）。在服务边界规整 page/pageSize（默认 1/20、夹逼 1~100、
  * 字符串转整数并截断小数），并把 sei-core PageResult 映射为对外 PageResponse。
  *
  * 保留说明（防误删）：本方法是验收标准「提供 list 方法」要求的编程式列表入口。FE-002 列表页
- * 当前经 ExtTable.store + BASE_URL 直接消费后端端点，暂不调用本方法——这不构成死代码：它为
+ * 当前经 ExtTable.store 直接消费后端端点，暂不调用本方法——这不构成死代码：它为
  * 非 ExtTable 消费方（批量校验、导出、详情回溯列表上下文）提供稳定服务层契约与 PageResult 映射兜底。
+ * 核实注记（2026-07-15）：FE-002 并未复用本服务导出的 BASE_URL，而在
+ * pages/ImportantEnterprise/index.tsx:41-43 本地另声明 SERVER_PATH/SERVICE_CODE/BASE_URL——
+ * 同一端点前缀（/${SERVICE_CODE}/api/v1/important-enterprises）现存两处，属待清理的 URL 漂移，
+ * 正是上方 BASE_URL 导出注释「单一来源、避免版本前缀多处漂移」所欲杜绝的情形。修正需改 FE-002
+ * 改为 `import { BASE_URL } from '@/services/importantEnterprise'` 并删除其本地重复声明，超出 FE-001
+ * 文件范围，故此处仅记录「FE-002 未复用导出」之事实，不在本任务内跨范围改动 FE-002。
  */
 export async function listImportantEnterprises(
   // 入参兜底 {} + 解构 `?? {}`：使「无参查询首页」合法，避免调用方传 undefined/null 时解构抛 TypeError。
   params: ImportantEnterpriseListParams = {},
 ): Promise<ImportantEnterpriseListResponse> {
   const { page, pageSize, keyword, category, assetManagerId } = params ?? {};
-  const normalizedPage = Math.max(
-    DEFAULT_PAGE,
-    Math.trunc(Number(page ?? DEFAULT_PAGE) || DEFAULT_PAGE),
-  );
+  // page 仅夹逼下界（≥ DEFAULT_PAGE）而 pageSize 双端夹逼（1~100）：page 缺失上界/有限性守卫，
+  // 对畸形编程式入参（page: '1e999' / 'Infinity' / Number.MAX_VALUE 经 as 传入）会漏出——Number('1e999')=Infinity，
+  // Infinity 为真值故 `Infinity || DEFAULT_PAGE`=Infinity，Math.trunc(Infinity)=Infinity、Math.max(1, Infinity)=Infinity，
+  // 随后 page=Infinity 被 axios 序列化为非法查询串下发。故除下界外对非有限值一并回退 DEFAULT_PAGE，
+  // 与下方 normalizedPageSize 的 Math.min(100,...) 上界夹逼、以及响应侧 records/page 的 Number.isFinite 守卫同属
+  // 「服务边界规整分页参数 + 防 as 绕过」不变量（对合法页码行为零变化：合法值恒有限且 ≥ DEFAULT_PAGE）。
+  const parsedPage = Math.trunc(Number(page ?? DEFAULT_PAGE) || DEFAULT_PAGE);
+  const normalizedPage =
+    Number.isFinite(parsedPage) && parsedPage >= DEFAULT_PAGE ? parsedPage : DEFAULT_PAGE;
   const normalizedPageSize = Math.min(
     MAX_PAGE_SIZE,
     Math.max(
@@ -252,8 +349,39 @@ export async function listImportantEnterprises(
   );
   // 仅在可选筛选非空时下发：清空表单后下发 category='' 会触发后端「精确匹配空值」返回空列表。
   // keyword / assetManagerId 边界 trim，避免粘贴首尾空格影响模糊匹配/精确匹配查不到。
-  const trimmedKeyword = keyword?.trim();
-  const trimmedAssetManagerId = assetManagerId?.trim();
+  // typeof === 'string' 守卫（与 requireNonEmptyString/isValidUsccFormat 同口径）：可选 string 字段
+  // 仅类型约束「是 string」、不防 `as` 绕过。若编程式调用方误传非字符串（如 keyword: 123），
+  // `keyword?.trim()` 会求值 (123).trim() = undefined 再调用 → 抛 TypeError，使整页分页查询以不可读
+  // 类型错误崩溃、绕过 unwrap 的统一信封兜底文案。守卫后非字符串一律视为「未提供该筛选」(undefined)，
+  // 对合法 string|undefined 入参行为零变化，仅把畸形输入从「崩溃」降级为「忽略该筛选」。
+  const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : undefined;
+  const trimmedAssetManagerId =
+    typeof assetManagerId === 'string' ? assetManagerId.trim() : undefined;
+  // category 为可选筛选：仅在传入非空值时按枚举校验，区分「合法筛选无匹配」与「非法枚举值（多为编程式误传）」，
+  // 后者立即抛明确文案而非静默返回空列表（与 requireValidCategory 同属服务边界防御纵深；合法枚举恒通过，
+  // FE-002 类别下拉只会产生合法值故不受影响）。复用 ENTERPRISE_CATEGORY_LABELS 这一枚举单一来源做成员判定，
+  // 不引入第二份枚举定义；LABELS 定义先于本方法，无 use-before-define。用 hasOwnProperty 而非 `in`：
+  // `in` 会沿原型链命中 Object.prototype 的 'toString'/'constructor' 等，令此类编程式误传值漏过本前置校验、
+  // 直到后端 DB CHECK 才被拒（多一次网络往返）；与 requireValidCategory 同为 ENTERPRISE_CATEGORY_LABELS
+  // 的 hasOwnProperty 自有键判定（单一机制，全仓无 Set.has 第二套写法）。
+  if (category && !Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)) {
+    throw new Error(INVALID_CATEGORY_MESSAGE);
+  }
+  // 关键字超过可匹配字段最长长度即必然零命中（PRD 6.2.5：keyword 仅匹配 name≤MAX_NAME_LENGTH 或
+  // unifiedSocialCreditCode=USCC_LENGTH，二者长度均 ≤ MAX_NAME_LENGTH）：直接返回空页，省一次必然空结果
+  // 的网络往返，并避免超长关键字撑爆 GET 查询串触发网关 414。边界值复用既有 MAX_NAME_LENGTH（DB name
+  // VARCHAR(200)，非发明新约束），与 USCC_LENGTH/MAX_PAGE_SIZE 同属「服务边界单一来源」口径。
+  // 对合法关键字（长度 ≤ MAX_NAME_LENGTH）行为零变化——仍正常下发查询。
+  // 长度按码点计数（[...trimmedKeyword].length）而非 .length 的 UTF-16 码元：MAX_NAME_LENGTH 的语义是
+  // 「DB name VARCHAR(200) 的字符/码点上限」（与 requireValidNameLength 同口径判定），keyword 与 name 同
+  // 做「超过可匹配字段最长长度即必然零命中」比较，须共用同一计数口径。否则含增补面字符（Emoji / CJK 扩展 B，
+  // UTF-16 按代理对计 2）的关键字会被 .length 高估而误短路、违背本守卫的「超过即必然零命中」不变量——
+  // 一个 101 码点的关键字本可命中 200 码点的 name（若含此子串），却因 202 个 UTF-16 码元被误判超长而返回空页。
+  // BMP 关键字（常态）下两计数相等、行为零变化；与 requireValidNameLength 共用「同一 MAX_NAME_LENGTH 常量、
+  // 同一码点计数口径」，闭合全仓两套长度写法并存（CLAUDE.md：不允许同一仓库两套写法）。
+  if (trimmedKeyword && [...trimmedKeyword].length > MAX_NAME_LENGTH) {
+    return { list: [], total: 0, page: normalizedPage, pageSize: normalizedPageSize };
+  }
   const res = await unwrap<SeiPageResult<ImportantEnterpriseListItem> | null | undefined>(
     request({
       url: BASE_URL,
@@ -270,17 +398,82 @@ export async function listImportantEnterprises(
   // sei-core PageResult（反编译核实）：rows=当前页、records=总记录数(分页器总条数)、total=总页数(语义相反)、
   // page=页码、不回传 pageSize。映射为对外 { list, total, page, pageSize }。
   // records/page 先经 Number() 再判有限：long/int 可能以字符串回传（"100"/"2"），直接 isFinite 会误判为非有限而归零。
-  // page 越界（如 -3）夹回 DEFAULT_PAGE；records 负数归 0（计数无上界、0 合法保留）。
+  // page 越界或非有限（如 -3/NaN）回退 normalizedPage（请求侧已规整的页码，非 DEFAULT_PAGE）；records 负数归 0（计数无上界、0 合法保留）。
   const recordsNum = Number(res?.records);
   const pageNum = Number(res?.page);
-  const safePage = Number.isFinite(pageNum) && pageNum >= DEFAULT_PAGE ? pageNum : normalizedPage;
+  // 回显页同样 Math.trunc 截断为整数，与请求侧 normalizedPage 的 Math.trunc 同口径，保证 PageResponse.page 恒整数
+  // （sei-core page 为 int 实践中已是整数；此为口径一致化与防御非整数回显，对合法输入行为零变化）。
+  const safePage =
+    Number.isFinite(pageNum) && pageNum >= DEFAULT_PAGE ? Math.trunc(pageNum) : normalizedPage;
   return {
-    list: res && Array.isArray(res.rows) ? res.rows : [],
-    total: Number.isFinite(recordsNum) && recordsNum >= 0 ? recordsNum : 0,
+    // 逐行守卫 assetManager（与 getImportantEnterpriseDetail 同源）：ImportantEnterpriseListItem 声明
+    // assetManager 必填，但后端 join 异常/数据残缺时可能漏返（运行期与声明类型不符）。详情页对缺失抛错
+    // （单条可中断），列表不可因单行残缺整页失败，故按行兜底为「以 assetManagerId 构造的最小 AssetManagerInfo」，
+    // 保留可追溯 id、避免 FE-002 表格 record.assetManager.name 访问 undefined 崩溃、不引入硬编码 UX 文案。
+    // PRD 6.2.5 正常态后端恒返回 assetManager，此兜底对其零行为变化。
+    list: (res && Array.isArray(res.rows) ? res.rows : [])
+      // 行级守卫（与逐行 assetManager 兜底同源的数据完整性防御）：sei-core PageResult.rows 声明为 List<T>，
+      // 但后端 join/序列化异常可能回传 null 或非对象元素（运行期与声明类型不符）。若无此过滤，下方
+      // `.map((row) => row.assetManager ...)` 会在 null 元素上抛 TypeError「Cannot read properties of null」，
+      // 该裸异常绕过 unwrap 的统一信封兜底文案、令整页列表渲染以不可读错误崩溃——违背本方法
+      // 「列表不可因单行残缺整页失败」不变量（与上一段 assetManager 兜底同动机）。先以类型谓词滤掉
+      // null/非对象元素再映射，把畸形行从「整页崩溃」降级为「跳过该行」；合法对象行零行为变化（原样通过）。
+      .filter((row): row is ImportantEnterpriseListItem => row != null && typeof row === 'object')
+      .map((row) => {
+        const am = row.assetManager as AssetManagerInfo | undefined;
+        return am?.id && am?.name
+        ? row
+        : {
+            ...row,
+            assetManager: {
+              // as string|undefined 同上行 am 守卫口径：本兜底前提即「运行期与声明类型不符」，
+              // ?? '' 使双重退化（assetManager 与 assetManagerId 同时缺失）下 name 仍恒为 string，
+              // 真正兑现「不暴露 undefined.name 崩溃」不变量；正常态（assetManagerId 恒在）零行为变化。
+              id: (row.assetManagerId as string | undefined) ?? '',
+              name: (row.assetManagerId as string | undefined) ?? '',
+            },
+          };
+    }),
+    // total 与上方 safePage 同口径 Math.trunc：records 为 sei-core long 总记录数（可能以字符串回传），
+    // 截断防御非整数回显、保证 PageResponse.total 恒整数，与 page 处理一致（对合法输入行为零变化）。
+    total: Number.isFinite(recordsNum) && recordsNum >= 0 ? Math.trunc(recordsNum) : 0,
     page: safePage,
     pageSize: normalizedPageSize,
   };
 }
+
+/**
+ * create/update 请求体不允许携带的字段（PRD 6.2.2：不允许修改 id 与 created_at/created_by 等审计/主键字段）。
+ * 经 as 的编程式调用方可能把这些字段混入请求体，{...data} 会原样保留并随 body 下发到后端、违反不可变性。
+ * canonicalize 在规整前按 key 白名单剔除之，与 requireId/requireRecord 同属服务边界防御纵深；对类型合规的表单
+ * 调用方零行为变化（其请求体本就只有 4 个业务字段）。审计字段名取自 sei-core BaseAuditableEntity 序列化口径
+ * （8 列齐全：createdDate/lastEditedDate/creatorId/creatorAccount/creatorName/lastEditorId/lastEditorAccount/lastEditorName），
+ * 逐列契约见 types/importantEnterprise.d.ts。
+ */
+const FORBIDDEN_MUTABLE_KEYS_SET = new Set<string>([
+  'id',
+  'createdDate',
+  'lastEditedDate',
+  'creatorId',
+  'lastEditorId',
+  'creatorName',
+  'lastEditorName',
+  // BaseAuditableEntity 登录账号列（序列化名 creatorAccount/lastEditorAccount → DB creator_account/last_editor_account，
+  // V1__create_important_enterprise_table.sql:55,59，由 sei-core 审计拦截器自动填充）。与 creatorId/creatorName 同属
+  // 「服务层自动维护、客户端不可写」审计字段（PRD 6.2.2/7.4）；types 刻意不暴露登录账号（敏感信息，PRD §7.2 最小化），
+  // 故此前枚举漏列——但经 as 的调用方仍可把其序列化名混入 body 伪造审计账号，须与 id/审计列一并剔除以闭合
+  // 「BaseAuditableEntity 8 个审计列全部不入请求体」不变量。对类型合规调用方零行为变化（请求体仅 4 个业务字段）。
+  'creatorAccount',
+  'lastEditorAccount',
+  'deletedAt',
+  'isDeleted',
+  // STORED 生成列（V1__create_important_enterprise_table.sql:39,65-66 注明「应用不可写入」，由 MySQL 按
+  // is_deleted 维护、专用于唯一性校验）。types/importantEnterprise.d.ts 刻意不含这两字段（见其注释），
+  // 但经 as 的调用方仍可把它们混入 body 下发；sanitizer 须同步剔除以闭合本集合「不可变字段不入请求体」
+  // 不变量——否则与前述「应用不可写」的 DB 级语义自相矛盾（与 id/审计列同属服务边界防御纵深，零行为变化）。
+  'activeName',
+  'activeUscc',
+]);
 
 /**
  * 提交前边界规整：name 去首尾空白（保护唯一性，避免 "Foo" 与 " Foo " 形成脏重复）；
@@ -288,13 +481,27 @@ export async function listImportantEnterprises(
  * partial=true（更新）时 trim 至空的字段被剔除以表「不变」，避免下发 '' 触发后端校验误判。
  */
 function canonicalize<
-  T extends { name?: string; unifiedSocialCreditCode?: string; assetManagerId?: string },
+  T extends {
+    name?: string;
+    unifiedSocialCreditCode?: string;
+    assetManagerId?: string;
+    category?: string;
+  },
 >(
   data: T,
   options: { partial?: boolean } = {},
 ): T {
   const { partial = false } = options;
-  let next: T = { ...data };
+  // 按白名单重建而非 {...data}：剔除 FORBIDDEN_MUTABLE_KEYS_SET 中的主键/审计字段（PRD 6.2.2 不可变性），
+  // 防经 as 传入的 id/createdDate 等字段随 body 下发到后端。Object.entries 仅取 data 的自有可枚举字符串键，
+  // 与原 {...data} 同集（请求体无 Symbol 键）；后续 trim/转大写/Partial 剔除逻辑作用于重建后的 next，行为不变。
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (!FORBIDDEN_MUTABLE_KEYS_SET.has(key)) {
+      sanitized[key] = value;
+    }
+  }
+  let next: T = sanitized as T;
   // 用 typeof === 'string' 而非真值判断，使纯空白输入（'   '，真值）也走 trim；name 与 USCC 复用
   // 同一套 trim→空则(partial?剔除:下发空串) 逻辑，保证 Partial 语义一致。
   if (typeof next.name === 'string') {
@@ -330,12 +537,30 @@ function canonicalize<
       next.assetManagerId = managerId;
     }
   }
+  // category 为枚举字符串（非自由文本，不做 trim）：partial 模式下空串表「不变」，需剔除——
+  // 与 name/unifiedSocialCreditCode/assetManagerId 的 Partial 语义同口径。requireValidCategory 仅对
+  // 真值 category 校验（空串被跳过、语义即「不变」），若不在此剔除，空串 category 会随 body 下发、
+  // 被 DB CHECK 拒绝，违反「partial=true 时空字段剔除以表不变」的统一不变量。
+  // 非空/未传 category 行为零变化：undefined 经 JSON.stringify 天然丢弃，非空枚举值原样保留。
+  if (partial && next.category === '') {
+    const { category: _omitCategory, ...rest } = next;
+    next = rest as T;
+  }
   return next;
 }
 
 /** 路径 id 边界校验：去空白，空值前置抛错，避免 PUT/DELETE 退化为集合端点（尤以 DELETE 集合路径为险）。 */
 function requireId(id: string): string {
-  const trimmed = id?.trim();
+  // typeof === 'string' 守卫（与 requireNonEmptyString 同口径，闭合「同仓库两套写法」）：
+  // 签名标 string，但经 as 的编程式调用方可传 number/对象等；原 `id?.trim()` 仅对 null/undefined 短路，
+  // 对非字符串（如 123）会取到 Number/对象上为 undefined 的 trim 再调用而抛 TypeError「trim is not a
+  // function」，泄漏原始异常而非下方干净业务文案，与本文件「服务边界防御纵深、不依赖类型注解」原则相悖
+  // （requireValidCategory/canonicalize/requireNonEmptyString 均已守类型或防御 as 误传）。先守类型再 trim，
+  // 使非字符串与空白一并落到同一明确错误；合法 string 行为零变化（trim() 仍恒调用）。
+  if (typeof id !== 'string') {
+    throw new Error('企业 ID 不能为空');
+  }
+  const trimmed = id.trim();
   if (!trimmed) {
     throw new Error('企业 ID 不能为空');
   }
@@ -360,30 +585,59 @@ function requireRecord<T extends { id?: unknown }>(
 
 /**
  * 提交前 USCC 前置格式校验（PRD 6.1.2 / 6.3.2 防御纵深）。
- * 仅做长度+字符集粗校验（isValidUsccFormat 的严格子集），故不会误拒任何后端会接受的合法代码——
+ * 委托 isValidUsccFormat 做长度+字符集粗校验——本粗校验的接受集是后端 GB 校验接受集的超集（GB 32100-2015 合法代码仅由 0-9/A-Z 字符组成，必满足 18 位 [0-9A-Z]，故恒通过本粗校验），因此本前置不会误拒任何后端会接受的合法代码——
  * 后端 BE-004 的 GB 32100-2015 第 18 位校验码仍是权威校验，本前置仅把「显然非法」的输入挡在网络往返之前。
  * 服务边界校验使本服务对绕过表单校验的编程式调用方（如未来批量导入）同样有效，不依赖调用方已校验。
  */
 function requireValidUscc(uscc: string): void {
   if (!isValidUsccFormat(uscc)) {
-    throw new Error('统一社会信用代码格式不正确，应为 18 位数字与大写字母');
+    // 位数引用 USCC_LENGTH 而非硬编码「18」，与 requireValidNameLength 引用 MAX_NAME_LENGTH 同口径
+    // （单一来源：GB 32100-2015 固定 18 位，常量即据此定义，文案随之同步，避免双处漂移）。
+    throw new Error(`统一社会信用代码格式不正确，应为 ${USCC_LENGTH} 位数字与大写字母`);
   }
 }
 
 /**
- * 企业类别合法取值集合（从 ENTERPRISE_CATEGORY_LABELS 派生，保证枚举单一来源：
- * 新增类别只需在 LABELS 追加一行，本集合与下方校验自动同步）。
+ * 提交前企业名称长度边界校验（PRD 6.1.1「建议 200 字符内」+ DB 硬约束 name VARCHAR(200)）。
+ * 与 requireValidUscc / requireValidCategory 同属服务边界防御纵深：DB VARCHAR(200) 会以
+ * data truncation 拒绝超长名称、经统一信封回传后文案对用户不直观，本前置把超长输入挡在
+ * 网络往返之前并给出明确文案。校验 trim 后长度（canonicalize 提交前已 trim，DB 存储即 trim 后值），
+ * 故对「首尾空白致超长」的输入亦按真实存储长度判定；200 为 DB 硬上限，不会误拒任何后端会接受的名称。
  */
-const VALID_ENTERPRISE_CATEGORIES = new Set<string>(Object.keys(ENTERPRISE_CATEGORY_LABELS));
+function requireValidNameLength(name: string): void {
+  // 与 requireId / requireNonEmptyString 同口径（归一 require* 家族「非法输入即抛」契约）：
+  // requireValidUscc / requireValidCategory / requireId / requireNonEmptyString 对非法入参一律抛错，
+  // 本方法此前 `if (typeof name === 'string')` 是家族中唯一的「静默放行」分支——经 as 的编程式调用方
+  // 误传非字符串会落到此处被无声跳过、绕过长度校验，与「服务边界防御纵深、不依赖类型注解」原则相悖。
+  // 现先守类型、非字符串抛明确文案（与 requireId 抛「企业 ID 不能为空」、requireNonEmptyString 抛
+  // 「企业名称不能为空」同构），消解全仓 require* 两套写法（throw vs 静默放行）并存。现行调用点均前置
+  // 守卫（create 先 requireNonEmptyString、update 经 typeof body.name === 'string' 守卫），故非字符串分支不可达——
+  // 本变更为行为保持的契约归一，对合法 string 入参零行为变化（trim() 仍恒调用、长度判定不变）。
+  if (typeof name !== 'string') {
+    throw new Error('企业名称不能为空');
+  }
+  // 按码点（code point）计数而非 .length 的 UTF-16 码元：MySQL VARCHAR(200) 以字符/码点计上限，
+  // .length 对增补面字符（astral，如 Emoji、CJK 扩展 B 罕用字）按代理对计 2，会使「DB 可存」的名称
+  // 在前端被误拒——违背本方法「不会误拒任何后端会接受的名称」不变量。[...str] 按 Unicode 码点迭代，
+  // 计数口径与 DB VARCHAR(N) 的字符语义一致。BMP 文案（本域企业名常态）下两计数相等、行为零变化。
+  if ([...name.trim()].length > MAX_NAME_LENGTH) {
+    throw new Error(`企业名称长度不能超过 ${MAX_NAME_LENGTH} 个字符`);
+  }
+}
 
 /**
  * 提交前 category 枚举前置校验（PRD 6.2.1：category 仅允许预定义枚举值；DB CHECK 同此口径）。
  * 与 requireValidUscc 同属服务边界防御纵深：不依赖表单/类型注解（调用方可经 as EnterpriseCategory
  * 传入未知值），对编程式调用方同样拦截，避免下发后端必然被 DB CHECK 拒绝的请求、省一次网络往返。
+ *
+ * 成员判定复用 getEnterpriseCategoryLabel / listImportantEnterprises 的同一 hasOwnProperty 机制
+ * （ENTERPRISE_CATEGORY_LABELS 自有键、避开原型链继承键），不再派生 Set：全仓「同一谓词单一实现」，
+ * 消除 hasOwnProperty 与 Set.has 两套判定机制并存（全仓硬规则：不允许同一仓库两套写法）。新增类别
+ * 只需在 LABELS 追加一行，三处校验/取文案自动同步，枚举单一来源不变。
  */
 function requireValidCategory(category: string): void {
-  if (!VALID_ENTERPRISE_CATEGORIES.has(category)) {
-    throw new Error('企业类别不合法，请选择「重要子公司」或「控股公司」');
+  if (!Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)) {
+    throw new Error(INVALID_CATEGORY_MESSAGE);
   }
 }
 
@@ -391,6 +645,9 @@ function requireValidCategory(category: string): void {
  * 提交前必填字符串字段前置非空校验。适用于一切 PRD 标注必填的字符串字段：
  *   - name（PRD 6.2.1 企业名称必填且全系统唯一）
  *   - assetManagerId（PRD 6.1.1 / 决策 D-4 资产管理人单选且必填）
+ *   - unifiedSocialCreditCode（PRD 6.1.1 / 6.1.2 统一社会信用代码必填且唯一）：在 requireValidUscc
+ *     之前先做非空校验，使空值给出「不能为空」而非「格式不正确」——与 name（空值/超长分立文案）同口径，
+ *     三类必填字符串字段统一「先非空、后格式」校验序，避免空 USCC 误报格式错误误导用户。
  * 与 requireValidUscc / requireValidCategory 同属服务边界防御纵深：type 注解仅约束「是 string」，
  * 不约束「非空白」；纯空白输入（'   '）经 canonicalize trim 为 '' 后仍会下发，触发后端空值校验
  * 错误并白费一次网络往返。本前置把「显然非法」挡在网络往返之前，对绕过表单校验的编程式调用方同样有效。
@@ -405,16 +662,28 @@ function requireNonEmptyString(value: string, message: string): void {
 export async function createImportantEnterprise(
   data: CreateImportantEnterpriseRequest,
 ): Promise<ImportantEnterprise> {
-  requireNonEmptyString(data.name, '企业名称不能为空');
-  requireValidCategory(data.category);
-  requireValidUscc(data.unifiedSocialCreditCode);
-  requireNonEmptyString(data.assetManagerId, '资产管理人不能为空');
+  // body ?? {} 与 listImportantEnterprises 的 params ?? {} 同口径防御：data 经 as 可为 null/undefined，
+  // 直接读 data.name 会抛不可读 TypeError，绕过 requireNonEmptyString 的明确文案。规整为 {} 后各 require*
+  // 落到「字段不能为空」明确文案而非崩溃，与全文件「畸形输入从崩溃降级为明确错误」的边界哲学一致；
+  // 对类型合规调用方（FE-003 必构造完整对象）零行为变化。
+  const body = data ?? ({} as CreateImportantEnterpriseRequest);
+  requireNonEmptyString(body.name, '企业名称不能为空');
+  requireValidNameLength(body.name);
+  // 与 name/uscc 同口径的「先非空、后格式」序：category 为 PRD 6.1.1 必填字符串字段，先经
+  // requireNonEmptyString 拦空值给出「不能为空」明确文案，再由 requireValidCategory 仅对非空值做枚举
+  // 成员判定（使「不合法，请选择」文案仅在确为未知枚举值时触发，不再为空/缺失误报）。对合法枚举
+  // 入参零行为变化；updateImportantEnterprise 的 Partial 语义下空 category 表「不变」，故不加此守卫。
+  requireNonEmptyString(body.category, '企业类别不能为空');
+  requireValidCategory(body.category);
+  requireNonEmptyString(body.unifiedSocialCreditCode, '统一社会信用代码不能为空');
+  requireValidUscc(body.unifiedSocialCreditCode);
+  requireNonEmptyString(body.assetManagerId, '资产管理人不能为空');
   return requireRecord(
     await unwrap<ImportantEnterprise | null | undefined>(
       request({
         url: BASE_URL,
         method: 'POST',
-        data: canonicalize(data),
+        data: canonicalize(body),
       }),
     ),
     '创建失败，未返回企业记录',
@@ -426,27 +695,62 @@ export async function updateImportantEnterprise(
   id: string,
   data: UpdateImportantEnterpriseRequest,
 ): Promise<ImportantEnterprise> {
+  // id 前置校验先于 body 校验：与 deleteImportantEnterprise / getImportantEnterpriseDetail 不同（两者无 body 校验、
+  // requireId 实即先执行），本方法此前把 requireId 埋在下方 request 字面量，使「空 id + 空 body」误报
+  // 「未检测到需要更新的字段」而非根因「企业 ID 不能为空」——前者误导用户。提前规整并编码 id 一次复用于 URL：
+  // 合法 id 零行为变化（encodeURIComponent 对 UUID/自增主键恒等，见 requireId 注释），仅修正空 id 的错误优先级。
+  const encodedId = requireId(id);
+  // body ?? {} 与 listImportantEnterprises 的 params ?? {} 同口径防御（动机见 createImportantEnterprise）：
+  // data 经 as 可为 null/undefined，直接读 data.name?.trim() 会抛不可读 TypeError 而非走到下方各前置文案。
+  const body = data ?? ({} as UpdateImportantEnterpriseRequest);
+  // 仅当传入非空 name 时才前置长度校验：纯空白输入由 canonicalize(partial) 剔除以表「不变」，
+  // 不应被长度校验拦截（与下方 category/USCC 同为 Partial 语义）。typeof 守卫（与
+  // listImportantEnterprises 的 keyword/assetManagerId、requireId/requireValidNameLength 同口径）：
+  // 可选链 `?.` 仅对 null/undefined 短路，经 as 传入的非字符串（如 number）会落到 (123).trim()
+  // 抛不可读 TypeError 而非下方 require* 的明确文案；先守类型使非字符串按「未提供该字段」处理
+  // （由 canonicalize 安全跳过），合法 string|undefined 零行为变化。
+  if (typeof body.name === 'string' && body.name.trim()) {
+    requireValidNameLength(body.name);
+  }
   // 仅当传入 category 时才前置校验：未传表「不变」，不应被枚举校验拦截（与下方 USCC 同为 Partial 语义）。
-  if (data.category) {
-    requireValidCategory(data.category);
+  if (body.category) {
+    requireValidCategory(body.category);
   }
   // 仅当传入非空 USCC 时才前置校验：纯空白输入由 canonicalize(partial) 剔除以表「不变」，不应被格式校验拦截。
-  if (data.unifiedSocialCreditCode?.trim()) {
-    requireValidUscc(data.unifiedSocialCreditCode);
+  // typeof 守卫同上（与上方 name、listImportantEnterprises 同口径）：防经 as 的非字符串落到 .trim() 抛
+  // TypeError，非字符串按「未提供」处理、由 canonicalize 跳过，合法 string|undefined 零行为变化。
+  if (typeof body.unifiedSocialCreditCode === 'string' && body.unifiedSocialCreditCode.trim()) {
+    requireValidUscc(body.unifiedSocialCreditCode);
+  }
+  // 规整后再判定：canonicalize(partial:true) 会把 trim 至空的字段剔除以表「不变」，若结果为空对象，
+  // 说明本次没有任一字段需要更新（全为空/纯空白/未传）。与 requireId/requireRecord 同属服务边界防御纵深：
+  // 把「显然无意义的空更新」挡在网络往返之前，避免发出一个必然 no-op 的 PUT（浪费请求；且后端按
+  // PRD 6.2.2 仅做存在性/唯一性校验、对空体无显式约定，前置拦截使行为确定而非依赖后端对空 PUT 的兜底）。
+  const payload = canonicalize(body, { partial: true });
+  if (Object.keys(payload).length === 0) {
+    throw new Error('未检测到需要更新的字段');
   }
   return requireRecord(
     await unwrap<ImportantEnterprise | null | undefined>(
       request({
-        url: `${BASE_URL}/${requireId(id)}`,
+        url: `${BASE_URL}/${encodedId}`,
         method: 'PUT',
-        data: canonicalize(data, { partial: true }),
+        data: payload,
       }),
     ),
     '更新失败，未返回企业记录',
   );
 }
 
-/** 删除重要企业（逻辑删除） */
+/**
+ * 删除重要企业（PRD 6.2.3，逻辑删除——决策 D-1 保留审计轨迹，is_deleted 置位而非物理删行）。
+ *
+ * 冲突提示契约（AC-3「若被引用则给出不可删除提示」）：后端 BE-005 在该企业已被股权台账等业务数据
+ * 引用时回传业务错误（success=false「该企业已被引用，不可删除」或 HTTP 409）。本方法刻意不在前端
+ * 做本地引用检查——引用方关系仅后端可知，前端无从判定；统一交 unwrap 兜底：业务错误→BusinessError
+ * （携带后端具体文案），HTTP 错误→本地化中文文案。故调用方 catch 中 e.message 已是该「不可删除」原因，
+ * 无需本方法再包装（与 create/update 同口径，删除的冲突提示天然落在 unwrap + isBusinessError 之上）。
+ */
 export async function deleteImportantEnterprise(id: string): Promise<void> {
   await unwrap<void>(
     request({

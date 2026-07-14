@@ -56,8 +56,13 @@ export interface AssetManagerInfo {
  * → 必填；可空审计/删除列（creator_id/creator_name/last_editor_id/last_editor_name/
  * deleted_at）→ 可选；creator_account/last_editor_account（登录账号，敏感）与
  * active_name/active_uscc（STORED 生成列）刻意不对外暴露。
- * 字段级契约已落地稳定，无待修正项；列表/详情响应信封（sei-core PageResult 的
- * rows/records/total/page 映射、assetManager 解析）仍未联调，待 BE-005/006 落地后复核。
+ * 字段级契约已落地稳定，无待修正项。列表/详情响应信封（sei-core PageResult 的
+ * rows/records/total/page 映射、assetManager 逐行兜底）的映射逻辑已在
+ * @/services/importantEnterprise 落地并按 sei-core PageResult 反编译契约静态核实
+ * （listImportantEnterprises：rows→list、records→total，因 sei-core total 实为「总页数」、
+ * 语义与「总条数」相反，故分页器总条数取 records；getImportantEnterpriseDetail：
+ * assetManager 必填守卫）。待 BE-005/006 落地后做真实端点联调复核——静态契约已对齐，
+ * 缺的仅是运行期往返验证（非映射逻辑缺失）。
  */
 export interface ImportantEnterprise {
   /** 主键 */
@@ -147,10 +152,14 @@ export type UpdateImportantEnterpriseRequest = Partial<CreateImportantEnterprise
 
 /** 重要企业分页列表查询参数 */
 export interface ImportantEnterpriseListParams {
-  /** 页码，默认 1 */
-  page?: number;
-  /** 每页条数，默认 20，最大 100 */
-  pageSize?: number;
+  /**
+   * 页码，默认 1。放宽为 number|string：与 listImportantEnterprises 中请求侧 `Number(page)` 强制转换
+   * 同源——编程式调用方常以 URLSearchParams.get()/表单 state 取值，
+   * 后者恒为 string；严格 number 会让这类调用方被迫 `as number` 绕过类型。运行期已规整为合法整数。
+   */
+  page?: number | string;
+  /** 每页条数，默认 20，最大 100。放宽为 number|string 的动机同 page（请求侧 Number(pageSize) 强制转换）。 */
+  pageSize?: number | string;
   /** 企业名称或统一社会信用代码模糊搜索关键字 */
   keyword?: string;
   /** 按企业类别精确筛选 */
