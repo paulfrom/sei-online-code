@@ -20,7 +20,7 @@ import {
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
-import { DeleteOutlined, EditOutlined, LockOutlined, PlusOutlined } from '@ead/suid-icons';
+import { DeleteOutlined, EditOutlined, LockOutlined, PlusOutlined, ReloadOutlined } from '@ead/suid-icons';
 import {
   AGENT_FIND_BY_PAGE_URL,
   BUILTIN_SKILLS,
@@ -50,6 +50,9 @@ const Agents: React.FC = () => {
   const [editing, setEditing] = useState<AgentDto | null>(null);
   const [skillOptions, setSkillOptions] = useState<Array<{ value: string; label: string }>>([]);
   const editingBuiltin = Boolean(editing?.builtin);
+
+  // ── 刷新列表 ──
+  const reloadData = useCallback(() => { tableRef.current?.reloadData(); }, []);
 
   /** load the skill options for the multi-select (ep #17) — user skills + builtins */
   const loadSkills = useCallback(async () => {
@@ -201,6 +204,11 @@ const Agents: React.FC = () => {
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建 Agent
             </Button>
+          ),
+          right: (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={reloadData}></Button>
+            </>
           ),
         }}
       />

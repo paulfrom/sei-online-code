@@ -7,7 +7,7 @@
  * displays it and never recomputes. Re-importing an existing name is rejected
  * by the server (409, dedup by name).
  */
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import {
   ActionButton,
@@ -21,7 +21,7 @@ import {
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
-import { DeleteOutlined, EyeOutlined, ImportOutlined } from '@ead/suid-icons';
+import { DeleteOutlined, EyeOutlined, ImportOutlined, ReloadOutlined } from '@ead/suid-icons';
 import {
   SKILL_FIND_BY_PAGE_URL,
   deleteSkill,
@@ -78,6 +78,9 @@ const Skills: React.FC = () => {
   const [viewing, setViewing] = useState<SkillDto | null>(null);
   const [importMode, setImportMode] = useState<'github' | 'archive'>('github');
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
+
+  // ── 刷新列表 ──
+  const reloadData = useCallback(() => { tableRef.current?.reloadData(); }, []);
 
   const handleDelete = async (id: string) => {
     const res = await deleteSkill(id);
@@ -168,6 +171,11 @@ const Skills: React.FC = () => {
             <Button type="primary" icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
               导入技能
             </Button>
+          ),
+          right: (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={reloadData}></Button>
+            </>
           ),
         }}
       />

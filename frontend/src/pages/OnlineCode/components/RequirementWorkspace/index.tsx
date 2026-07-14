@@ -121,7 +121,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
 
   const handleBack = useCallback(() => {
     if (requirement?.projectId) {
-      history.push(`/online-code/requirements?projectId=${requirement.projectId}`);
+      history.push(`/online-code/project?projectId=${requirement.projectId}`);
     } else {
       history.back();
     }

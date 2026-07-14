@@ -5,7 +5,7 @@
  * Row action enters the current Project Description -> Overview Design -> Module Detailed Design
  * -> Feature Design -> Coding Execution flow.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { history } from 'umi';
 import {
   ActionButton,
@@ -19,7 +19,7 @@ import {
   message,
 } from '@ead/suid';
 import type { ExtTableProps, ExtTableRef } from '@ead/suid';
-import { PlusOutlined } from '@ead/suid-icons';
+import { PlusOutlined, ReloadOutlined } from '@ead/suid-icons';
 import {
   PROJECT_FIND_BY_PAGE_URL,
   saveProject,
@@ -36,6 +36,9 @@ const ProjectList: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [seedTemplates, setSeedTemplates] = useState<Array<{ value: string; label: string }>>([]);
   const [seedTemplatesLoading, setSeedTemplatesLoading] = useState(false);
+
+  // ── 刷新列表 ──
+  const reloadData = useCallback(() => { tableRef.current?.reloadData(); }, []);
 
   const loadSeedTemplates = async () => {
     setSeedTemplatesLoading(true);
@@ -145,6 +148,11 @@ const ProjectList: React.FC = () => {
             >
               新建项目
             </Button>
+          ),
+          right: (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={reloadData}></Button>
+            </>
           ),
         }}
       />
