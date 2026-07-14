@@ -39,7 +39,8 @@ const { SERVER_PATH } = constants;
  *   → 必填 boolean；deleted_at TIMESTAMP NULL → 可选；DB CHECK category IN ('IMPORTANT_SUBSIDIARY',
  *   'HOLDING_COMPANY') 与 EnterpriseCategory 联合类型逐字一致。生成列 active_name/active_uscc 不对外暴露。
  *   上述为 schema 级契约；运行期响应信封（sei-core PageResult 的 rows/records/total/page 映射、
- *   assetManager 解析）仍待 BE-005/006 落地 + 私有 registry 可达联调复核。
+ *   assetManager 解析）仍待 BE-002..006 落地（2026-07-15 再核实：后端仅 BE-001 迁移脚本 V1 在盘，
+ *       实体/Repository/USCC 工具/Service/Controller 五项产物均未落地）+ 私有 registry 可达联调复核。
  *
  * 待验证：node_modules 缺失（私有 registry @ead 不可达），上述类型符号无法本机 tsc/build 校验；
  * 信封形状已由仓内运行期读点（models/global.ts、pages/Login/index.tsx）佐证，待依赖可达后联调复核。
@@ -50,7 +51,7 @@ const { SERVER_PATH } = constants;
  *   多轮 test-agent 报「文件缺失 / NOT IN HEAD」为 CWD 路径解析假阴性：bare `frontend/...` 相对
  *   repo root（/home/paul/project/sei-online-code）解析到平台前端，而非本工作区
  *   project/data/2668088422724877313/frontend；`git ls-files`（CWD 相对路径）可证两文件已跟踪。
- *   运行期信封映射仍待 BE-005/006 + registry 可达联调复核（同上「待验证」未闭合）。
+ *   运行期信封映射仍待 BE-002..006 + registry 可达联调复核（同上「待验证」未闭合；后端仅 BE-001 在盘）。
  *   假阴性复现与证伪（test-agent CWD 落在 repo root 时命中，故多轮报「文件缺失/NOT IN HEAD」）：
  *     复现：`cd /home/paul/project/sei-online-code && test -f frontend/src/services/importantEnterprise.ts`
  *           —— bare frontend/ 相对 repo root 解析到【平台前端】而非本工作区，故判 missing（假阴性）。
@@ -364,7 +365,18 @@ export async function listImportantEnterprises(
   // `in` 会沿原型链命中 Object.prototype 的 'toString'/'constructor' 等，令此类编程式误传值漏过本前置校验、
   // 直到后端 DB CHECK 才被拒（多一次网络往返）；与 requireValidCategory 同为 ENTERPRISE_CATEGORY_LABELS
   // 的 hasOwnProperty 自有键判定（单一机制，全仓无 Set.has 第二套写法）。
-  if (category && !Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)) {
+  // typeof 守卫（与 requireValidCategory / getEnterpriseCategoryLabel 同口径，闭合本文件第三处 category
+  //   消费方缺类型守卫的「两套写法」）：签名标 category?: EnterpriseCategory，但经 as 的编程式调用方可传
+  //   number/对象等真值非字符串。前置 `category &&` 仅短路 falsy，真值非字符串（123/{}) 会落到 hasOwnProperty
+  //   经 ToPropertyKey 隐式强转（"123"/"[object Object]"）后落空、间接抛出 INVALID_CATEGORY_MESSAGE——结果等价
+  //   但不直观。补 `typeof category !== 'string'` 使非字符串与未知枚举值走同一显式判定；刻意保留前置
+  //   `category &&` 以兑现「未提供该筛选即跳过」的可选语义（与 requireValidCategory 对空值必抛不同，此处
+  //   空值表「不筛选」）。|| 短路保证 hasOwnProperty 仅对真实 string 求值；对合法 string|undefined|'' 入参零行为变化。
+  if (
+    category &&
+    (typeof category !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category))
+  ) {
     throw new Error(INVALID_CATEGORY_MESSAGE);
   }
   // 关键字超过可匹配字段最长长度即必然零命中（PRD 6.2.5：keyword 仅匹配 name≤MAX_NAME_LENGTH 或
@@ -380,6 +392,19 @@ export async function listImportantEnterprises(
   // BMP 关键字（常态）下两计数相等、行为零变化；与 requireValidNameLength 共用「同一 MAX_NAME_LENGTH 常量、
   // 同一码点计数口径」，闭合全仓两套长度写法并存（CLAUDE.md：不允许同一仓库两套写法）。
   if (trimmedKeyword && [...trimmedKeyword].length > MAX_NAME_LENGTH) {
+    return { list: [], total: 0, page: normalizedPage, pageSize: normalizedPageSize };
+  }
+  // assetManagerId 与上方 keyword 同属可选 GET 查询参数，且同为「超长即必然零命中」语义：
+  // assetManagerId 是精确匹配的 UUID 外键（DB asset_manager_id VARCHAR(36)，见 V1 迁移脚本），
+  // 任何超过标识符上界的值都不可能命中真实主键。经 as 的编程式调用方可传入 MB 级垃圾串，
+  // axios 将其作为查询串值（内部 encodeURIComponent）下发，超长同样撑爆 GET URL 触发网关 414
+  // （与 keyword 短路同源动机）。复用 requireId 既有的 MAX_ID_LENGTH（64，已覆盖 36 位 UUID 并留余量）
+  // 作上界——单一来源，不发明第二个 id 长度常量。超过即直接返回空页：精确匹配的 id 超过标识符上界
+  // 必无命中，空结果是合法语义，故短路返回而非抛错，与上方 keyword 短路完全对称。
+  // 计数用 UTF-16 码元 .length（非 keyword 的 [...].length 码点计数）：assetManagerId 字符集恒 ASCII
+  // （UUID/自增数字）→ 码元与码点恒等，.length 精确且 O(1)；与 requireId 对 id 类 ASCII 标识符的
+  // 计数口径一致（避免对 MB 级垃圾串先分配等长数组的 O(n) 退化）。
+  if (trimmedAssetManagerId && trimmedAssetManagerId.length > MAX_ID_LENGTH) {
     return { list: [], total: 0, page: normalizedPage, pageSize: normalizedPageSize };
   }
   const res = await unwrap<SeiPageResult<ImportantEnterpriseListItem> | null | undefined>(
@@ -549,6 +574,13 @@ function canonicalize<
   return next;
 }
 
+/**
+ * id 长度上界（与 MAX_NAME_LENGTH / USCC_LENGTH / MAX_PAGE_SIZE / MIN_PAGE_SIZE 同属「服务边界单一来源常量」；
+ * id 为路径参数、无 UI 输入框消费方，故与 MIN_PAGE_SIZE 同口径保持私有不导出）。64 位覆盖 PRD 6.1.1 的
+ * UUID（DB VARCHAR(36)，36 位）与自增主键并留充分余量。
+ */
+const MAX_ID_LENGTH = 64;
+
 /** 路径 id 边界校验：去空白，空值前置抛错，避免 PUT/DELETE 退化为集合端点（尤以 DELETE 集合路径为险）。 */
 function requireId(id: string): string {
   // typeof === 'string' 守卫（与 requireNonEmptyString 同口径，闭合「同仓库两套写法」）：
@@ -564,6 +596,18 @@ function requireId(id: string): string {
   if (!trimmed) {
     throw new Error('企业 ID 不能为空');
   }
+  // 长度上界守卫（与 requireValidNameLength 的 MAX_NAME_LENGTH、requireValidUscc 的 USCC_LENGTH 同口径）：
+  // 经 as 的编程式调用方可传入超长/畸形字符串（粘贴整段文本、MB 级串），encodeURIComponent 逐字符转义后
+  // 拼入 `${BASE_URL}/${id}` 单段路径，撑爆 URL 触发网关 414、或发出语义错误的端点请求。合法 id 恒
+  // ≤36 位 UUID（PRD 6.1.1 / DB VARCHAR(36)），故对一切真实主键零行为变化，仅把「显然非主键的畸形输入」
+  // 挡在网络往返之前，与下方 encodeURIComponent 同属 requireId 越权/畸形输入防御纵深（PRD 7.2 入参严格校验）。
+  // 计数刻意用 UTF-16 码元 .length（非文件他处自由文本字段的码点 [...str].length）：id 字符集恒 ASCII
+  // （UUID/自增数字）→ 码元与码点恒等、计数精确；而 .length 为 O(1)，本守卫正要拦下的 MB 级畸形串若先
+  // [...trimmed].length 会瞬时分配等长数组、把拦截劣化为 O(n)。据此与「DB VARCHAR 自由文本按字符语义需
+  // 码点计数」的 requireValidNameLength / 关键字短路区分，preempt 全仓长度计数统一时的误改（性能退化）。
+  if (trimmed.length > MAX_ID_LENGTH) {
+    throw new Error('企业 ID 格式不正确');
+  }
   // 编码为合法单段路径：防 id 含 / ? # 等字符把 `${BASE_URL}/${id}` 拆成多段或附加查询串
   // （即上方注释所述 PUT/DELETE 退化为错误端点的越权风险，PRD 7.2 入参严格校验/防注入）。
   // 主键为 UUID/自增（PRD 6.1.1，DB VARCHAR(36)，字符集 [0-9a-f-]），encodeURIComponent 对其为
@@ -572,12 +616,26 @@ function requireId(id: string): string {
   return encodeURIComponent(trimmed);
 }
 
-/** 校验返回记录非空且含必填主键 id，否则前置为明确错误（防 success=true 却回传空/残缺 data）。 */
+/** 校验返回记录非空且含必填 string 主键 id，否则前置为明确错误（防 success=true 却回传空/残缺/类型不符 data）。 */
 function requireRecord<T extends { id?: unknown }>(
   record: T | null | undefined,
   message: string,
 ): T {
-  if (!record || !record.id) {
+  // typeof 守卫（与 requireId 在【输入】路径保证 id 为非空 string 同口径，闭合 require* 家族【响应】侧唯一仅判
+  //   truthy 的缺口）：后端 success=true 却回传运行期与声明类型不符的 data 时（join/序列化异常——与
+  //   listImportantEnterprises 逐行 assetManager 兜底、getImportantEnterpriseDetail 的 assetManager 守卫
+  //   同源威胁模型），id 若为真值非字符串（number 123 / boolean true / 对象 {}）此前会漏过 `!record.id`
+  //   的 truthy 判定、违反 ImportantEnterprise.id: string 契约，令下游 `${BASE_URL}/${id}` 路径拼接、
+  //   FE-002 表格 dataIndex、FE-004 详情读取在非字符串 id 上行为未定义。先守 typeof 使响应侧与输入侧
+  //   （requireId）对「id 必为非空 string」的保证收敛一致；合法后端（id 恒为 UUID/自增数字字符串）零行为变化
+  //   ——既有的 null/undefined/'' 三类必拒分支仍由 `!record` / `!record.id` 兜住，typeof 子句仅额外拦真值非字符串。
+  // 条件序：`!record` 前置短路，避免对 null/undefined 访问 .id；typeof 在判空之前，保证空/空白串仍落到
+  //   判空子句（id 已是 string 才到此处）给出既有文案，而非被 typeof 误吞。
+  // 判空按 trim：空白主键（"   "）与 null/undefined/''/非字符串同属本方法 docstring 所防「残缺 data」，
+  //   此前 `!record.id`（truthy 判定）会漏过空白串（!"  "为 false）。trim 后判空使响应侧 id 非空保证与
+  //   requireId【输入】侧 `id.trim()` 后判空收敛同口径（上方 typeof 注释自称与 requireId「同口径」）；
+  //   合法后端 id（UUID/自增数字串，无首尾空白）trim 恒等、零行为变化。仅校验不回写，返回的 record.id 原值不变。
+  if (!record || typeof record.id !== 'string' || !record.id.trim()) {
     throw new Error(message);
   }
   return record;
@@ -590,7 +648,12 @@ function requireRecord<T extends { id?: unknown }>(
  * 服务边界校验使本服务对绕过表单校验的编程式调用方（如未来批量导入）同样有效，不依赖调用方已校验。
  */
 function requireValidUscc(uscc: string): void {
-  if (!isValidUsccFormat(uscc)) {
+  // 显式 typeof 首子句（与 requireId / requireValidNameLength / requireValidCategory / requireNonEmptyString
+  // 同口径，闭合 require* 家族「各成员在自身边界显式拒非字符串」契约）：签名标 string，但经 as 的
+  // 编程式调用方可传入真值非字符串。isValidUsccFormat 内部已有 typeof 故行为等价（非字符串本就抛同一文案），
+  // 此处补显式子句使家族五个成员形态统一为 `typeof X !== 'string' || !<谓词>`，并短路掉一次委托调用——
+  // 与 requireValidCategory 此前补 typeof 同属「行为保持的契约归一」，对合法 string 入参零行为变化。
+  if (typeof uscc !== 'string' || !isValidUsccFormat(uscc)) {
     // 位数引用 USCC_LENGTH 而非硬编码「18」，与 requireValidNameLength 引用 MAX_NAME_LENGTH 同口径
     // （单一来源：GB 32100-2015 固定 18 位，常量即据此定义，文案随之同步，避免双处漂移）。
     throw new Error(`统一社会信用代码格式不正确，应为 ${USCC_LENGTH} 位数字与大写字母`);
@@ -636,7 +699,16 @@ function requireValidNameLength(name: string): void {
  * 只需在 LABELS 追加一行，三处校验/取文案自动同步，枚举单一来源不变。
  */
 function requireValidCategory(category: string): void {
-  if (!Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)) {
+  // typeof 守卫（与 requireId / requireValidNameLength / requireNonEmptyString 同口径，闭合 require*
+  // 家族「非字符串入参即抛明确文案」契约）：签名标 string，但经 as 的编程式调用方可传入真值非字符串
+  // （如 number/对象）。此前仅 hasOwnProperty 一道判定，对非字符串键依赖 ToPropertyKey 隐式强转后落空、
+  // 间接抛出 INVALID_CATEGORY_MESSAGE——行为等价但不直观，且使本方法成为 require* 家族中唯一缺类型守卫的成员
+  // （与 requireValidNameLength 此前补 typeof 的动机同源）。先守 typeof 使非字符串与未知枚举值走同一显式判定，
+  // || 短路保证 hasOwnProperty 仅对真实 string 求值；对合法 string 入参零行为变化（既有成员判定不变）。
+  if (
+    typeof category !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(ENTERPRISE_CATEGORY_LABELS, category)
+  ) {
     throw new Error(INVALID_CATEGORY_MESSAGE);
   }
 }
@@ -678,6 +750,15 @@ export async function createImportantEnterprise(
   requireNonEmptyString(body.unifiedSocialCreditCode, '统一社会信用代码不能为空');
   requireValidUscc(body.unifiedSocialCreditCode);
   requireNonEmptyString(body.assetManagerId, '资产管理人不能为空');
+  // assetManagerId 是 id 类标识符（UUID 外键，DB asset_manager_id VARCHAR(36)，PRD 6.1.1「企业用户 ID」），
+  // 与 requireId 对【路径】id、listImportantEnterprises 对【查询】assetManagerId 的长度上界守卫同口径，复用
+  // MAX_ID_LENGTH 单一来源：经 as 的编程式调用方可传入超长/畸形串，JSON body 虽无 GET URL 414 风险，但下发给
+  // 后端必然被 AC-7 存在性校验拒绝（FK 不存在），前置拦截省一次网络往返并给出明确文案——与全文件「服务边界
+  // 防御纵深、不依赖类型注解」一致。requireNonEmptyString 已保证此处 body.assetManagerId 为非空 string，故
+  // 直读 .length 安全；合法 assetManagerId 恒为 36 位 UUID（远 < 64），零行为变化。
+  if (body.assetManagerId.length > MAX_ID_LENGTH) {
+    throw new Error('资产管理人 ID 格式不正确');
+  }
   return requireRecord(
     await unwrap<ImportantEnterprise | null | undefined>(
       request({
@@ -721,6 +802,18 @@ export async function updateImportantEnterprise(
   // TypeError，非字符串按「未提供」处理、由 canonicalize 跳过，合法 string|undefined 零行为变化。
   if (typeof body.unifiedSocialCreditCode === 'string' && body.unifiedSocialCreditCode.trim()) {
     requireValidUscc(body.unifiedSocialCreditCode);
+  }
+  // assetManagerId 长度上界守卫（与 createImportantEnterprise / requireId / listImportantEnterprises 同口径，
+  // 复用 MAX_ID_LENGTH 单一来源）：Partial 语义下仅在传入非空白 string 时校验——trim 至空由 canonicalize(partial)
+  // 剔除表「不变」，故此处用 `typeof === 'string' && trim()` 与上方 name/uscc 的 Partial 守卫同形，而非必填校验。
+  // typeof 守卫防经 as 的非字符串落到 .length 抛 TypeError（与 listImportantEnterprises 的 keyword/assetManagerId、
+  // 上方 name/uscc 同口径）；合法 UUID(36) 远 < 64，零行为变化，仅把超长/畸形 FK 挡在必然失败的 PUT 之前。
+  if (
+    typeof body.assetManagerId === 'string' &&
+    body.assetManagerId.trim() &&
+    body.assetManagerId.length > MAX_ID_LENGTH
+  ) {
+    throw new Error('资产管理人 ID 格式不正确');
   }
   // 规整后再判定：canonicalize(partial:true) 会把 trim 至空的字段剔除以表「不变」，若结果为空对象，
   // 说明本次没有任一字段需要更新（全为空/纯空白/未传）。与 requireId/requireRecord 同属服务边界防御纵深：
