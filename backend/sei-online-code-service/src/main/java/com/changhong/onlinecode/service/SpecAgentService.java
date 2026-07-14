@@ -1,8 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.SpecDao;
@@ -26,7 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
@@ -35,7 +34,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 需求智能体 spawn 编排。复用 {@link CliRunner} + {@link SkillMaterializer}，
+ * 需求智能体 spawn 编排。复用工作区绑定 runner + {@link SkillMaterializer}，
  * 镜像 {@link PlanAgentService} 的链式落库（GENERATING → SPEC_REVIEW / FAILED）。
  *
  * <p>D11 链式落库：{@code CliRunner.execute} 返 {@link CompletableFuture}，{@code .thenApply} 解析 JSON
@@ -97,10 +96,10 @@ public class SpecAgentService {
         Agent agent = agentService.findByName("requirement-agent");
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildSpecPrompt(project, spec, modifyHint);
-        Path workdir = materializeSkills(agent);
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
+        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId; // 需求阶段无 Run，用 projectId 作日志键
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
                     agent.getName(), agent.getInstructions(),
@@ -108,7 +107,8 @@ public class SpecAgentService {
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                     LOGGER);
         }
-        CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(), iterationId, prompt,
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
         future.thenApply(json -> {
@@ -296,9 +296,8 @@ public class SpecAgentService {
         return current.getMessage();
     }
 
-    private Path materializeSkills(Agent agent) {
+    private Path materializeSkills(Agent agent, Path workdir) {
         try {
-            Path tmp = Files.createTempDirectory("agent-skills-");
             List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
             if (agent != null && agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
@@ -314,11 +313,10 @@ public class SpecAgentService {
                     }
                 }
             }
-            skillMaterializer.materialize(tmp.toString(), payloads);
-            return tmp;
+            skillMaterializer.materialize(workdir.toString(), payloads);
+            return workdir;
         } catch (Exception e) {
-            LOGGER.warn("materializeSkills failed, fallback to tmp root", e);
-            return Path.of(System.getProperty("java.io.tmpdir"));
+            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
         }
     }
 

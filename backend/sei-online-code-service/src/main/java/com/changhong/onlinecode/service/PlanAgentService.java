@@ -1,8 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
@@ -26,7 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -103,10 +102,10 @@ public class PlanAgentService {
         Agent agent = agentService.findByName("planning-agent");
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildPlanningPrompt(project, modifyHint);
-        Path workdir = materializeSkills(agent);
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
+        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId; // 规划阶段无 Run，用 projectId 作日志键
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
                     agent.getName(), agent.getInstructions(),
@@ -114,7 +113,8 @@ public class PlanAgentService {
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                     LOGGER);
         }
-        CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(), iterationId, prompt,
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
         future.thenApply(json -> parseJson(json, PlanContent.class))
@@ -206,10 +206,10 @@ public class PlanAgentService {
         Agent agent = agentService.findByName("feature-design-agent");
         Plan plan = planDao.findLatestByProjectId(projectId);
         String prompt = buildFeatureDesignPrompt(plan, featureId, modifyHint);
-        Path workdir = materializeSkills(agent);
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
+        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId + ":" + featureId;
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
                     agent.getName(), agent.getInstructions(),
@@ -217,7 +217,8 @@ public class PlanAgentService {
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                     LOGGER);
         }
-        CompletableFuture<String> future = runner.execute(iterationId, prompt, workdir.toString(),
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(), iterationId, prompt,
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
         final FeatureDesign target = fd;
@@ -309,9 +310,8 @@ public class PlanAgentService {
         return current.getMessage();
     }
 
-    private Path materializeSkills(Agent agent) {
+    private Path materializeSkills(Agent agent, Path workdir) {
         try {
-            Path tmp = Files.createTempDirectory("agent-skills-");
             List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
             if (agent != null && agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
@@ -327,11 +327,10 @@ public class PlanAgentService {
                     }
                 }
             }
-            skillMaterializer.materialize(tmp.toString(), payloads);
-            return tmp;
+            skillMaterializer.materialize(workdir.toString(), payloads);
+            return workdir;
         } catch (Exception e) {
-            LOGGER.warn("materializeSkills failed, fallback to tmp root", e);
-            return Path.of(System.getProperty("java.io.tmpdir"));
+            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
         }
     }
 

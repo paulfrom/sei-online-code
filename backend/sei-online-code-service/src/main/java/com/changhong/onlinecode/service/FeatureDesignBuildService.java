@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
@@ -131,12 +131,12 @@ public class FeatureDesignBuildService {
         Task savedTask = taskResult.getData();
 
         // 6. 创建 Run
-        WorkspaceResolveResult workspace = workspaceManager.resolve(fd.getProjectId());
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(fd.getProjectId());
         Run run = new Run();
         run.setTaskId(savedTask.getId());
         run.setIterationId(savedTask.getIterationId());
         run.setState(RunState.RUNNING);
-        run.setWorktreePath(workspace.getPath());
+        run.setWorktreePath(workspace.pathString());
         OperateResultWithData<Run> runResult = runService.save(run);
         if (!runResult.successful()) {
             // 回退构建状态
@@ -149,18 +149,16 @@ public class FeatureDesignBuildService {
 
         // 7. 异步执行编码（D11：链式回调）——按 dev-agent.cliTool 选 runner
         String prompt = buildPrompt(fd);
-        CliRunner runner = cliRunnerRegistry.resolve(devAgent.getCliTool());
-        AgentBriefWriter.writeBrief(workspace.getPath(), devAgent.getCliTool(),
+        AgentBriefWriter.writeBrief(workspace.pathString(), devAgent.getCliTool(),
                 devAgent.getName(), devAgent.getInstructions(),
                 devAgent.getModel(),
                 devAgent.getMcpConfig() != null && !devAgent.getMcpConfig().isBlank(),
                 null);
-        CompletableFuture<String> executeFuture = runner.execute(
+        CompletableFuture<String> executeFuture = cliRunnerRegistry.execute(workspace, devAgent.getCliTool(),
                 savedTask.getIterationId(),
                 savedTask.getId(),
                 savedRun.getId(),
                 prompt,
-                workspace.getPath(),
                 devAgent.getModel(),
                 devAgent.getMcpConfig()
         );

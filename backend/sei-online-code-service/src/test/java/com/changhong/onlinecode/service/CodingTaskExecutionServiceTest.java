@@ -301,7 +301,10 @@ class CodingTaskExecutionServiceTest {
         ExecutionPlan plan = new ExecutionPlan();
         plan.setMemoryContextId("context-1");
         plan.setWorkspaceMemoryId("memory-1");
-        com.changhong.onlinecode.agent.CliRunner runner = mock(com.changhong.onlinecode.agent.CliRunner.class);
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(java.nio.file.Path.of(System.getProperty("java.io.tmpdir")));
+        when(agentWorkspace.pathString()).thenReturn(System.getProperty("java.io.tmpdir"));
 
         when(codingTaskDao.findOne("task-trace")).thenReturn(task);
         when(runDao.findByCodingTaskId("task-trace")).thenReturn(java.util.List.of());
@@ -312,13 +315,10 @@ class CodingTaskExecutionServiceTest {
         });
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(executionPlanDao.findOne("plan-trace")).thenReturn(plan);
-        when(workspaceManager.resolve("project-trace")).thenReturn(
-                new com.changhong.onlinecode.dto.WorkspaceResolveResult(System.getProperty("java.io.tmpdir"), true,
-                        com.changhong.onlinecode.dto.enums.WorkspaceSource.SCAFFOLD));
-        when(cliRunnerRegistry.resolve("codex")).thenReturn(runner);
+        when(cliRunnerRegistry.workspace("project-trace")).thenReturn(agentWorkspace);
         when(changeCollector.collect(any(), any())).thenReturn(
                 new com.changhong.onlinecode.service.memory.CodingTaskChangeResult());
-        when(runner.execute(any(), any(), any(), any(), any(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new CompletableFuture<>());
 
         service.executePlanTask("task-trace", "backend-dev-agent", "prompt");

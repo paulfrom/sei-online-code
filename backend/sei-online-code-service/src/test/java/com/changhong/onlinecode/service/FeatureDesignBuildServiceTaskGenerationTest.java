@@ -99,7 +99,10 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         Run savedRun = new Run();
         savedRun.setId("run1");
 
-        CliRunner runner = mock(CliRunner.class);
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(workspace);
+        when(agentWorkspace.pathString()).thenReturn(workspace.toString());
         OperateResultWithData<Task> savedTaskResult = OperateResultWithData.operationSuccessWithData(savedTask);
         OperateResultWithData<Run> savedRunResult = OperateResultWithData.operationSuccessWithData(savedRun);
 
@@ -107,11 +110,10 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         when(featureDesignDao.tryAcquireBuildLock(eq("fd1"), eq(FeatureDesignBuildStatus.BUILDING))).thenReturn(1);
         when(agentService.findByName("dev-agent")).thenReturn(devAgent);
         when(taskService.save(any(Task.class))).thenReturn(savedTaskResult);
-        when(workspaceManager.resolve("project1"))
-                .thenReturn(new WorkspaceResolveResult(workspace.toString(), true, null));
+        when(cliRunnerRegistry.workspace("project1")).thenReturn(agentWorkspace);
         when(runService.save(any(Run.class))).thenReturn(savedRunResult);
-        when(cliRunnerRegistry.resolve("codex")).thenReturn(runner);
-        when(runner.execute(anyString(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), anyString(), anyString(), anyString(),
+                anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("success"));
 
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build("fd1");
@@ -131,8 +133,8 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         assertTrue(generatedTask.getDescription().contains("支持按名称筛选"));
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(runner).execute(eq("fd1"), eq("task1"), eq("run1"), promptCaptor.capture(),
-                eq(workspace.toString()), eq(null), eq(null));
+        verify(cliRunnerRegistry).execute(eq(agentWorkspace), eq("codex"), eq("fd1"),
+                eq("task1"), eq("run1"), promptCaptor.capture(), eq(null), eq(null));
         assertTrue(promptCaptor.getValue().contains("实现库存列表查询与筛选"));
         assertTrue(promptCaptor.getValue().contains("src/pages/inventory/index.tsx"));
     }

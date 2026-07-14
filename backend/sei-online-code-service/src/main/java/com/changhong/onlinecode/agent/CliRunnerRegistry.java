@@ -1,10 +1,16 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.onlinecode.dto.WorkspaceResolveResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * CliRunner 注册表。参考 multica {@code server/pkg/agent/agent.go} 的 {@code New(agentType, cfg)}
@@ -23,12 +29,19 @@ public class CliRunnerRegistry {
     public static final String DEFAULT_TOOL = "claude";
 
     private final Map<String, CliRunner> runners;
+    private final WorkspaceManager workspaceManager;
 
-    public CliRunnerRegistry(List<CliRunner> runners) {
+    @Autowired
+    public CliRunnerRegistry(List<CliRunner> runners, WorkspaceManager workspaceManager) {
         this.runners = new HashMap<>();
+        this.workspaceManager = workspaceManager;
         for (CliRunner r : runners) {
             this.runners.put(r.tool(), r);
         }
+    }
+
+    CliRunnerRegistry(List<CliRunner> runners) {
+        this(runners, null);
     }
 
     /**
@@ -37,7 +50,7 @@ public class CliRunnerRegistry {
      * @param tool Agent.cliTool 取值（可为 null）
      * @return 命中 runner；未命中返回默认 claude runner
      */
-    public CliRunner resolve(String tool) {
+    CliRunner resolve(String tool) {
         if (tool == null || tool.isBlank()) {
             return runners.get(DEFAULT_TOOL);
         }
@@ -48,6 +61,51 @@ public class CliRunnerRegistry {
     /** 默认 tool 名。 */
     public String defaultTool() {
         return DEFAULT_TOOL;
+    }
+
+    /** Resolve and validate the only workspace in which a project's agents may run. */
+    public AgentWorkspace workspace(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new IllegalArgumentException("Agent 执行缺少 projectId，拒绝解析工作区");
+        }
+        if (workspaceManager == null) {
+            throw new IllegalStateException("WorkspaceManager 未配置，拒绝启动 Agent");
+        }
+        WorkspaceResolveResult resolved = workspaceManager.resolve(projectId);
+        if (resolved == null || resolved.getPath() == null || resolved.getPath().isBlank()) {
+            throw new IllegalStateException("项目工作区解析失败: " + projectId);
+        }
+        Path path = Path.of(resolved.getPath()).toAbsolutePath().normalize();
+        if (!Files.isDirectory(path)) {
+            throw new IllegalStateException("项目工作区不存在或不是目录: " + path);
+        }
+        return new AgentWorkspace(projectId, path);
+    }
+
+    /** Execute only after revalidating that the binding still matches the project's current workspace. */
+    public CompletableFuture<String> execute(AgentWorkspace workspace, String tool,
+                                             String iterationId, String prompt,
+                                             String model, String mcpConfig) {
+        String cwd = validate(workspace);
+        return resolve(tool).execute(iterationId, prompt, cwd, model, mcpConfig);
+    }
+
+    /** Execute a fan-out run only in its validated project workspace. */
+    public CompletableFuture<String> execute(AgentWorkspace workspace, String tool,
+                                             String iterationId, String taskId, String runId,
+                                             String prompt, String model, String mcpConfig) {
+        String cwd = validate(workspace);
+        return resolve(tool).execute(iterationId, taskId, runId, prompt, cwd, model, mcpConfig);
+    }
+
+    private String validate(AgentWorkspace workspace) {
+        Objects.requireNonNull(workspace, "Agent 工作区绑定不能为空");
+        AgentWorkspace current = workspace(workspace.projectId());
+        if (!current.path().equals(workspace.path())) {
+            throw new IllegalStateException("项目工作区已变化，拒绝在旧工作区启动 Agent: projectId="
+                    + workspace.projectId() + ", expected=" + current.path() + ", actual=" + workspace.path());
+        }
+        return current.pathString();
     }
 
     /** Cancel a run without requiring the caller to know which vendor owns it. */

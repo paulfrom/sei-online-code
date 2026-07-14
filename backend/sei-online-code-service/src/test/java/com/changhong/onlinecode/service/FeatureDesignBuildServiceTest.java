@@ -218,17 +218,19 @@ class FeatureDesignBuildServiceTest {
         Run savedRun = new Run();
         savedRun.setId(runId);
 
-        WorkspaceResolveResult workspace = new WorkspaceResolveResult("/tmp/workspace", true, null);
+        com.changhong.onlinecode.agent.AgentWorkspace workspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(workspace.path()).thenReturn(java.nio.file.Path.of("/tmp/workspace"));
+        when(workspace.pathString()).thenReturn("/tmp/workspace");
 
         when(featureDesignDao.findLatestById(fdId)).thenReturn(fd);
         when(featureDesignDao.tryAcquireBuildLock(eq(fdId), eq(FeatureDesignBuildStatus.BUILDING))).thenReturn(1);
         when(agentService.findByName("dev-agent")).thenReturn(devAgent);
         when(taskService.save(any(Task.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedTask));
-        when(workspaceManager.resolve(projId)).thenReturn(workspace);
+        when(cliRunnerRegistry.workspace(projId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
-        CliRunner runner = mock(CliRunner.class);
-        when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
-        when(runner.execute(anyString(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), anyString(), anyString(), anyString(),
+                anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("success"));
 
         // 执行

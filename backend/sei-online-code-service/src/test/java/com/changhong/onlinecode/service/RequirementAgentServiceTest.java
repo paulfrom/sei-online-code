@@ -48,7 +48,11 @@ class RequirementAgentServiceTest {
         projectService = mock(ProjectService.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
         runner = mock(CliRunner.class);
-        when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
+        com.changhong.onlinecode.agent.AgentWorkspace workspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(workspace.path()).thenReturn(java.nio.file.Path.of(System.getProperty("java.io.tmpdir")));
+        when(workspace.pathString()).thenReturn(System.getProperty("java.io.tmpdir"));
+        when(cliRunnerRegistry.workspace(anyString())).thenReturn(workspace);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
@@ -69,7 +73,7 @@ class RequirementAgentServiceTest {
         when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
         when(agentService.findByName("prd-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
-        when(runner.execute(eq("req1"), anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), eq("req1"), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("   "));
 
         service.spawnPrd("req1", null, "token-1");
@@ -108,7 +112,7 @@ class RequirementAgentServiceTest {
                 ## 功能需求
                 内容
                 """;
-        when(runner.execute(eq("req1"), anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), eq("req1"), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(content));
 
         service.spawnPrd("req1", null, "token-1");
@@ -120,14 +124,15 @@ class RequirementAgentServiceTest {
     void reviewMemory_agentDifferencesPersistAsNonBlockingWarning() {
         Requirement requirement = new Requirement();
         requirement.setId("req1");
+        requirement.setProjectId("p1");
         requirement.setStatus(RequirementStatus.PRD_REVIEW);
         requirement.setPrdContent("# PRD");
         RequirementDesignContext context = new RequirementDesignContext();
         context.setId("ctx1");
         when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
         when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
-        when(runner.execute(org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
-                anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture("""
                         {"findings":[{"severity":"HIGH","message":"新增缓存策略尚未沉淀",
                         "suggestedAction":"交付后更新项目记忆"}]}
@@ -146,6 +151,7 @@ class RequirementAgentServiceTest {
     void reviewMemory_newerPrdDiscardsLateAgentResult() {
         Requirement reviewed = new Requirement();
         reviewed.setId("req1");
+        reviewed.setProjectId("p1");
         reviewed.setPrdContent("old");
         Requirement latest = new Requirement();
         latest.setId("req1");
@@ -155,8 +161,9 @@ class RequirementAgentServiceTest {
         CompletableFuture<String> response = new CompletableFuture<>();
         when(requirementDao.findOne("req1")).thenReturn(reviewed, latest);
         when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
-        when(runner.execute(org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
-                anyString(), anyString(), any(), any())).thenReturn(response);
+        when(cliRunnerRegistry.execute(any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
+                anyString(), any(), any())).thenReturn(response);
 
         service.reviewMemory("req1", "old", context);
         response.complete("{\"findings\":[{\"message\":\"迟到差异\"}]}");

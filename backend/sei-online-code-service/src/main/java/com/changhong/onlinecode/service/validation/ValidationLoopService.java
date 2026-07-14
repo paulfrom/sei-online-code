@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.service.validation;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
@@ -145,15 +145,15 @@ public class ValidationLoopService {
         }
         Run review = newRun(requirementId, loopId, codingTaskId, RunType.TEST_REVIEW,
                 "Review validation facts", plan);
-        WorkspaceResolveResult workspace = workspaceManager.resolve(projectId);
+        AgentWorkspace workspace = runnerRegistry.workspace(projectId);
         String prompt = "Interpret these immutable validation facts. Do not invent executions. scope=" + scope
                 + ", area=" + area + "\n" + toJson(facts);
         try {
-            AgentBriefWriter.writeBrief(workspace.getPath(), agent.getCliTool(), agent.getName(),
+            AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(), agent.getName(),
                     agent.getInstructions(), agent.getModel(), agent.getMcpConfig() != null, null);
-            CliRunner runner = runnerRegistry.resolve(agent.getCliTool());
-            String report = runner.execute(requirementId, codingTaskId, review.getId(), prompt,
-                    workspace.getPath(), agent.getModel(), agent.getMcpConfig()).get(30, TimeUnit.MINUTES);
+            String report = runnerRegistry.execute(workspace, agent.getCliTool(),
+                    requirementId, codingTaskId, review.getId(), prompt,
+                    agent.getModel(), agent.getMcpConfig()).get(30, TimeUnit.MINUTES);
             review.setState(report == null ? RunState.FAILED : RunState.SUCCEEDED);
             review.setFinishedDate(new Date());
             runDao.save(review);

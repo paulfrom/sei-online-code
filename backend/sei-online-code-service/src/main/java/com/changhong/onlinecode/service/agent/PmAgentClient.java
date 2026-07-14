@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RunDao;
@@ -156,16 +156,15 @@ public class PmAgentClient {
     }
 
     private String executeAgent(Agent agent, String projectId, String prompt, long timeoutSeconds, Run run) {
-        CliRunner runner = cliRunnerRegistry.resolve(agent.getCliTool());
-        WorkspaceResolveResult workspace = workspaceManager.resolve(projectId);
-        String cwd = workspace == null ? null : workspace.getPath();
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
+        String cwd = workspace.pathString();
 
         AgentBriefWriter.writeBrief(cwd, agent.getCliTool(), agent.getName(),
                 agent.getInstructions(), agent.getModel(),
                 agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
 
-        CompletableFuture<String> future = runner.execute(
-                projectId, null, run.getId(), prompt, cwd, agent.getModel(), agent.getMcpConfig());
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace, agent.getCliTool(),
+                projectId, null, run.getId(), prompt, agent.getModel(), agent.getMcpConfig());
         try {
             return future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {

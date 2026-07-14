@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.CliRunner;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
@@ -139,29 +139,28 @@ public class CodingTaskExecutionService {
         run.setStartedDate(new Date());
         runDao.save(run);
 
-        WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
-        run.setWorktreePath(workspace.getPath());
-        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.getPath()));
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
+        run.setWorktreePath(workspace.pathString());
+        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
         runDao.save(run);
 
         Agent agent = agentService.findByName(task.getAssignedAgent());
         String fullPrompt = buildExecutionPrompt(task, prompt);
 
         if (agent != null) {
-            AgentBriefWriter.writeBrief(workspace.getPath(), agent.getCliTool(),
+            AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(),
                     agent.getName(), agent.getInstructions(),
                     agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                     null);
         }
 
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
-        CompletableFuture<String> future = runner.execute(
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(),
                 task.getRequirementId(),
                 task.getId(),
                 run.getId(),
                 fullPrompt,
-                workspace.getPath(),
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
@@ -238,24 +237,22 @@ public class CodingTaskExecutionService {
         run.setStartedDate(new Date());
         runDao.save(run);
 
-        WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
-        run.setWorktreePath(workspace.getPath());
-        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.getPath()));
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
+        run.setWorktreePath(workspace.pathString());
+        run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
         runDao.save(run);
 
-        AgentBriefWriter.writeBrief(workspace.getPath(), agent.getCliTool(),
+        AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(),
                 agent.getName(), agent.getInstructions(),
                 agent.getModel(),
                 agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
                 null);
 
-        CliRunner runner = cliRunnerRegistry.resolve(agent.getCliTool());
-        CompletableFuture<String> future = runner.execute(
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace, agent.getCliTool(),
                 task.getRequirementId(),
                 task.getId(),
                 run.getId(),
                 buildExecutionPrompt(task, prompt),
-                workspace.getPath(),
                 agent.getModel(),
                 agent.getMcpConfig());
 

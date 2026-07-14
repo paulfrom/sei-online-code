@@ -47,7 +47,11 @@ class SpecAgentServiceTest {
         projectLifecycleService = mock(ProjectLifecycleService.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
         runner = mock(CliRunner.class);
-        when(cliRunnerRegistry.resolve(any())).thenReturn(runner);
+        com.changhong.onlinecode.agent.AgentWorkspace workspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(workspace.path()).thenReturn(java.nio.file.Path.of(System.getProperty("java.io.tmpdir")));
+        when(workspace.pathString()).thenReturn(System.getProperty("java.io.tmpdir"));
+        when(cliRunnerRegistry.workspace(anyString())).thenReturn(workspace);
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
@@ -71,7 +75,7 @@ class SpecAgentServiceTest {
                   "entities":[{"key":"InventoryTask","fields":[{"name":"id","type":"string","description":"主键"}]}],
                   "apiContract":[{"method":"GET","path":"/api/inventory/tasks","requestShape":"InventoryQuery","responseShape":"ResultData<Page<InventoryTaskDto>>","description":"查询盘点任务"}]
                 """;
-        when(runner.execute(eq("p1"), anyString(), anyString(), any(), any()))
+        when(cliRunnerRegistry.execute(any(), any(), eq("p1"), anyString(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(truncated));
 
         service.spawnRequirement("p1", null, "spec1");

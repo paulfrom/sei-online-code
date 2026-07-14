@@ -1,12 +1,19 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link CliRunnerRegistry} 单元测试。
@@ -66,5 +73,54 @@ class CliRunnerRegistryTest {
         CliRunnerRegistry cancellableRegistry = new CliRunnerRegistry(List.of(cancellable));
 
         assertTrue(cancellableRegistry.cancel("run-1"));
+    }
+
+    @Test
+    void execute_usesResolvedProjectWorkspace(@TempDir Path workspace) {
+        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
+        when(workspaceManager.resolve("project-1")).thenReturn(
+                new WorkspaceResolveResult(workspace.toString(), true, null));
+        AtomicReference<String> actualCwd = new AtomicReference<>();
+        CliRunner runner = capturingRunner(actualCwd);
+        CliRunnerRegistry boundRegistry = new CliRunnerRegistry(List.of(runner), workspaceManager);
+
+        AgentWorkspace binding = boundRegistry.workspace("project-1");
+        boundRegistry.execute(binding, "fake", "iteration-1", "prompt", null, null).join();
+
+        assertEquals(workspace.toAbsolutePath().normalize().toString(), actualCwd.get());
+    }
+
+    @Test
+    void execute_workspaceConfigurationChanged_rejectsOldBinding(@TempDir Path root) throws Exception {
+        Path original = java.nio.file.Files.createDirectory(root.resolve("original"));
+        Path changed = java.nio.file.Files.createDirectory(root.resolve("changed"));
+        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
+        when(workspaceManager.resolve("project-1")).thenReturn(
+                new WorkspaceResolveResult(original.toString(), true, null),
+                new WorkspaceResolveResult(changed.toString(), true, null));
+        AtomicReference<String> actualCwd = new AtomicReference<>();
+        CliRunnerRegistry boundRegistry = new CliRunnerRegistry(
+                List.of(capturingRunner(actualCwd)), workspaceManager);
+
+        AgentWorkspace stale = boundRegistry.workspace("project-1");
+
+        assertThrows(IllegalStateException.class,
+                () -> boundRegistry.execute(stale, "fake", "iteration-1", "prompt", null, null));
+        assertEquals(null, actualCwd.get());
+    }
+
+    private static CliRunner capturingRunner(AtomicReference<String> cwd) {
+        return new CliRunner() {
+            public String tool() { return "fake"; }
+            public CompletableFuture<String> execute(String i, String p, String c, String m, String mc) {
+                cwd.set(c);
+                return CompletableFuture.completedFuture("ok");
+            }
+            public CompletableFuture<String> execute(String i, String t, String r, String p,
+                                                     String c, String m, String mc) {
+                cwd.set(c);
+                return CompletableFuture.completedFuture("ok");
+            }
+        };
     }
 }

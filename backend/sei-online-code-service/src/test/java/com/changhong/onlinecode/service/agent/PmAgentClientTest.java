@@ -42,16 +42,17 @@ class PmAgentClientTest {
         CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         RunDao runDao = mock(RunDao.class);
-        CliRunner runner = mock(CliRunner.class);
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(workspace);
+        when(agentWorkspace.pathString()).thenReturn(workspace.toString());
         AtomicReference<Run> savedRun = new AtomicReference<>();
 
         Agent agent = new Agent();
         agent.setName("pm-agent");
         agent.setCliTool("codex");
         when(agentService.findByName("pm-agent")).thenReturn(agent);
-        when(registry.resolve("codex")).thenReturn(runner);
-        when(workspaceManager.resolve("project-1"))
-                .thenReturn(new WorkspaceResolveResult(workspace.toString(), true, WorkspaceSource.SCAFFOLD));
+        when(registry.workspace("project-1")).thenReturn(agentWorkspace);
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
             if (run.getId() == null) run.setId("run-1");
@@ -59,8 +60,8 @@ class PmAgentClientTest {
             return run;
         });
         when(runDao.findOne("run-1")).thenAnswer(invocation -> savedRun.get());
-        when(runner.execute(eq("project-1"), eq(null), eq("run-1"), any(),
-                eq(workspace.toString()), eq(null), eq(null))).thenAnswer(invocation -> {
+        when(registry.execute(eq(agentWorkspace), eq("codex"), eq("project-1"), eq(null),
+                eq("run-1"), any(), eq(null), eq(null))).thenAnswer(invocation -> {
             savedRun.get().setCancelRequested(Boolean.TRUE);
             return CompletableFuture.completedFuture("""
                     {"goal":"g","tasks":[{"taskKey":"BE-1","title":"t","description":"d",
@@ -80,8 +81,8 @@ class PmAgentClientTest {
 
         assertNull(result);
         assertEquals(RunState.CANCELLED, savedRun.get().getState());
-        verify(runner).execute(eq("project-1"), eq(null), eq("run-1"), any(),
-                eq(workspace.toString()), eq(null), eq(null));
+        verify(registry).execute(eq(agentWorkspace), eq("codex"), eq("project-1"),
+                eq(null), eq("run-1"), any(), eq(null), eq(null));
     }
 
     @Test

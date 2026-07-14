@@ -1,8 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Date;
@@ -39,7 +38,7 @@ import java.util.regex.Pattern;
 /**
  * Requirement PRD 代理服务。
  *
- * <p>优先通过 {@link CliRunner} 调用真实 prd-agent；当 CLI 不可用或 agent 未配置时回退到
+ * <p>优先通过工作区绑定 runner 调用真实 prd-agent；当 CLI 不可用或 agent 未配置时回退到
  * 确定性本地 fallback（backend 规则 #11）。真实 LLM 集成在 {@code ANTHROPIC_API_KEY} 等密钥配置后
  * 由 CLI runner 自动启用。{</p>
  *
@@ -119,7 +118,8 @@ public class RequirementAgentService {
         Project project = projectService.findOne(requirement.getProjectId());
         RequirementDesignContext context = requirementDesignContextService.prepare(requirementId);
         String fullPrompt = buildPrdPrompt(project, requirement, prompt, context);
-        Path workdir = materializeSkills(agent);
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(requirement.getProjectId());
+        Path workdir = materializeSkills(agent, workspace.path());
 
         if (agent != null) {
             AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
@@ -129,9 +129,8 @@ public class RequirementAgentService {
                     LOGGER);
         }
 
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
-        CompletableFuture<String> future = runner.execute(
-                requirementId, fullPrompt, workdir.toString(),
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(), requirementId, fullPrompt,
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
@@ -185,11 +184,12 @@ public class RequirementAgentService {
         }
 
         Agent agent = agentService.findByName(MEMORY_REVIEW_AGENT_NAME);
-        Path workdir = materializeSkills(agent);
-        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
-        CompletableFuture<String> future = runner.execute(
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(requirement.getProjectId());
+        materializeSkills(agent, workspace.path());
+        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
+                agent == null ? null : agent.getCliTool(),
                 requirementId + "-memory-review-" + UUID.randomUUID(),
-                buildMemoryReviewPrompt(content, context), workdir.toString(),
+                buildMemoryReviewPrompt(content, context),
                 agent == null ? null : agent.getModel(),
                 agent == null ? null : agent.getMcpConfig());
 
@@ -351,9 +351,8 @@ public class RequirementAgentService {
         }
     }
 
-    private Path materializeSkills(Agent agent) {
+    private Path materializeSkills(Agent agent, Path workdir) {
         try {
-            Path tmp = Files.createTempDirectory("agent-skills-");
             List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
             if (agent != null && agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
@@ -368,11 +367,10 @@ public class RequirementAgentService {
                     }
                 }
             }
-            skillMaterializer.materialize(tmp.toString(), payloads);
-            return tmp;
+            skillMaterializer.materialize(workdir.toString(), payloads);
+            return workdir;
         } catch (Exception e) {
-            LOGGER.warn("materializeSkills failed, fallback to tmp root", e);
-            return Path.of(System.getProperty("java.io.tmpdir"));
+            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
         }
     }
 
