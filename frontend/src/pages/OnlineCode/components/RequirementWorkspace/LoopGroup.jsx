@@ -79,7 +79,7 @@ const LoopGroup = ({
       {earliest && (
         <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>{earliest}</span>
       )}
-      {planVersion != null && (
+      {planVersion !== undefined && planVersion !== null && (
         <Tag color="geekblue" style={{ marginInline: 0 }}>计划 v{planVersion}</Tag>
       )}
       <Tag color={status.color} style={{ marginInline: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>

@@ -21,7 +21,6 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   FileDoneOutlined,
-  LinkOutlined,
   ProfileOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -140,7 +139,7 @@ const CommentItem = ({
             <Icon style={{ fontSize: 12 }} />
             {meta.label}
           </Tag>
-          {metadata.planVersion != null && (
+          {metadata.planVersion !== undefined && metadata.planVersion !== null && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               计划 v{String(metadata.planVersion)}
             </Text>

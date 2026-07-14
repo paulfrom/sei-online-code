@@ -98,15 +98,17 @@ public class CodingTaskExecutionService {
         this.eventPublisher = eventPublisher;
     }
 
-    /** Requests logical cancellation and best-effort process termination. */
-    public boolean cancelRun(String runId) {
+    /**
+     * Requests logical cancellation and best-effort process termination.
+     */
+    public void cancelRun(String runId) {
         Run run = runDao.findOne(runId);
         if (run == null) {
-            return false;
+            return;
         }
         run.setCancelRequested(Boolean.TRUE);
         runDao.save(run);
-        return cliRunnerRegistry.cancel(runId);
+        cliRunnerRegistry.cancel(runId);
     }
 
     /**
@@ -129,6 +131,8 @@ public class CodingTaskExecutionService {
         task.setStatus(CodingTaskStatus.RUNNING);
         codingTaskDao.save(task);
 
+        // 先解析工作区与基准 commit 再一次性 insert，避免二次 save 触发 preSave 的 existsById 校验失败。
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
         Run run = new Run();
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
@@ -137,9 +141,6 @@ public class CodingTaskExecutionService {
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
-        runDao.save(run);
-
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
         runDao.save(run);
@@ -232,12 +233,12 @@ public class CodingTaskExecutionService {
             run.setMemoryContextId(executionPlan.getMemoryContextId());
             run.setWorkspaceMemoryId(executionPlan.getWorkspaceMemoryId());
         }
+        // 先解析工作区与基准 commit 再一次性 insert，避免 insert 后立即二次 save 触发
+        // sei-core preSave 的 existsById 校验（同事务内 persist 尚未 flush，DB 查不到 id）。
+        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
-        runDao.save(run);
-
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
         runDao.save(run);

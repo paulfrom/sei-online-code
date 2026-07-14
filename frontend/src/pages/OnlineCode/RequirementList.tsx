@@ -6,16 +6,15 @@
 import React, { useRef, useState, useMemo, useCallback } from 'react';
 import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { useUserContext } from '@ead/suid-utils-react';
 import {
-  PlusOutlined, ExportOutlined, ReloadOutlined
-} from '@ead/suid-icons';
+  Button, ExtModal, ExtTable, Form, Input, message, Space
+} from '@ead/suid';
+import { PlusOutlined, ReloadOutlined } from '@ead/suid-icons';
 // @ts-ignore JS service module has no declaration file
 import { saveRequirement, REQUIREMENT_FIND_BY_PAGE_URL } from '@/services/requirement';
 import type { RequirementDto } from '@/services/onlineCodeTypes';
 import type { ResultData } from '@/services/onlineCode';
 import { PageContainer, PageHeader, PageState } from './components/PageLayout';
-import { Button, ExtModal, ExtTable, Form, Input, message, Space } from '@ead/suid';
 
 
 const useStyles = createStyles(() => ({
@@ -29,7 +28,6 @@ const useStyles = createStyles(() => ({
 const RequirementList = ({ projectId }) => {
   const tableRef = useRef<any>(null);
   const [form] = Form.useForm();
-  const { currentUser } = useUserContext();
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { styles } = useStyles();
@@ -66,15 +64,8 @@ const RequirementList = ({ projectId }) => {
         value: projectId,
       });
     }
-    // if (currentUser?.account) {
-    //   filters.push({
-    //     fieldName: 'creatorAccount',
-    //     operator: 'EQ',
-    //     value: currentUser.account,
-    //   });
-    // }
     return { filters };
-  }, [projectId, currentUser?.account]);
+  }, [projectId]);
 
 
   const formatDate = (value?: string | null) =>

@@ -65,7 +65,7 @@ const ProjectList: React.FC = () => {
       loadSeedTemplates();
       form.resetFields();
     }
-  }, [modalOpen]);
+  }, [modalOpen, form]);
 
   const goProjectDetail = (record: ProjectDto) => {
     history.push(`/online-code/project?projectId=${record.id}`);

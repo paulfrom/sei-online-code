@@ -42,5 +42,5 @@
 - `eadp-backend` skill 中描述的 `ITenant` / `tenantCode` 仅为 sei-core 框架能力说明，本项目不采用
 
 ## rules
-- 如果任务超过3个文件的修改，使用superpowers进行任务拆解和执行
+- 如果任务超过3个文件的修改(不包括测试文件)，使用superpowers进行任务拆解和执行
 - 项目内同级目录下的CLAUDE.md和AGENT.md都是相同内容，你只用了解其中一个

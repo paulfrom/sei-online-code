@@ -5,29 +5,29 @@
  *   ┌──────────────────────────────────────┬──────────────────────┐
  *   │  LeftColumn 75%                       │  RightColumn 25%     │
  *   │  ┌──────────────────────────────────┐ │  ┌─────────────────┐ │
- *   │  │ PrdSection                       │ │  │ AutomationStatus│ │
- *   │  ├──────────────────────────────────┤ │  ├─────────────────┤ │
- *   │  │ CommentStream                    │ │  │ RightTabs       │ │
- *   │  │   (LoopGroup + CommentComposer)  │ │  │  plan/task/run/ │ │
- *   │  └──────────────────────────────────┘ │  │  delivery       │ │
+ *   │  │ PrdSection                       │ │  │ OverviewPanel    │ │
+ *   │  ├──────────────────────────────────┤ │  │ (status + stat  │ │
+ *   │  │ CommentStream                    │ │  │  cards; click →  │ │
+ *   │  │   (LoopGroup + CommentComposer)  │ │  │  detail drawer) │ │
+ *   │  └──────────────────────────────────┘ │  └─────────────────┘ │
  *   └──────────────────────────────────────┴──────────────────────┘
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { history } from 'umi';
 import { createStyles } from '@ead/antd-style';
-import { Button, Drawer, message } from '@ead/suid';
-import { ArrowLeftOutlined, MenuOutlined } from '@ead/suid-icons';
+import { Button } from '@ead/suid';
+import { ArrowLeftOutlined } from '@ead/suid-icons';
+import { PageContainer, PageHeader, PageState } from '../PageLayout';
 // @ts-ignore JS module has no declaration file
 import { useRequirementWorkspace } from './useRequirementWorkspace';
-import { PageContainer, PageHeader, PageState } from '../PageLayout';
 // @ts-ignore JS module has no declaration file
 import PrdSection from './PrdSection';
 // @ts-ignore JS module has no declaration file
 import CommentStream from './CommentStream';
 // @ts-ignore JS module has no declaration file
-import AutomationStatusBar from './AutomationStatusBar';
+import OverviewPanel from './OverviewPanel';
 // @ts-ignore JS module has no declaration file
-import RightTabs from './RightTabs';
+import OverviewDrawer from './OverviewDrawer';
 // @ts-ignore JS module has no declaration file
 import RunLogDrawer from './RunLogDrawer';
 import type { RunDto } from './types';
@@ -57,24 +57,17 @@ const useStyles = createStyles(({ token, css }) => ({
     gap: ${token.marginMD}px;
     overflow: hidden;
   `,
-  prdSectionWrap: css`
-    flex-shrink: 0;
-  `,
   commentStreamWrap: css`
-    flex: 1;
-    min-height: 300px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
+    padding: ${token.paddingMD}px;
     background: ${token.colorBgContainer};
     border: 1px solid ${token.colorBorderSecondary};
     border-radius: ${token.borderRadius}px;
-    overflow: auto;
   `,
-  drawerBtn: css`
-    position: fixed;
-    right: ${token.marginMD}px;
-    bottom: ${token.marginMD}px;
-    z-index: 1000;
+  prdSectionWrap: css`
+    flex-shrink: 0;
   `,
 }));
 
@@ -101,23 +94,10 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
 
   const [drawerRun, setDrawerRun] = useState<RunDto | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
-  const [narrow, setNarrow] = useState(false);
+  const [detailPanel, setDetailPanel] = useState<'plan' | 'task' | 'run' | 'delivery' | null>(null);
+  const [taskFilterId, setTaskFilterId] = useState<string | null>(null);
   const [highlightTaskKey, setHighlightTaskKey] = useState<string | null>(null);
-  const rightTabsRef = useRef<any>(null);
-
-  useEffect(() => {
-    const onResize = () => setNarrow(typeof window !== 'undefined' && window.innerWidth < 1280);
-    onResize();
-    if (typeof window !== 'undefined') {
-      window.addEventListener('resize', onResize);
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('resize', onResize);
-      }
-    };
-  }, []);
+  const [stopping, setStopping] = useState(false);
 
   const handleBack = useCallback(() => {
     if (requirement?.projectId) {
@@ -137,18 +117,58 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     setDrawerRun(null);
   }, []);
 
+  // Cross-column navigation from the comment stream: open the drawer and
+  // focus the relevant panel/row instead of switching a tab.
   const handleJumpPlan = useCallback(() => {
-    rightTabsRef.current?.switchTo?.('plan');
+    setDetailPanel('plan');
   }, []);
 
   const handleHighlightTask = useCallback((taskKey: string) => {
     setHighlightTaskKey(taskKey);
-    rightTabsRef.current?.switchTo?.('task', taskKey);
+    setDetailPanel('task');
   }, []);
 
   const handleHighlightTaskConsumed = useCallback(() => {
     setHighlightTaskKey(null);
   }, []);
+
+  const handleOpenPanel = useCallback(
+    (key: 'plan' | 'task' | 'run' | 'delivery') => {
+      setDetailPanel(key);
+      setTaskFilterId(null);
+      setHighlightTaskKey(null);
+    },
+    [],
+  );
+
+  const handleDetailClose = useCallback(() => {
+    setDetailPanel(null);
+    setTaskFilterId(null);
+    setHighlightTaskKey(null);
+  }, []);
+
+  // Inside the run panel, a task row's "查看运行" jumps to the run panel
+  // filtered to that task.
+  const handleViewRunFromTask = useCallback((task: any) => {
+    setTaskFilterId(task && task.id ? task.id : null);
+    setDetailPanel('run');
+  }, []);
+
+  // Inside the plan panel, a task's "查看任务" jumps to the task panel and
+  // highlights that row.
+  const handleJumpTaskFromPlan = useCallback((taskKey: string) => {
+    setHighlightTaskKey(taskKey);
+    setDetailPanel('task');
+  }, []);
+
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    try {
+      await actions.stopAutomation();
+    } finally {
+      setStopping(false);
+    }
+  }, [actions]);
 
   if (loading) {
     return (
@@ -172,28 +192,19 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     .includes(requirement.automationStatus);
 
   const rightColumn = (
-    <>
-      <AutomationStatusBar
-        status={requirement.automationStatus}
-        activeLoopId={activeLoopId}
-        planVersion={planVersion}
-      />
-      <RightTabs
-        ref={rightTabsRef}
-        plan={executionPlan}
-        tasks={codingTasks}
-        runs={runs}
-        delivery={delivery}
-        comments={comments}
-        onRunLog={handleRunLogOpen}
-        onRerun={actions.rerunTask}
-        onStop={actions.stopAutomation}
-        onRetryMr={actions.retryMr}
-        autoStopEnabled={autoStopEnabled}
-        highlightTaskKey={highlightTaskKey}
-        onHighlightTaskConsumed={handleHighlightTaskConsumed}
-      />
-    </>
+    <OverviewPanel
+      requirement={requirement}
+      plan={executionPlan}
+      tasks={codingTasks}
+      runs={runs}
+      delivery={delivery}
+      activeLoopId={activeLoopId}
+      planVersion={planVersion}
+      autoStopEnabled={autoStopEnabled}
+      stopping={stopping}
+      onStop={handleStop}
+      onOpenPanel={handleOpenPanel}
+    />
   );
 
   return (
@@ -230,30 +241,29 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
           </div>
         </div>
 
-        {!narrow && <div className={styles.rightColumn}>{rightColumn}</div>}
-
-        {narrow && (
-          <>
-            <Button
-              className={styles.drawerBtn}
-              icon={<MenuOutlined />}
-              onClick={() => setRightDrawerOpen(true)}
-              type="primary"
-            >
-              执行面板
-            </Button>
-            <Drawer
-              title="执行面板"
-              open={rightDrawerOpen}
-              onClose={() => setRightDrawerOpen(false)}
-              width={360}
-              styles={{ body: { display: 'flex', flexDirection: 'column' } }}
-            >
-              {rightColumn}
-            </Drawer>
-          </>
-        )}
+        <div className={styles.rightColumn}>{rightColumn}</div>
       </div>
+
+      <OverviewDrawer
+        panelKey={detailPanel}
+        onClose={handleDetailClose}
+        plan={executionPlan}
+        tasks={codingTasks}
+        runs={runs}
+        delivery={delivery}
+        comments={comments}
+        taskFilterId={taskFilterId}
+        onClearTaskFilter={() => setTaskFilterId(null)}
+        highlightTaskKey={highlightTaskKey}
+        onHighlightTaskConsumed={handleHighlightTaskConsumed}
+        onRunLog={handleRunLogOpen}
+        onRerun={actions.rerunTask}
+        onStop={actions.stopAutomation}
+        autoStopEnabled={autoStopEnabled}
+        onRetryMr={actions.retryMr}
+        onViewRunFromTask={handleViewRunFromTask}
+        onJumpTaskFromPlan={handleJumpTaskFromPlan}
+      />
 
       <RunLogDrawer
         open={drawerOpen}

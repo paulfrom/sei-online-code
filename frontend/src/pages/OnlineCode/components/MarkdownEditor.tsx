@@ -4,10 +4,10 @@
  * - editable: split view with raw Input.TextArea on the left and ReactMarkdown preview on the right.
  */
 import React, { useEffect, useState } from 'react';
-import { createStyles } from '@ead/antd-style';
-import { Input } from '@ead/suid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { createStyles } from '@ead/antd-style';
+import { Input } from '@ead/suid';
 
 const useStyles = createStyles(({ token, css }) => ({
   container: css`
@@ -137,9 +137,6 @@ const useStyles = createStyles(({ token, css }) => ({
   `,
   previewOnly: css`
     padding: ${token.paddingMD}px;
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
   `,
   empty: css`
     color: ${token.colorTextDisabled};
@@ -150,6 +147,8 @@ export interface MarkdownEditorProps {
   value?: string;
   onChange?: (value: string) => void;
   readOnly?: boolean;
+  /** When false (editable mode only), render the textarea alone without the preview pane. */
+  split?: boolean;
   height?: number | string;
   placeholder?: string;
 }
@@ -158,6 +157,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   value,
   onChange,
   readOnly = false,
+  split = true,
   height = 320,
   placeholder,
 }) => {
@@ -195,16 +195,34 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     );
   };
 
+  const containerStyle =
+    height === 'auto' ? undefined : { height: containerHeight };
+
   if (readOnly) {
     return (
-      <div className={styles.container} style={{ height: containerHeight }}>
+      <div className={styles.container} style={containerStyle}>
         <div className={styles.previewOnly}>{renderPreview()}</div>
       </div>
     );
   }
 
+  // Editable mode without split: a single textarea, no header / preview pane.
+  if (!split) {
+    return (
+      <div className={styles.container} style={containerStyle}>
+        <Input.TextArea
+          value={displayValue}
+          onChange={handleChange}
+          placeholder={placeholder}
+          className={styles.textarea}
+          autoSize={{ minRows: 6 }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className={styles.container} style={{ height: containerHeight }}>
+    <div className={styles.container} style={containerStyle}>
       <div className={styles.header}>
         <span className={styles.headerLabel}>编辑</span>
         <span className={styles.headerLabel}>预览</span>

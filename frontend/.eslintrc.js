@@ -6,6 +6,17 @@ module.exports = {
     page: true,
   },
   plugins: ['import', 'unused-imports', 'react-hooks'],
+  overrides: [
+    {
+      // `extends: umi/eslint` 启用了 base `no-unused-vars`，在 TS 文件上会对
+      // interface 回调签名中的形参产生误报。TS 文件由
+      // `@typescript-eslint/no-unused-vars` 接管，关闭 base 规则以消除误报。
+      files: ['**/*.{ts,tsx}'],
+      rules: {
+        'no-unused-vars': 'off',
+      },
+    },
+  ],
   rules: {
     'global-require': 0,
     'no-underscore-dangle': 0,

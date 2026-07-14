@@ -1,7 +1,7 @@
 /**
  * Project memory tab: shows current WorkspaceMemory state, a short summary, and MemoryJob list.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Card, List, Tag, message } from '@ead/suid';
 import * as memoryWorkspace from '@/services/memoryWorkspace';
@@ -58,7 +58,7 @@ const ProjectMemoryTab = ({ projectId }) => {
 
   const isMock = process.env.MOCK === 'yes';
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (isMock) {
       return;
     }
@@ -79,11 +79,11 @@ const ProjectMemoryTab = ({ projectId }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId, isMock]);
 
   useEffect(() => {
     load();
-  }, [projectId]);
+  }, [load]);
 
   const handleInitialize = async () => {
     setActionLoading(true);

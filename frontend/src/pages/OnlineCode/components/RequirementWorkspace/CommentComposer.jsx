@@ -122,7 +122,8 @@ const CommentComposer = ({
         value={content}
         onChange={setContent}
         placeholder="输入评论（支持 Markdown）…"
-        height={180}
+        split={false}
+        height="auto"
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button

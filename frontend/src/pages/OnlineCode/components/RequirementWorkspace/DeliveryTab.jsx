@@ -5,8 +5,6 @@ import React, { useMemo } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Card, Collapse, Descriptions, Space, Tag, message } from '@ead/suid';
 import { RedoOutlined } from '@ead/suid-icons';
-// @ts-ignore JS service module has no declaration file
-import { retryMr } from '@/services/requirement';
 
 const useStyles = createStyles(({ token, css }) => ({
   mrUrl: css`

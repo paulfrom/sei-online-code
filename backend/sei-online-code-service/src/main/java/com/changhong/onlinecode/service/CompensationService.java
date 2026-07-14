@@ -98,6 +98,7 @@ public class CompensationService {
     }
 
     /** Runs one ordered recovery pass: close timed-out work, then repair upstream to downstream. */
+    @Transactional
     public void runCycle() {
         Date now = new Date();
         runPhase("timeout-runs", () -> timeoutRuns(now));

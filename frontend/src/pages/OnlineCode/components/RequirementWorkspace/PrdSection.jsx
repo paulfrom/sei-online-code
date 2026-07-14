@@ -148,7 +148,7 @@ const PrdSection = ({
         value={draft}
         onChange={setDraft}
         readOnly={!editing}
-        height={480}
+        height={editing ? 480 : 'auto'}
         placeholder="暂无 PRD 内容"
       />
     </div>

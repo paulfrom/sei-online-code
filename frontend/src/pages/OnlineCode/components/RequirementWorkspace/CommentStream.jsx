@@ -101,28 +101,26 @@ const CommentStream = ({
   // TODO: virtualize when >100 comments — until then React.memo on the group
   // (see LoopGroup default export) keeps re-renders bounded.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {groups.map((g) => (
-          <LoopGroup
-            key={g.loopId}
-            loopId={g.loopId}
-            comments={g.comments}
-            active={g.active}
-            planVersion={(() => {
-              for (const c of g.comments) {
-                const v = planVersionOf(c);
-                if (v != null) return v;
-              }
-              return null;
-            })()}
-            onJumpPlan={onJumpPlan}
-            onHighlightTask={onHighlightTask}
-          />
-        ))}
-        <div ref={bottomRef} />
-      </div>
-      <div style={{ flexShrink: 0, borderTop: '1px solid rgba(0,0,0,0.06)', paddingTop: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {groups.map((g) => (
+        <LoopGroup
+          key={g.loopId}
+          loopId={g.loopId}
+          comments={g.comments}
+          active={g.active}
+          planVersion={(() => {
+            for (const c of g.comments) {
+              const v = planVersionOf(c);
+              if (v !== null) return v;
+            }
+            return null;
+          })()}
+          onJumpPlan={onJumpPlan}
+          onHighlightTask={onHighlightTask}
+        />
+      ))}
+      <div ref={bottomRef} />
+      <div style={{ flexShrink: 0, borderTop: '1px solid rgba(0,0,0,0.06)', paddingTop: 8, marginTop: 8 }}>
         <CommentComposer
           requirement={requirement}
           onSend={onSend}

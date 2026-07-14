@@ -42,7 +42,8 @@ const TASK_STATUS_META = {
  */
 const ExecutionPlanTab = ({ plan, tasks, comments = [], onJumpTask }) => {
   const { styles } = useStyles();
-  const parsed = useMemo(() => parsePlanJson(plan && plan.planJson), [plan && plan.planJson]);
+  const planJson = plan && plan.planJson;
+  const parsed = useMemo(() => parsePlanJson(planJson), [planJson]);
   const planValidationReport = useMemo(() => {
     const candidates = comments.filter((comment) => {
       if (comment.commentType !== 'VALIDATION_RESULT') return false;

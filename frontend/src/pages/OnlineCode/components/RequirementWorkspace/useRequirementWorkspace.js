@@ -218,6 +218,7 @@ export function useRequirementWorkspace(requirementId) {
         document.removeEventListener('visibilitychange', onVisibility);
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirement?.automationStatus, refresh]);
 
   const activeLoopId = useMemo(
@@ -303,7 +304,7 @@ export function useRequirementWorkspace(requirementId) {
       },
       refresh,
     }),
-    [requirementId, codingTasks, refresh, safeSet],
+    [requirementId, refresh, safeSet],
   );
 
   return {
