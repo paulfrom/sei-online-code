@@ -85,6 +85,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
                 requirementDesignContextService.invalidate(entity.getId());
             }
         }
+        if (Objects.isNull(entity.getAutomationStatus())) {
+            entity.setAutomationStatus(RequirementAutomationStatus.IDLE);
+        }
+
         OperateResultWithData<Requirement> result = super.save(entity);
         Requirement saved = result.getData();
         if (result.successful() && isNew && saved != null) {
