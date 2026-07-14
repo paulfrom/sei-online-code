@@ -59,6 +59,7 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         AgentService agentService = mock(AgentService.class);
         TaskService taskService = mock(TaskService.class);
         RunService runService = mock(RunService.class);
+        RunNumberService runNumberService = mock(RunNumberService.class);
         CliRunnerRegistry cliRunnerRegistry = mock(CliRunnerRegistry.class);
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         FailureInfoSupport failureInfoSupport = mock(FailureInfoSupport.class);
@@ -67,10 +68,12 @@ class FeatureDesignBuildServiceTaskGenerationTest {
                 agentService,
                 taskService,
                 runService,
+                runNumberService,
                 cliRunnerRegistry,
                 workspaceManager,
                 failureInfoSupport
         );
+        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         FeatureDesignContent content = new FeatureDesignContent();
         content.setFeatureId("inventory-list");

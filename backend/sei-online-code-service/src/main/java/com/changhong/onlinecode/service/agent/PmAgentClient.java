@@ -20,6 +20,7 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementAutomationService;
+import com.changhong.onlinecode.service.RunNumberService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,17 +59,20 @@ public class PmAgentClient {
     private final CliRunnerRegistry cliRunnerRegistry;
     private final WorkspaceManager workspaceManager;
     private final RunDao runDao;
+    private final RunNumberService runNumberService;
     private final ObjectMapper objectMapper;
 
     public PmAgentClient(AgentService agentService,
                          CliRunnerRegistry cliRunnerRegistry,
                          WorkspaceManager workspaceManager,
                          RunDao runDao,
+                         RunNumberService runNumberService,
                          ObjectMapper objectMapper) {
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.workspaceManager = workspaceManager;
         this.runDao = runDao;
+        this.runNumberService = runNumberService;
         this.objectMapper = objectMapper;
     }
 
@@ -187,6 +191,7 @@ public class PmAgentClient {
         run.setMemoryContextId(memoryContextId);
         run.setWorkspaceMemoryId(workspaceMemoryId);
         run.setStartedDate(new Date());
+        runNumberService.assign(run);
         return runDao.save(run);
     }
 
@@ -286,10 +291,8 @@ public class PmAgentClient {
         sb.append("  ],\n");
         sb.append("  \"risks\": [\"string\"],\n");
         sb.append("  \"validation\": {\n");
-        sb.append("    \"commands\": [\n");
-        sb.append("      {\"area\": \"frontend\", \"command\": \"pnpm -C frontend build\"},\n");
-        sb.append("      {\"area\": \"backend\", \"command\": \"./gradlew :sei-online-code-service:compileJava\"}\n");
-        sb.append("    ]\n");
+        sb.append("    \"mode\": \"test-agent\",\n");
+        sb.append("    \"guidance\": \"test-agent must inspect the workspace and choose the correct test/build/package validation\"\n");
         sb.append("  }\n");
         sb.append("}\n");
         return sb.toString();

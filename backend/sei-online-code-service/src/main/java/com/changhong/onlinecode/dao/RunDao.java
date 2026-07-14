@@ -25,6 +25,8 @@ public interface RunDao extends BaseEntityDao<Run> {
      */
     List<Run> findByIterationId(String iterationId);
 
+    List<Run> findByTaskId(String taskId);
+
     /**
      * 按编码任务 ID 查询运行记录。
      *

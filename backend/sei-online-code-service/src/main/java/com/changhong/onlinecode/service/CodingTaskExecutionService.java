@@ -52,6 +52,7 @@ public class CodingTaskExecutionService {
     private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskExecutionService.class);
     private final CodingTaskDao codingTaskDao;
     private final RunDao runDao;
+    private final RunNumberService runNumberService;
     private final RequirementService requirementService;
     private final ExecutionPlanDao executionPlanDao;
     private final RequirementCommentService requirementCommentService;
@@ -68,6 +69,7 @@ public class CodingTaskExecutionService {
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
+                                      RunNumberService runNumberService,
                                       RequirementService requirementService,
                                       ExecutionPlanDao executionPlanDao,
                                       RequirementCommentService requirementCommentService,
@@ -83,6 +85,7 @@ public class CodingTaskExecutionService {
                                       ApplicationEventPublisher eventPublisher) {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
+        this.runNumberService = runNumberService;
         this.requirementService = requirementService;
         this.executionPlanDao = executionPlanDao;
         this.requirementCommentService = requirementCommentService;
@@ -136,13 +139,13 @@ public class CodingTaskExecutionService {
         Run run = new Run();
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
-        run.setRunNo(nextRunNo(id));
         run.setTriggerSource(prompt == null ? TriggerSource.AUTO : TriggerSource.USER_ACTION);
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
+        runNumberService.assign(run);
         runDao.save(run);
 
         Agent agent = agentService.findByName(task.getAssignedAgent());
@@ -223,7 +226,6 @@ public class CodingTaskExecutionService {
         Run run = new Run();
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
-        run.setRunNo(nextRunNo(codingTaskId));
         run.setRunType(RunType.DEVELOPMENT);
         run.setLoopId(task.getLoopId());
         run.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
@@ -241,6 +243,7 @@ public class CodingTaskExecutionService {
         run.setStartedDate(new Date());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
+        runNumberService.assign(run);
         runDao.save(run);
 
         AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(),
@@ -427,18 +430,14 @@ public class CodingTaskExecutionService {
         List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
         return runs.stream()
                 .filter(r -> r.getState() == RunState.FAILED)
-                .reduce((a, b) -> a.getRunNo() > b.getRunNo() ? a : b)
+                .reduce((a, b) -> Objects.requireNonNullElse(a.getRunNo(), 0)
+                        > Objects.requireNonNullElse(b.getRunNo(), 0) ? a : b)
                 .orElse(null);
     }
 
     private boolean hasActiveRun(String codingTaskId) {
         List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
         return runs.stream().anyMatch(r -> r.getState() == RunState.RUNNING);
-    }
-
-    private Integer nextRunNo(String codingTaskId) {
-        List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
-        return runs.stream().mapToInt(r -> Objects.requireNonNullElse(r.getRunNo(), 0)).max().orElse(0) + 1;
     }
 
     private static String rootMessage(Throwable throwable) {

@@ -41,6 +41,7 @@ public class FeatureDesignBuildService {
     private final AgentService agentService;
     private final TaskService taskService;
     private final RunService runService;
+    private final RunNumberService runNumberService;
     private final CliRunnerRegistry cliRunnerRegistry;
     private final WorkspaceManager workspaceManager;
     private final FailureInfoSupport failureInfoSupport;
@@ -50,6 +51,7 @@ public class FeatureDesignBuildService {
             AgentService agentService,
             TaskService taskService,
             RunService runService,
+            RunNumberService runNumberService,
             CliRunnerRegistry cliRunnerRegistry,
             WorkspaceManager workspaceManager,
             FailureInfoSupport failureInfoSupport
@@ -58,6 +60,7 @@ public class FeatureDesignBuildService {
         this.agentService = agentService;
         this.taskService = taskService;
         this.runService = runService;
+        this.runNumberService = runNumberService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.workspaceManager = workspaceManager;
         this.failureInfoSupport = failureInfoSupport;
@@ -137,6 +140,7 @@ public class FeatureDesignBuildService {
         run.setIterationId(savedTask.getIterationId());
         run.setState(RunState.RUNNING);
         run.setWorktreePath(workspace.pathString());
+        runNumberService.assign(run);
         OperateResultWithData<Run> runResult = runService.save(run);
         if (!runResult.successful()) {
             // 回退构建状态

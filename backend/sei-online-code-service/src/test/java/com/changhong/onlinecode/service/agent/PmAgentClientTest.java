@@ -12,6 +12,7 @@ import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
+import com.changhong.onlinecode.service.RunNumberService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,6 +43,7 @@ class PmAgentClientTest {
         CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         RunDao runDao = mock(RunDao.class);
+        RunNumberService runNumberService = mock(RunNumberService.class);
         com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
                 mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
         when(agentWorkspace.path()).thenReturn(workspace);
@@ -53,6 +55,7 @@ class PmAgentClientTest {
         agent.setCliTool("codex");
         when(agentService.findByName("pm-agent")).thenReturn(agent);
         when(registry.workspace("project-1")).thenReturn(agentWorkspace);
+        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
             if (run.getId() == null) run.setId("run-1");
@@ -71,6 +74,7 @@ class PmAgentClientTest {
         });
 
         PmAgentClient client = new PmAgentClient(agentService, registry, workspaceManager, runDao,
+                runNumberService,
                 new ObjectMapper());
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
@@ -88,7 +92,7 @@ class PmAgentClientTest {
     @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(WorkspaceManager.class), mock(RunDao.class), new ObjectMapper());
+                mock(WorkspaceManager.class), mock(RunDao.class), mock(RunNumberService.class), new ObjectMapper());
 
         assertNull(parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"T1","title":"t","agent":"frontend-dev-agent",
@@ -113,7 +117,7 @@ class PmAgentClientTest {
     @Test
     void parsePlan_preservesAcceptanceCriteriaForValidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(WorkspaceManager.class), mock(RunDao.class), new ObjectMapper());
+                mock(WorkspaceManager.class), mock(RunDao.class), mock(RunNumberService.class), new ObjectMapper());
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
                 "area":"backend","dependsOn":[],"fileScope":["backend/"],

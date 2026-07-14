@@ -1,10 +1,8 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
@@ -13,7 +11,6 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
-import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +20,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.EnumSet;
@@ -60,8 +56,6 @@ public class CodingTaskScheduler {
     private final CodingTaskDao codingTaskDao;
     private final RequirementDao requirementDao;
     private final CodingTaskExecutionService executionService;
-    private final ValidationCommandExecutor validationCommandExecutor;
-    private final WorkspaceManager workspaceManager;
     private final RunDao runDao;
     private final CodingTaskChangeCollector changeCollector;
     private final ApplicationEventPublisher eventPublisher;
@@ -73,16 +67,12 @@ public class CodingTaskScheduler {
     public CodingTaskScheduler(CodingTaskDao codingTaskDao,
                                RequirementDao requirementDao,
                                CodingTaskExecutionService executionService,
-                               ValidationCommandExecutor validationCommandExecutor,
-                               WorkspaceManager workspaceManager,
                                RunDao runDao,
                                CodingTaskChangeCollector changeCollector,
                                ApplicationEventPublisher eventPublisher) {
         this.codingTaskDao = codingTaskDao;
         this.requirementDao = requirementDao;
         this.executionService = executionService;
-        this.validationCommandExecutor = validationCommandExecutor;
-        this.workspaceManager = workspaceManager;
         this.runDao = runDao;
         this.changeCollector = changeCollector;
         this.eventPublisher = eventPublisher;
@@ -284,27 +274,11 @@ public class CodingTaskScheduler {
             return;
         }
 
-        String command = resolveValidationCommand(task);
-        Path workspace = resolveWorkspace(task.getProjectId());
-        ValidationCommandExecutor.ValidationResult result = validationCommandExecutor.execute(workspace, command);
-        if (!isCurrentLoop(task)) {
-            task.setStatus(CodingTaskStatus.STALE);
-            codingTaskDao.save(task);
-            schedule(task.getRequirementId());
-            return;
-        }
-        if (result.isSuccess()) {
-            task.setStatus(CodingTaskStatus.SUCCEEDED);
-            task.setFailureSummary(null);
-            task.setFailureDetail(null);
-            appendValidationResult(task, result, true);
-        } else {
-            task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
-            task.setFailureSummary("任务级验证失败");
-            task.setFailureDetail("exitCode=" + result.getExitCode() + "\n" + result.getStdout() + "\n" + result.getStderr());
-            task.setLastFailedAt(new Date());
-            appendValidationResult(task, result, false);
-        }
+        task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
+        task.setFailureSummary("任务级验证失败");
+        task.setFailureDetail("ValidationLoopService 未注入，无法通过 test-agent 执行验证");
+        task.setLastFailedAt(new Date());
+        appendValidationUnavailable(task);
         codingTaskDao.save(task);
         schedule(task.getRequirementId());
     }
@@ -342,9 +316,7 @@ public class CodingTaskScheduler {
                 toJson(metadata));
     }
 
-    private void appendValidationResult(CodingTask task,
-                                        ValidationCommandExecutor.ValidationResult result,
-                                        boolean success) {
+    private void appendValidationUnavailable(CodingTask task) {
         if (requirementCommentService == null) {
             return;
         }
@@ -353,12 +325,11 @@ public class CodingTaskScheduler {
         metadata.put("taskId", task.getId());
         metadata.put("taskKey", task.getPlanTaskKey());
         metadata.put("area", task.getArea());
-        metadata.put("passed", success);
-        metadata.put("exitCode", result.getExitCode());
-        metadata.put("durationMs", result.getDuration().toMillis());
+        metadata.put("passed", false);
+        metadata.put("reason", "ValidationLoopService missing");
         requirementCommentService.append(task.getRequirementId(), task.getLoopId(),
                 RequirementCommentAuthorType.TEST_AGENT, "test-agent", RequirementCommentType.VALIDATION_RESULT,
-                (success ? "任务级验证通过：" : "任务级验证失败：") + task.getPlanTaskKey(),
+                "任务级验证失败：test-agent 验证服务不可用",
                 toJson(metadata));
     }
 
@@ -381,19 +352,6 @@ public class CodingTaskScheduler {
         }
         sb.append("请在已解析的工作区中按上述描述执行编码，只修改任务范围内的文件。");
         return sb.toString();
-    }
-
-    private String resolveValidationCommand(CodingTask task) {
-        return switch (task.getArea()) {
-            case "frontend" -> "pnpm -C frontend build";
-            case "backend" -> "./gradlew :sei-online-code-service:compileJava";
-            default -> "";
-        };
-    }
-
-    private Path resolveWorkspace(String projectId) {
-        WorkspaceResolveResult result = workspaceManager.resolve(projectId);
-        return result == null || result.getPath() == null ? Path.of(".") : Path.of(result.getPath());
     }
 
     private boolean isCurrentLoop(CodingTask task) {

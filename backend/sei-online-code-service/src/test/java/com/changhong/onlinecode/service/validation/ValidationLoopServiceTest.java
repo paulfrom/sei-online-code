@@ -1,23 +1,21 @@
 package com.changhong.onlinecode.service.validation;
 
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
-import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.RunType;
-import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
-import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.time.Duration;
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,37 +28,46 @@ import static org.mockito.Mockito.when;
 
 class ValidationLoopServiceTest {
 
+    @TempDir
+    Path workspace;
+
     @Test
-    void taskValidation_prefersExecutionPlanCommandAndRecordsValidationRun() {
-        ValidationCommandExecutor executor = mock(ValidationCommandExecutor.class);
+    void taskValidation_runsTestAgentInProjectWorkspaceAndRecordsReviewRun() {
         RunDao runDao = mock(RunDao.class);
         ExecutionPlanDao planDao = mock(ExecutionPlanDao.class);
-        ProjectDao projectDao = mock(ProjectDao.class);
-        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         RequirementCommentService comments = mock(RequirementCommentService.class);
         AgentService agents = mock(AgentService.class);
         CliRunnerRegistry runners = mock(CliRunnerRegistry.class);
+        com.changhong.onlinecode.service.RunNumberService runNumberService =
+                mock(com.changhong.onlinecode.service.RunNumberService.class);
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
         AtomicInteger ids = new AtomicInteger();
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
             if (run.getId() == null) run.setId("run-" + ids.incrementAndGet());
             return run;
         });
-        when(workspaceManager.resolve("project-1"))
-                .thenReturn(new WorkspaceResolveResult(".", true, WorkspaceSource.SCAFFOLD));
+        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(agentWorkspace.path()).thenReturn(workspace);
+        when(agentWorkspace.pathString()).thenReturn(workspace.toString());
+        when(runners.workspace("project-1")).thenReturn(agentWorkspace);
+        when(runners.execute(eq(agentWorkspace), eq("codex"), eq("requirement-1"), eq("task-1"),
+                eq("run-1"), any(), eq(null), eq(null)))
+                .thenReturn(CompletableFuture.completedFuture("""
+                        {"passed":true,"summary":"ok","commands":[{"command":"workspace-selected validation","exitCode":0,"result":"ok"}],"findings":[]}
+                        """));
         ExecutionPlan plan = new ExecutionPlan();
         plan.setId("plan-1");
-        plan.setPlanJson("{\"validation\":{\"commands\":[{\"area\":\"backend\",\"command\":\"gradle check\"}]}}");
+        plan.setPlanJson("{\"validation\":{\"mode\":\"test-agent\"}}");
         when(planDao.findOne("plan-1")).thenReturn(plan);
-        Project project = new Project();
-        project.setId("project-1");
-        project.setValidationConfig("{\"commands\":[\"fallback\"]}");
-        when(projectDao.findOne("project-1")).thenReturn(project);
-        when(executor.execute(any(), eq("gradle check")))
-                .thenReturn(new ValidationCommandExecutor.ValidationResult(0, "ok", "", Duration.ofMillis(10)));
+        Agent agent = new Agent();
+        agent.setName("test-agent");
+        agent.setCliTool("codex");
+        when(agents.findByName("test-agent")).thenReturn(agent);
 
-        ValidationLoopService service = new ValidationLoopService(executor, runDao, planDao, projectDao,
-                workspaceManager, comments, agents, runners, new ObjectMapper());
+        ValidationLoopService service = new ValidationLoopService(runDao, planDao, comments, agents, runners,
+                runNumberService, new ObjectMapper());
         CodingTask task = new CodingTask();
         task.setId("task-1");
         task.setRequirementId("requirement-1");
@@ -72,9 +79,10 @@ class ValidationLoopServiceTest {
         ValidationLoopService.ValidationOutcome outcome = service.validateTask(task);
 
         assertTrue(outcome.passed());
-        verify(executor).execute(any(), eq("gradle check"));
+        verify(runners).execute(eq(agentWorkspace), eq("codex"), eq("requirement-1"), eq("task-1"),
+                eq("run-1"), any(), eq(null), eq(null));
         verify(runDao, atLeastOnce()).save(org.mockito.ArgumentMatchers.<Run>argThat(
-                run -> run.getRunType() == RunType.VALIDATION_COMMAND));
+                run -> run.getRunType() == RunType.TEST_REVIEW));
         verify(comments).append(eq("requirement-1"), eq("loop-1"), any(), eq("test-agent"), any(), any(), any());
     }
 }

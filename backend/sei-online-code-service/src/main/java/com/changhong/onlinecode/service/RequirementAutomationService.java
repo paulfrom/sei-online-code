@@ -652,10 +652,9 @@ public class RequirementAutomationService {
                 return item;
             }).toList());
             root.put("risks", planResult.risks().isEmpty() ? List.of() : planResult.risks());
-            List<Map<String, String>> commands = planResult.validationCommands().stream()
-                    .map(cmd -> Map.of("area", cmd.area(), "command", cmd.command()))
-                    .toList();
-            root.put("validation", Map.of("commands", commands));
+            root.put("validation", Map.of(
+                    "mode", "test-agent",
+                    "guidance", "test-agent inspects the workspace and chooses the correct test/build/package validation"));
             return objectMapper.writeValueAsString(root);
         } catch (Exception e) {
             LOGGER.warn("planJson serialize failed", e);

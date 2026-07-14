@@ -19,3 +19,10 @@
 3. 增加错误路径拒绝、配置漂移拒绝和正确 cwd 传递测试。
 4. 运行 service 相关单测、`compileJava` 与 `git diff --check`。
 
+## 验证执行模型修正
+
+- 测试、验证、打包不再由服务端固定命令执行。
+- `ValidationLoopService` 只负责创建 `test-agent` Run，并通过 `CliRunnerRegistry.workspace(projectId)` 绑定项目工作区后启动 Agent。
+- `test-agent` 必须在绑定工作区内读取工作区说明、构建文件、脚本和验收条件，自行选择测试 / build / package 命令。
+- 服务端只解析 `test-agent` 返回的 `passed` 结果并记录 `VALIDATION_RESULT`，解析不到通过结论时按失败处理。
+- 原 `ValidationCommandExecutor` / `ProcessValidationCommandExecutor` / 固定 Gradle 命令兼容逻辑已移除，避免重新形成服务端直跑验证命令的路径。

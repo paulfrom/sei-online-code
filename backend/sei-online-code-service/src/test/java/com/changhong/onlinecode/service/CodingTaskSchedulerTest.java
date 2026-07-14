@@ -1,15 +1,11 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
-import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
-import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,8 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
-import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,8 +36,6 @@ class CodingTaskSchedulerTest {
     private CodingTaskDao codingTaskDao;
     private RequirementDao requirementDao;
     private CodingTaskExecutionService executionService;
-    private ValidationCommandExecutor validationCommandExecutor;
-    private WorkspaceManager workspaceManager;
     private RunDao runDao;
     private ApplicationEventPublisher eventPublisher;
     private CodingTaskScheduler scheduler;
@@ -55,12 +47,10 @@ class CodingTaskSchedulerTest {
         codingTaskDao = mock(CodingTaskDao.class);
         requirementDao = mock(RequirementDao.class);
         executionService = mock(CodingTaskExecutionService.class);
-        validationCommandExecutor = mock(ValidationCommandExecutor.class);
-        workspaceManager = mock(WorkspaceManager.class);
         runDao = mock(RunDao.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
-                validationCommandExecutor, workspaceManager, runDao, mock(CodingTaskChangeCollector.class),
+                runDao, mock(CodingTaskChangeCollector.class),
                 eventPublisher);
         when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
@@ -68,8 +58,6 @@ class CodingTaskSchedulerTest {
             savedTasks.incrementAndGet();
             return invocation.getArgument(0);
         });
-        when(workspaceManager.resolve(anyString())).thenReturn(
-                new WorkspaceResolveResult("/tmp/ws", true, WorkspaceSource.SCAFFOLD));
     }
 
     @Test
@@ -159,8 +147,10 @@ class CodingTaskSchedulerTest {
         CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
         task.setAssignedAgent("frontend-dev-agent");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
-        when(validationCommandExecutor.execute(any(Path.class), eq("pnpm -C frontend build")))
-                .thenReturn(new ValidationCommandExecutor.ValidationResult(0, "ok", "", Duration.ofSeconds(1)));
+        ValidationLoopService validation = mock(ValidationLoopService.class);
+        when(validation.validateTask(task))
+                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
+        scheduler.setValidationLoopService(validation);
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 
@@ -174,8 +164,10 @@ class CodingTaskSchedulerTest {
         CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
         task.setAssignedAgent("frontend-dev-agent");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
-        when(validationCommandExecutor.execute(any(Path.class), eq("pnpm -C frontend build")))
-                .thenReturn(new ValidationCommandExecutor.ValidationResult(1, "", "build failed", Duration.ofSeconds(1)));
+        ValidationLoopService validation = mock(ValidationLoopService.class);
+        when(validation.validateTask(task))
+                .thenReturn(new ValidationLoopService.ValidationOutcome(false, List.of()));
+        scheduler.setValidationLoopService(validation);
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 

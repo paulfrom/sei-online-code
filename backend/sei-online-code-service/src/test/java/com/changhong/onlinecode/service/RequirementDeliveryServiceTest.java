@@ -20,6 +20,7 @@ class RequirementDeliveryServiceTest {
     void changeRequest_reusesPreviouslyDeliveredBranch() throws Exception {
         RequirementDeliveryService service = new RequirementDeliveryService(
                 mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
                 mock(WorkspaceMemoryService.class));
@@ -37,6 +38,7 @@ class RequirementDeliveryServiceTest {
     void successCommentMetadataContainsAllDeliveryAndValidationFacts() throws Exception {
         RequirementDeliveryService service = new RequirementDeliveryService(
                 mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
                 mock(WorkspaceMemoryService.class));

@@ -51,6 +51,7 @@ class CodingTaskExecutionServiceTest {
     private ExecutionPlanDao executionPlanDao;
     private WorkspaceManager workspaceManager;
     private CliRunnerRegistry cliRunnerRegistry;
+    private RunNumberService runNumberService;
     private CodingTaskChangeCollector changeCollector;
     private CodingTaskExecutionService service;
 
@@ -66,10 +67,13 @@ class CodingTaskExecutionServiceTest {
         executionPlanDao = mock(ExecutionPlanDao.class);
         workspaceManager = mock(WorkspaceManager.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        runNumberService = mock(RunNumberService.class);
+        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         changeCollector = mock(CodingTaskChangeCollector.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
+                runNumberService,
                 mock(RequirementService.class),
                 executionPlanDao,
                 mock(RequirementCommentService.class),

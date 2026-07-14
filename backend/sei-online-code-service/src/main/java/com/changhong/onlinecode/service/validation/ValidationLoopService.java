@@ -3,11 +3,8 @@ package com.changhong.onlinecode.service.validation;
 import com.changhong.onlinecode.agent.AgentBriefWriter;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
-import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
@@ -16,52 +13,46 @@ import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
-import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementCommentService;
+import com.changhong.onlinecode.service.RunNumberService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-/** Executes validation commands, records Runs, and asks test-agent to review facts. */
+/** Runs validation through test-agent in the project's bound workspace. */
 @Service
 public class ValidationLoopService {
 
-    private final ValidationCommandExecutor executor;
     private final RunDao runDao;
     private final ExecutionPlanDao executionPlanDao;
-    private final ProjectDao projectDao;
-    private final WorkspaceManager workspaceManager;
     private final RequirementCommentService commentService;
     private final AgentService agentService;
     private final CliRunnerRegistry runnerRegistry;
+    private final RunNumberService runNumberService;
     private final ObjectMapper objectMapper;
 
-    public ValidationLoopService(ValidationCommandExecutor executor, RunDao runDao,
-                                 ExecutionPlanDao executionPlanDao, ProjectDao projectDao,
-                                 WorkspaceManager workspaceManager, RequirementCommentService commentService,
+    public ValidationLoopService(RunDao runDao,
+                                 ExecutionPlanDao executionPlanDao, RequirementCommentService commentService,
                                  AgentService agentService, CliRunnerRegistry runnerRegistry,
+                                 RunNumberService runNumberService,
                                  ObjectMapper objectMapper) {
-        this.executor = executor;
         this.runDao = runDao;
         this.executionPlanDao = executionPlanDao;
-        this.projectDao = projectDao;
-        this.workspaceManager = workspaceManager;
         this.commentService = commentService;
         this.agentService = agentService;
         this.runnerRegistry = runnerRegistry;
+        this.runNumberService = runNumberService;
         this.objectMapper = objectMapper;
     }
 
@@ -81,42 +72,24 @@ public class ValidationLoopService {
     private ValidationOutcome validate(String requirementId, String projectId, String loopId,
                                        String codingTaskId, String taskKey, String area, String scope,
                                        ExecutionPlan plan) {
-        WorkspaceResolveResult workspace = workspaceManager.resolve(projectId);
-        Path cwd = Path.of(workspace.getPath());
-        List<String> commands = resolveCommands(plan, projectDao.findOne(projectId), area);
         List<Map<String, Object>> facts = new ArrayList<>();
-        boolean passed = true;
-        for (String command : commands) {
-            Run run = newRun(requirementId, loopId, codingTaskId, RunType.VALIDATION_COMMAND, command, plan);
-            ValidationCommandExecutor.ValidationResult result = executor.execute(cwd, command);
-            run.setExitCode(result.getExitCode());
-            run.setState(result.isSuccess() ? RunState.SUCCEEDED : RunState.FAILED);
-            run.setFailureReason(result.isSuccess() ? null : result.getStderr());
-            run.setFinishedDate(new Date());
-            runDao.save(run);
-            passed &= result.isSuccess();
-            Map<String, Object> fact = new LinkedHashMap<>();
-            fact.put("command", command);
-            fact.put("exitCode", result.getExitCode());
-            fact.put("durationMs", result.getDuration().toMillis());
-            fact.put("stdout", result.getStdout());
-            fact.put("stderr", result.getStderr());
-            fact.put("runId", run.getId());
-            facts.add(fact);
-        }
-        String report = askTestAgent(requirementId, projectId, loopId, codingTaskId, area, scope, facts, plan);
+        TestAgentResult result = runTestAgent(requirementId, projectId, loopId, codingTaskId, taskKey, area, scope, plan);
+        facts.addAll(result.facts());
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("scope", scope);
         metadata.put("taskId", codingTaskId);
         metadata.put("taskKey", taskKey);
         metadata.put("area", area);
-        metadata.put("passed", passed);
-        metadata.put("commands", facts);
+        metadata.put("passed", result.passed());
+        metadata.put("runId", result.runId());
+        metadata.put("facts", facts);
         commentService.append(requirementId, loopId, RequirementCommentAuthorType.TEST_AGENT, "test-agent",
                 RequirementCommentType.VALIDATION_RESULT,
-                report == null || report.isBlank() ? (passed ? "验证通过" : "验证失败") : report,
+                result.report() == null || result.report().isBlank()
+                        ? (result.passed() ? "验证通过" : "验证失败")
+                        : result.report(),
                 toJson(metadata));
-        return new ValidationOutcome(passed, facts);
+        return new ValidationOutcome(result.passed(), facts);
     }
 
     private Run newRun(String requirementId, String loopId, String codingTaskId, RunType type,
@@ -134,72 +107,107 @@ public class ValidationLoopService {
             run.setMemoryContextId(plan.getMemoryContextId());
             run.setWorkspaceMemoryId(plan.getWorkspaceMemoryId());
         }
+        runNumberService.assign(run);
         return runDao.save(run);
     }
 
-    private String askTestAgent(String requirementId, String projectId, String loopId, String codingTaskId, String area,
-                                String scope, List<Map<String, Object>> facts, ExecutionPlan plan) {
+    private TestAgentResult runTestAgent(String requirementId, String projectId, String loopId, String codingTaskId,
+                                         String taskKey, String area, String scope, ExecutionPlan plan) {
         Agent agent = agentService.findByName("test-agent");
         if (agent == null) {
-            return "test-agent 不存在；系统仅按命令退出码判定。";
+            return TestAgentResult.failed(null, "test-agent 不存在，无法执行验证。");
         }
         Run review = newRun(requirementId, loopId, codingTaskId, RunType.TEST_REVIEW,
-                "Review validation facts", plan);
+                "Run workspace validation", plan);
         AgentWorkspace workspace = runnerRegistry.workspace(projectId);
-        String prompt = "Interpret these immutable validation facts. Do not invent executions. scope=" + scope
-                + ", area=" + area + "\n" + toJson(facts);
+        String prompt = buildTestAgentPrompt(scope, area, taskKey, codingTaskId, plan);
         try {
             AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(), agent.getName(),
                     agent.getInstructions(), agent.getModel(), agent.getMcpConfig() != null, null);
             String report = runnerRegistry.execute(workspace, agent.getCliTool(),
                     requirementId, codingTaskId, review.getId(), prompt,
                     agent.getModel(), agent.getMcpConfig()).get(30, TimeUnit.MINUTES);
-            review.setState(report == null ? RunState.FAILED : RunState.SUCCEEDED);
+            boolean passed = parsePassed(report);
+            review.setState(passed ? RunState.SUCCEEDED : RunState.FAILED);
+            review.setFailureReason(passed ? null : "test-agent validation did not pass");
             review.setFinishedDate(new Date());
             runDao.save(review);
-            return report;
+            return new TestAgentResult(passed, report, review.getId(), extractFacts(report, review.getId()));
         } catch (Exception e) {
             review.setState(RunState.FAILED);
             review.setFailureReason(e.getMessage());
             review.setFinishedDate(new Date());
             runDao.save(review);
-            return "test-agent 评审失败：" + e.getMessage();
+            return TestAgentResult.failed(review.getId(), "test-agent 验证失败：" + e.getMessage());
         }
     }
 
-    private List<String> resolveCommands(ExecutionPlan plan, Project project, String area) {
-        List<String> commands = readCommands(plan == null ? null : plan.getPlanJson(), area);
-        if (commands.isEmpty()) {
-            commands = readCommands(project == null ? null : project.getValidationConfig(), area);
+    private String buildTestAgentPrompt(String scope, String area, String taskKey, String codingTaskId,
+                                        ExecutionPlan plan) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are test-agent. Execute validation inside the already-bound project workspace.\n");
+        sb.append("Do not rely on service-side fixed commands. Inspect the workspace instructions, build files, ")
+                .append("package scripts, Gradle files, and task acceptance criteria, then choose the appropriate ")
+                .append("test/build/package commands for this workspace.\n");
+        sb.append("scope=").append(scope).append("\n");
+        sb.append("area=").append(area).append("\n");
+        sb.append("taskKey=").append(taskKey == null ? "" : taskKey).append("\n");
+        sb.append("codingTaskId=").append(codingTaskId == null ? "" : codingTaskId).append("\n");
+        if (plan != null && plan.getPlanJson() != null) {
+            sb.append("\nExecution plan JSON:\n").append(plan.getPlanJson()).append("\n");
         }
-        if (!commands.isEmpty()) {
-            return commands;
-        }
-        if ("frontend".equals(area)) {
-            return List.of("pnpm -C frontend build");
-        }
-        if ("backend".equals(area)) {
-            return List.of("./gradlew :sei-online-code-service:compileJava");
-        }
-        return List.of("pnpm -C frontend build", "./gradlew :sei-online-code-service:compileJava");
+        sb.append("\nReturn only valid JSON with this shape:\n");
+        sb.append("{\"passed\":true or false,\"summary\":\"string\",\"commands\":[");
+        sb.append("{\"command\":\"string\",\"exitCode\":0,\"result\":\"string\"}");
+        sb.append("],\"findings\":[\"string\"]}\n");
+        return sb.toString();
     }
 
-    private List<String> readCommands(String json, String area) {
-        if (json == null || json.isBlank()) return List.of();
-        try {
-            JsonNode root = objectMapper.readTree(json);
-            JsonNode node = root.path("validation").path("commands");
-            if (node.isMissingNode()) node = root.path("commands");
-            if (!node.isArray()) return List.of();
-            List<String> result = new ArrayList<>();
-            for (JsonNode item : node) {
-                if (item.isTextual()) result.add(item.asText());
-                else if ((Objects.equals(area, item.path("area").asText()) || "full-stack".equals(area))
-                        && item.path("command").isTextual()) result.add(item.path("command").asText());
+    private boolean parsePassed(String report) {
+        JsonNode root = readJsonReport(report);
+        return root != null && root.path("passed").asBoolean(false);
+    }
+
+    private List<Map<String, Object>> extractFacts(String report, String runId) {
+        List<Map<String, Object>> facts = new ArrayList<>();
+        JsonNode root = readJsonReport(report);
+        if (root != null && root.path("commands").isArray()) {
+            for (JsonNode command : root.path("commands")) {
+                Map<String, Object> fact = new LinkedHashMap<>();
+                fact.put("command", command.path("command").asText(""));
+                fact.put("exitCode", command.path("exitCode").isNumber()
+                        ? command.path("exitCode").asInt() : null);
+                fact.put("result", command.path("result").asText(""));
+                fact.put("runId", runId);
+                facts.add(fact);
             }
-            return result;
-        } catch (Exception e) {
-            return List.of();
+        }
+        if (facts.isEmpty()) {
+            Map<String, Object> fact = new LinkedHashMap<>();
+            fact.put("runId", runId);
+            fact.put("report", report);
+            facts.add(fact);
+        }
+        return facts;
+    }
+
+    private JsonNode readJsonReport(String report) {
+        if (report == null || report.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(report);
+        } catch (Exception ignored) {
+            int start = report.indexOf('{');
+            int end = report.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                try {
+                    return objectMapper.readTree(report.substring(start, end + 1));
+                } catch (Exception nestedIgnored) {
+                    return null;
+                }
+            }
+            return null;
         }
     }
 
@@ -209,4 +217,13 @@ public class ValidationLoopService {
     }
 
     public record ValidationOutcome(boolean passed, List<Map<String, Object>> facts) { }
+
+    private record TestAgentResult(boolean passed, String report, String runId, List<Map<String, Object>> facts) {
+        static TestAgentResult failed(String runId, String report) {
+            Map<String, Object> fact = new LinkedHashMap<>();
+            fact.put("runId", runId);
+            fact.put("report", report);
+            return new TestAgentResult(false, report, runId, List.of(fact));
+        }
+    }
 }

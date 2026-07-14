@@ -49,6 +49,7 @@ public class RequirementDeliveryService {
     private final RequirementDao requirementDao;
     private final ExecutionPlanDao executionPlanDao;
     private final RunDao runDao;
+    private final RunNumberService runNumberService;
     private final ConfigService configService;
     private final WorkspaceManager workspaceManager;
     private final RequirementCommentService requirementCommentService;
@@ -58,6 +59,7 @@ public class RequirementDeliveryService {
     public RequirementDeliveryService(RequirementDao requirementDao,
                                       ExecutionPlanDao executionPlanDao,
                                       RunDao runDao,
+                                      RunNumberService runNumberService,
                                       ConfigService configService,
                                       WorkspaceManager workspaceManager,
                                       RequirementCommentService requirementCommentService,
@@ -66,6 +68,7 @@ public class RequirementDeliveryService {
         this.requirementDao = requirementDao;
         this.executionPlanDao = executionPlanDao;
         this.runDao = runDao;
+        this.runNumberService = runNumberService;
         this.configService = configService;
         this.workspaceManager = workspaceManager;
         this.requirementCommentService = requirementCommentService;
@@ -88,6 +91,7 @@ public class RequirementDeliveryService {
         run.setTriggerSource(TriggerSource.AUTO);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new java.util.Date());
+        runNumberService.assign(run);
         runDao.save(run);
 
         try {

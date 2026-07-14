@@ -59,6 +59,8 @@ class FeatureDesignBuildServiceTest {
     @Mock
     private RunService runService;
     @Mock
+    private RunNumberService runNumberService;
+    @Mock
     private CliRunnerRegistry cliRunnerRegistry;
     @Mock
     private WorkspaceManager workspaceManager;
@@ -74,10 +76,12 @@ class FeatureDesignBuildServiceTest {
                 agentService,
                 taskService,
                 runService,
+                runNumberService,
                 cliRunnerRegistry,
                 workspaceManager,
                 failureInfoSupport
         );
+        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
