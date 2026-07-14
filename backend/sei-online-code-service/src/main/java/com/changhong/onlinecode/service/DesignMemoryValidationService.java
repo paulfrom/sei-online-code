@@ -44,6 +44,20 @@ public class DesignMemoryValidationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DesignMemoryValidationService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final List<String> CHOICE_MARKERS = List.of(
+            "使用", "采用", "选用", "引入", "依赖", "基于", "接入",
+            "use", "using", "adopt", "choose", "chosen", "based on", "depend on", "depends on");
+    private static final List<String> NEGATION_MARKERS = List.of(
+            "不", "禁止", "严禁", "不得", "避免", "不可", "不能", "无需",
+            "not", "never", "without", "must not", "do not", "don't");
+    private static final List<String> FORBIDDEN_SELECTION_MARKERS = List.of(
+            "禁止使用", "严禁使用", "不得使用", "不可使用", "不能使用", "避免使用",
+            "禁止采用", "严禁采用", "不得采用",
+            "must not use", "do not use", "don't use", "never use",
+            "must not adopt", "do not adopt", "don't adopt", "never adopt");
+    private static final List<String> PROHIBITION_MARKERS = List.of(
+            "禁止", "严禁", "不得", "不可", "不能", "避免",
+            "must not", "do not", "don't", "never");
 
     /** 文档类型。 */
     public enum DocumentType {
@@ -206,9 +220,9 @@ public class DesignMemoryValidationService {
     /**
      * 检查文档是否使用了被结构化标记为 forbidden 的选择。
      *
-     * <p>WHY：原实现硬编码识别 Vue/antd，无法识别结构化 NormClaim 中的任意禁止项。
-     * 改为遍历 {@link WorkspaceNorms#getForbiddenChoices()} 每条 claim，从其 content 提取关键 token
-     * （非中文章节标题外的英文/技术词），命中文档即报 HIGH。</p>
+     * <p>遍历 {@link WorkspaceNorms#getForbiddenChoices()} 的结构化 claim，提取明确禁止使用/采用的
+     * 技术选择；仅当文档肯定表达“使用/采用该选择”时才报 HIGH。禁止行为约束中的普通英文词，
+     * 以及“不使用该选择”的合规说明均不视为命中。</p>
      */
     private void checkForbiddenChoices(String lower, WorkspaceNorms norms, ValidationResult result) {
         if (norms == null || norms.getForbiddenChoices() == null || norms.getForbiddenChoices().isEmpty()) {
@@ -219,7 +233,7 @@ public class DesignMemoryValidationService {
                 continue;
             }
             for (String token : extractForbiddenTokens(forbidden.getContent())) {
-                if (lower.contains(token)) {
+                if (isAffirmativeChoice(lower, token)) {
                     result.getFindings().add(new ValidationFinding("HIGH",
                             "文档使用了 Forbidden Choice：" + token,
                             "改用项目规定技术栈或澄清例外"));
@@ -234,8 +248,26 @@ public class DesignMemoryValidationService {
      * 中文章节标题（如“禁止使用”）不作为命中键，避免把“禁止”本身误判为命中。
      */
     private List<String> extractForbiddenTokens(String content) {
+        String lowerContent = content.toLowerCase(Locale.ROOT);
+        int selectionStart = -1;
+        int selectionMarkerLength = 0;
+        for (String marker : FORBIDDEN_SELECTION_MARKERS) {
+            int index = lowerContent.indexOf(marker);
+            if (index >= 0 && (selectionStart < 0 || index < selectionStart)) {
+                selectionStart = index;
+                selectionMarkerLength = marker.length();
+            }
+        }
+        // “MUST NOT reference backend internals”是禁止行为约束，不代表 backend 是禁用技术选型。
+        // 对含禁止语义、但没有“禁止使用/采用”的规则不做 token 级选型匹配。
+        if (selectionStart < 0 && PROHIBITION_MARKERS.stream().anyMatch(lowerContent::contains)) {
+            return List.of();
+        }
+        String choiceText = selectionStart < 0
+                ? content
+                : content.substring(selectionStart + selectionMarkerLength).split("[，。；;\\n]", 2)[0];
         List<String> tokens = new ArrayList<>();
-        Matcher matcher = Pattern.compile("[A-Za-z][A-Za-z0-9._-]+").matcher(content);
+        Matcher matcher = Pattern.compile("[A-Za-z][A-Za-z0-9._-]+").matcher(choiceText);
         while (matcher.find()) {
             String token = matcher.group().toLowerCase(Locale.ROOT);
             if (token.length() > 1) {
@@ -243,6 +275,50 @@ public class DesignMemoryValidationService {
             }
         }
         return tokens;
+    }
+
+    /**
+     * 只把“采用/使用某项选择”的肯定表达视为命中。
+     *
+     * <p>Forbidden Choice 的 content 通常是一整条规则，例如
+     * {@code Frontend MUST NOT reference backend internals (backend)}。旧实现对其中任意英文词做
+     * substring 命中，导致文档写“frontend 不引用 backend internals”这种合规说明也被判 HIGH。
+     * 这里要求 token 前存在选择动词，并排除该动词前的否定修饰；同时使用单词边界，避免
+     * {@code react} 误命中 {@code reactive}。</p>
+     */
+    private boolean isAffirmativeChoice(String lower, String token) {
+        Matcher tokenMatcher = Pattern.compile(
+                "(?<![A-Za-z0-9._-])" + Pattern.quote(token) + "(?![A-Za-z0-9._-])")
+                .matcher(lower);
+        while (tokenMatcher.find()) {
+            int contextStart = Math.max(0, tokenMatcher.start() - 64);
+            String prefix = lower.substring(contextStart, tokenMatcher.start());
+            int markerIndex = lastChoiceMarkerIndex(prefix);
+            if (markerIndex < 0) {
+                continue;
+            }
+            String markerPrefix = prefix.substring(Math.max(0, markerIndex - 12), markerIndex);
+            if (NEGATION_MARKERS.stream().noneMatch(markerPrefix::contains)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int lastChoiceMarkerIndex(String text) {
+        int last = -1;
+        for (String marker : CHOICE_MARKERS) {
+            if (marker.chars().allMatch(c -> c < 128)) {
+                Matcher matcher = Pattern.compile("(?<![a-z])" + Pattern.quote(marker) + "(?![a-z])")
+                        .matcher(text);
+                while (matcher.find()) {
+                    last = Math.max(last, matcher.start());
+                }
+            } else {
+                last = Math.max(last, text.lastIndexOf(marker));
+            }
+        }
+        return last;
     }
 
     /**

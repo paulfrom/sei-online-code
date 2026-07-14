@@ -161,6 +161,39 @@ class RequirementAutomationServiceTest {
     }
 
     @Test
+    void resumeDevelopmentLoop_recreatesMissingTasksFromPersistedPlanWithoutNewLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-recover");
+        requirement.setProjectId("proj-1");
+        requirement.setActiveLoopId("loop-recover");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setId("plan-recover");
+        plan.setRequirementId("req-recover");
+        plan.setLoopId("loop-recover");
+        plan.setStatus(ExecutionPlanStatus.READY);
+        plan.setPlanJson("{\"tasks\":[{\"taskKey\":\"BE-001\",\"title\":\"恢复后端任务\","
+                + "\"description\":\"实现恢复\",\"agent\":\"backend-dev-agent\","
+                + "\"area\":\"backend\",\"dependsOn\":[],\"fileScope\":[\"backend/\"]}]}");
+        when(requirementDao.findOne("req-recover")).thenReturn(requirement);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                "req-recover", "loop-recover")).thenReturn(plan);
+        when(codingTaskDao.findByRequirementIdAndLoopIdAndPlanTaskKey(
+                "req-recover", "loop-recover", "BE-001")).thenReturn(null);
+
+        boolean recovered = service.resumeDevelopmentLoop("req-recover", "loop-recover");
+
+        assertTrue(recovered);
+        ArgumentCaptor<CodingTask> taskCaptor = ArgumentCaptor.forClass(CodingTask.class);
+        verify(codingTaskDao).save(taskCaptor.capture());
+        assertEquals("plan-recover", taskCaptor.getValue().getExecutionPlanId());
+        assertEquals("loop-recover", taskCaptor.getValue().getLoopId());
+        assertEquals(CodingTaskStatus.PENDING, taskCaptor.getValue().getStatus());
+        assertEquals(ExecutionPlanStatus.DEVELOPING, plan.getStatus());
+        assertEquals("loop-recover", requirement.getActiveLoopId());
+    }
+
+    @Test
     void startInitialLoop_pmAgentFails_writesFailureAndSetsFailed() {
         Requirement requirement = new Requirement();
         requirement.setId("req-1");

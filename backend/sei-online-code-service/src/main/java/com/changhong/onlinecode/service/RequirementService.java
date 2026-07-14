@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Requirement 服务。
@@ -179,8 +180,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (requirement.getStatus() != RequirementStatus.PRD_REVIEW) {
             return OperateResultWithData.operationFailure("仅 PRD_REVIEW 状态可确认: " + requirement.getStatus());
         }
-        if (requirement.getMemoryValidationStatus() == MemoryValidationStatus.FAILED) {
-            return OperateResultWithData.operationFailure("记忆校验未通过（FAILED），请修改后重新校验");
+        DesignMemoryValidationService.ValidationResult memoryValidation = revalidateAfterEdit(
+                requirement, DesignMemoryValidationService.DocumentType.PRD, requirement.getPrdContent());
+        if (memoryValidation != null && memoryValidation.getStatus() == MemoryValidationStatus.FAILED) {
+            return OperateResultWithData.operationFailure(memoryValidationFailureMessage(memoryValidation));
         }
         OperateResultWithData<Void> validation = validateDesignContextForConfirm(requirement.getDesignContextId(), id);
         if (validation.notSuccessful()) {
@@ -198,9 +201,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
     /**
      * 手动编辑后重新校验文档，并写入 Requirement 的 memory_validation_status/result。
      */
-    private void revalidateAfterEdit(Requirement requirement,
-                                     DesignMemoryValidationService.DocumentType type,
-                                     String content) {
+    private DesignMemoryValidationService.ValidationResult revalidateAfterEdit(
+            Requirement requirement,
+            DesignMemoryValidationService.DocumentType type,
+            String content) {
         RequirementDesignContext context = null;
         if (requirement.getDesignContextId() != null && !requirement.getDesignContextId().isBlank()) {
             context = requirementDesignContextDao.findOne(requirement.getDesignContextId());
@@ -212,11 +216,24 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (context == null) {
             requirement.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
             requirement.setMemoryValidationResultJson(null);
-            return;
+            return null;
         }
         DesignMemoryValidationService.ValidationResult result = designMemoryValidationService.validate(type, content, context);
         requirement.setMemoryValidationStatus(result.getStatus());
         requirement.setMemoryValidationResultJson(toJson(result));
+        return result;
+    }
+
+    private String memoryValidationFailureMessage(DesignMemoryValidationService.ValidationResult result) {
+        String details = result.getFindings().stream()
+                .filter(finding -> "HIGH".equals(finding.getSeverity()))
+                .map(finding -> finding.getMessage()
+                        + (finding.getSuggestedAction() == null || finding.getSuggestedAction().isBlank()
+                        ? "" : "（建议：" + finding.getSuggestedAction() + "）"))
+                .collect(Collectors.joining("；"));
+        return details.isBlank()
+                ? "记忆校验未通过（FAILED），请根据校验结果修改 PRD 后重试"
+                : "记忆校验未通过（FAILED）：" + details;
     }
 
     private String toJson(DesignMemoryValidationService.ValidationResult result) {

@@ -1,7 +1,12 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dao.WorkspaceMemoryDao;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.MemoryConflictFinding;
@@ -9,10 +14,15 @@ import com.changhong.onlinecode.service.memory.MemoryNormClaim;
 import com.changhong.onlinecode.service.memory.MemoryRealityClaim;
 import com.changhong.onlinecode.service.memory.WorkspaceNorms;
 import com.changhong.onlinecode.service.memory.WorkspaceSnapshot;
+import com.changhong.sei.core.context.ApplicationContextHolder;
+import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationContext;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,6 +42,15 @@ import static org.mockito.Mockito.when;
  * @author sei-online-code
  */
 class DesignMemoryValidationServiceTest {
+
+    @BeforeAll
+    static void bootstrapContext() {
+        ApplicationContext ctx = mock(ApplicationContext.class);
+        when(ctx.getMessage(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(Locale.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        new ApplicationContextHolder().setApplicationContext(ctx);
+    }
 
     private final WorkspaceMemoryDao workspaceMemoryDao = mock(WorkspaceMemoryDao.class);
     private final DesignMemoryValidationService service = new DesignMemoryValidationService(workspaceMemoryDao);
@@ -109,8 +128,8 @@ class DesignMemoryValidationServiceTest {
     }
 
     @Test
-    void validate_structuredForbiddenChoiceHitsAnyToken() {
-        // WHY：不再硬编码 Vue/antd；结构化 forbidden_claim 中任意技术 token 命中即 FAILED。
+    void validate_structuredForbiddenChoiceHitsExplicitSelection() {
+        // WHY：不再硬编码 Vue/antd；文档明确选用结构化 forbidden choice 时应 FAILED。
         WorkspaceMemory memory = memoryWithNorms(forbiddenChoice("禁止使用 Vue 框架"));
         when(workspaceMemoryDao.findOne("wm-1")).thenReturn(memory);
         RequirementDesignContext context = contextWithMemory("wm-1");
@@ -122,6 +141,82 @@ class DesignMemoryValidationServiceTest {
         assertEquals(MemoryValidationStatus.FAILED, result.getStatus());
         assertTrue(result.getFindings().stream()
                 .anyMatch(f -> f.getMessage().contains("Forbidden Choice") && f.getMessage().contains("vue")));
+    }
+
+    @Test
+    void validate_forbiddenRuleMentionedAsComplianceDoesNotFail() {
+        // WHY：forbidden claim 是一条禁止行为，不是其中每个英文单词都是禁用技术。
+        // PRD 显式说明遵守边界时会重复 frontend/backend 等词，不能因此误判为 FAILED。
+        WorkspaceMemory memory = memoryWithNorms(
+                forbiddenChoice("Frontend MUST NOT reference backend internals (backend)"));
+        when(workspaceMemoryDao.findOne("wm-1")).thenReturn(memory);
+        RequirementDesignContext context = contextWithMemory("wm-1");
+        String document = fullPrdWith("""
+                设计依据：ctx-1
+                规范符合性：frontend 使用 backend 公开 API，但不引用 backend internals。
+                """);
+
+        DesignMemoryValidationService.ValidationResult result =
+                service.validate(DesignMemoryValidationService.DocumentType.PRD, document, context);
+
+        assertNotFailed(result);
+    }
+
+    @Test
+    void confirmPrd_revalidatesHistoricalFailedStatus() {
+        RequirementDao dao = mock(RequirementDao.class);
+        RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
+        DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
+        RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
+                contextDao, mock(RequirementDesignContextService.class), validationService, mapper);
+
+        Requirement requirement = reviewRequirementWithHistoricalFailure();
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        context.setContextStatus(RequirementDesignContextStatus.STALE);
+        DesignMemoryValidationService.ValidationResult current = new DesignMemoryValidationService.ValidationResult();
+        current.setStatus(MemoryValidationStatus.PASSED);
+        when(dao.findOne("req1")).thenReturn(requirement);
+        when(contextDao.findOne("ctx1")).thenReturn(context);
+        when(validationService.validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context))
+                .thenReturn(current);
+
+        OperateResultWithData<Requirement> result = requirementService.confirmPrd("req1");
+
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("STALE"));
+        assertEquals(MemoryValidationStatus.PASSED, requirement.getMemoryValidationStatus(),
+                "确认时应覆盖历史 FAILED，而不是在重校验前直接拦截");
+        org.mockito.Mockito.verify(validationService)
+                .validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context);
+    }
+
+    @Test
+    void confirmPrd_returnsCurrentValidationFindings() {
+        RequirementDao dao = mock(RequirementDao.class);
+        RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
+        DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
+        RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
+                contextDao, mock(RequirementDesignContextService.class), validationService, mapper);
+
+        Requirement requirement = reviewRequirementWithHistoricalFailure();
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        context.setContextStatus(RequirementDesignContextStatus.READY);
+        DesignMemoryValidationService.ValidationResult current = new DesignMemoryValidationService.ValidationResult();
+        current.setStatus(MemoryValidationStatus.FAILED);
+        current.getFindings().add(new DesignMemoryValidationService.ValidationFinding(
+                "HIGH", "缺少必填章节或关键词：验收标准", "补充验收标准章节"));
+        when(dao.findOne("req1")).thenReturn(requirement);
+        when(contextDao.findOne("ctx1")).thenReturn(context);
+        when(validationService.validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context))
+                .thenReturn(current);
+
+        OperateResultWithData<Requirement> result = requirementService.confirmPrd("req1");
+
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("缺少必填章节或关键词：验收标准"));
+        assertTrue(result.getMessage().contains("补充验收标准章节"));
     }
 
     @Test
@@ -232,6 +327,16 @@ class DesignMemoryValidationServiceTest {
         context.setId("ctx-1");
         context.setWorkspaceMemoryId(workspaceMemoryId);
         return context;
+    }
+
+    private Requirement reviewRequirementWithHistoricalFailure() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        requirement.setDesignContextId("ctx1");
+        requirement.setMemoryValidationStatus(MemoryValidationStatus.FAILED);
+        return requirement;
     }
 
     private String fullPrdWith(String extra) {

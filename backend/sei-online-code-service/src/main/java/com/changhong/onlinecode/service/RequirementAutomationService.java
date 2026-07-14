@@ -337,6 +337,46 @@ public class RequirementAutomationService {
         eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId()));
     }
 
+    /**
+     * Rebuilds the idempotent development boundary for an existing loop.
+     *
+     * <p>This is the recovery entry used by compensation after a process restart or a partial
+     * transaction: missing {@link CodingTask}s are recreated from the persisted plan and the
+     * normal scheduler is requested. No new plan version or loop id is created.</p>
+     *
+     * @return {@code true} when a current, recoverable plan was found
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean resumeDevelopmentLoop(String requirementId, String loopId) {
+        if (executionPlanDao == null || loopId == null || loopId.isBlank()) {
+            return false;
+        }
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (!isCurrentLoop(requirement, loopId)) {
+            return false;
+        }
+        ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                requirementId, loopId);
+        if (plan == null || (plan.getStatus() != ExecutionPlanStatus.READY
+                && plan.getStatus() != ExecutionPlanStatus.DEVELOPING)) {
+            return false;
+        }
+        List<PlanTask> planTasks = parsePlanTasks(plan.getPlanJson());
+        if (planTasks.isEmpty()) {
+            LOGGER.warn("resumeDevelopmentLoop skipped because plan has no valid tasks. requirementId={}, planId={}",
+                    requirementId, plan.getId());
+            return false;
+        }
+        createCodingTasks(requirementId, plan.getId(), loopId, requirement.getProjectId(), planTasks);
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        executionPlanDao.save(plan);
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        requirementDao.save(requirement);
+        TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
+                new CodingTaskSchedulingEvents.ScheduleRequested(requirementId)));
+        return true;
+    }
+
     private String interruptActiveLoop(Requirement requirement, RequirementComment comment) {
         if (executionPlanDao != null && requirement.getActiveLoopId() != null) {
             ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(

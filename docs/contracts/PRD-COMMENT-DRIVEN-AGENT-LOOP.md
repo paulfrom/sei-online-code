@@ -161,6 +161,46 @@ Trace/cancellation fields:
 
 Logical cancellation is the source of truth. Process-level kill may be best-effort.
 
+## Compensation
+
+The loop compensation scheduler runs every 60 seconds by default. It is a state repairer, not a
+second orchestrator: recovery keeps the current `activeLoopId`, reuses the persisted
+`ExecutionPlan`, and delegates progression to the normal automation, task scheduler, validation,
+acceptance, and delivery services.
+
+Default thresholds:
+
+- active loop stage stale timeout: 30 minutes
+- `Run.state = RUNNING` timeout: 30 minutes
+- retry policy: at most 3 retries, using the existing 1-minute/10-minute backoff fields
+
+Recovery order and actions:
+
+1. Preserve the pre-loop recovery boundary: retry eligible `Requirement.status = FAILED` PRD
+   generations and stale `PRD_GENERATING` records without changing their Requirement id.
+2. Close timed-out `RUNNING` runs as `FAILED`; a linked `RUNNING | VALIDATING` CodingTask becomes
+   `FAILED` with structured failure/retry information.
+3. `PLANNING | FAILED`: when no Run is active, resume PM planning for the same loop. A missing plan
+   is generated as `INITIAL` only when no earlier plan exists; otherwise it is a `CHANGE_REQUEST`.
+4. `DEVELOPING`: retry eligible `FAILED | VALIDATION_FAILED` tasks by conditionally claiming them
+   as `PENDING`; recreate missing tasks idempotently from `ExecutionPlan.planJson`; request the
+   normal DAG scheduler.
+5. stale `VALIDATING | ACCEPTING`: re-enter the normal plan-settled validation/PM acceptance
+   boundary when no Run is active.
+6. stale `DELIVERING`: invoke the normal idempotent delivery retry when no delivery Run is active.
+
+Compensation must not:
+
+- create or rotate a loop id
+- automatically resume `INTERRUPTED`
+- automatically advance `WAITING_HUMAN`
+- modify `COMPLETED`
+- overwrite human comments or bypass PM remediation/acceptance limits
+
+Every claimed retry, timeout closure, and recovered stage writes `oc_compensation_log` with
+`SCHEDULED_COMPENSATION` as its trigger source. Conditional task/Run state updates are the
+concurrency guard; a failed claim means another worker already advanced the node.
+
 ## Validation
 
 Task-level validation runs after successful development. Default commands:
