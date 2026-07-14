@@ -20,8 +20,7 @@ const useStyles = createStyles(({ token, css }) => ({
   body: css`
     display: flex;
     flex-direction: column;
-    height: 100%;
-    overflow: auto;
+    min-height: 0;
     padding: ${token.paddingMD}px;
   `,
 }));
@@ -55,7 +54,7 @@ const TITLE_BY_PANEL = {
 const OverviewDrawer = ({
   panelKey,
   onClose,
-  width = 760,
+  width = 960,
   plan,
   tasks,
   runs,

@@ -19,6 +19,7 @@ public class CompensationScheduler {
 
     @Scheduled(fixedDelayString = "${onlinecode.compensation.fixed-delay-ms:60000}")
     public void run() {
+        LOGGER.info("CompensationScheduler is running");
         try {
             compensationService.runCycle();
         } catch (Exception e) {

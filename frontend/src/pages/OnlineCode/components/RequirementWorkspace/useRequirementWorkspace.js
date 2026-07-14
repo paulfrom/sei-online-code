@@ -143,6 +143,7 @@ export function useRequirementWorkspace(requirementId) {
 
       const ctRes = await findCodingTasksByPage({
         filters: [{ fieldName: 'requirementId', value: requirementId, operator: 'EQ' }],
+        pageInfo: { page: 1, rows: 30 }
       });
       const tasks =
         ctRes && ctRes.success && ctRes.data && ctRes.data.rows ? ctRes.data.rows : [];
@@ -218,7 +219,7 @@ export function useRequirementWorkspace(requirementId) {
         document.removeEventListener('visibilitychange', onVisibility);
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirement?.automationStatus, refresh]);
 
   const activeLoopId = useMemo(
