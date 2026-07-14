@@ -5,6 +5,8 @@ import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.RequirementDto;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Requirement;
@@ -34,6 +36,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private final RequirementDesignContextDao requirementDesignContextDao;
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignMemoryValidationService designMemoryValidationService;
+    private final RequirementCommentService requirementCommentService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private RequirementAutomationService requirementAutomationService;
 
@@ -42,12 +45,14 @@ public class RequirementService extends BaseEntityService<Requirement> {
                               RequirementDesignContextDao requirementDesignContextDao,
                               RequirementDesignContextService requirementDesignContextService,
                               DesignMemoryValidationService designMemoryValidationService,
+                              RequirementCommentService requirementCommentService,
                               com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.dao = dao;
         this.requirementAgentService = requirementAgentService;
         this.requirementDesignContextDao = requirementDesignContextDao;
         this.requirementDesignContextService = requirementDesignContextService;
         this.designMemoryValidationService = designMemoryValidationService;
+        this.requirementCommentService = requirementCommentService;
         this.objectMapper = objectMapper;
     }
 
@@ -183,7 +188,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
         DesignMemoryValidationService.ValidationResult memoryValidation = revalidateAfterEdit(
                 requirement, DesignMemoryValidationService.DocumentType.PRD, requirement.getPrdContent());
         if (memoryValidation != null && memoryValidation.getStatus() == MemoryValidationStatus.FAILED) {
-            return OperateResultWithData.operationFailure(memoryValidationFailureMessage(memoryValidation));
+            appendMemoryValidationComment(requirement, memoryValidation);
         }
         OperateResultWithData<Void> validation = validateDesignContextForConfirm(requirement.getDesignContextId(), id);
         if (validation.notSuccessful()) {
@@ -234,6 +239,22 @@ public class RequirementService extends BaseEntityService<Requirement> {
         return details.isBlank()
                 ? "记忆校验未通过（FAILED），请根据校验结果修改 PRD 后重试"
                 : "记忆校验未通过（FAILED）：" + details;
+    }
+
+    /**
+     * 记录记忆校验冲突，但不阻断确认流程。
+     */
+    private void appendMemoryValidationComment(
+            Requirement requirement,
+            DesignMemoryValidationService.ValidationResult result) {
+        requirementCommentService.append(
+                requirement.getId(),
+                requirement.getActiveLoopId(),
+                RequirementCommentAuthorType.SYSTEM,
+                "记忆校验",
+                RequirementCommentType.VALIDATION_RESULT,
+                memoryValidationFailureMessage(result) + "；已记录该冲突，流程继续执行。",
+                requirement.getMemoryValidationResultJson());
     }
 
     private String toJson(DesignMemoryValidationService.ValidationResult result) {

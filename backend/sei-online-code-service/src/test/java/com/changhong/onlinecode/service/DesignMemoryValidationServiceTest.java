@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -168,7 +169,8 @@ class DesignMemoryValidationServiceTest {
         RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
         DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
         RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), validationService, mapper);
+                contextDao, mock(RequirementDesignContextService.class), validationService,
+                mock(RequirementCommentService.class), mapper);
 
         Requirement requirement = reviewRequirementWithHistoricalFailure();
         RequirementDesignContext context = new RequirementDesignContext();
@@ -192,21 +194,22 @@ class DesignMemoryValidationServiceTest {
     }
 
     @Test
-    void confirmPrd_returnsCurrentValidationFindings() {
+    void confirmPrd_appendsCommentAndContinuesAfterFailedMemoryValidation() {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
         DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
+        RequirementCommentService commentService = mock(RequirementCommentService.class);
         RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), validationService, mapper);
+                contextDao, mock(RequirementDesignContextService.class), validationService, commentService, mapper);
 
         Requirement requirement = reviewRequirementWithHistoricalFailure();
         RequirementDesignContext context = new RequirementDesignContext();
         context.setId("ctx1");
-        context.setContextStatus(RequirementDesignContextStatus.READY);
+        context.setContextStatus(RequirementDesignContextStatus.STALE);
         DesignMemoryValidationService.ValidationResult current = new DesignMemoryValidationService.ValidationResult();
         current.setStatus(MemoryValidationStatus.FAILED);
         current.getFindings().add(new DesignMemoryValidationService.ValidationFinding(
-                "HIGH", "缺少必填章节或关键词：验收标准", "补充验收标准章节"));
+                "HIGH", "遗漏 high severity 冲突：必须使用统一鉴权组件", "显式处理 conflict-7"));
         when(dao.findOne("req1")).thenReturn(requirement);
         when(contextDao.findOne("ctx1")).thenReturn(context);
         when(validationService.validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context))
@@ -215,8 +218,15 @@ class DesignMemoryValidationServiceTest {
         OperateResultWithData<Requirement> result = requirementService.confirmPrd("req1");
 
         assertFalse(result.successful());
-        assertTrue(result.getMessage().contains("缺少必填章节或关键词：验收标准"));
-        assertTrue(result.getMessage().contains("补充验收标准章节"));
+        assertTrue(result.getMessage().contains("STALE"), "记忆冲突后应继续执行设计上下文校验");
+        verify(commentService).append(
+                org.mockito.ArgumentMatchers.eq("req1"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType.SYSTEM),
+                org.mockito.ArgumentMatchers.eq("记忆校验"),
+                org.mockito.ArgumentMatchers.eq(com.changhong.onlinecode.dto.enums.RequirementCommentType.VALIDATION_RESULT),
+                org.mockito.ArgumentMatchers.contains("遗漏 high severity 冲突：必须使用统一鉴权组件"),
+                org.mockito.ArgumentMatchers.contains("\"status\":\"FAILED\""));
     }
 
     @Test
