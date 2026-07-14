@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 
 final class CodexAppServerEvents {
@@ -9,6 +10,7 @@ final class CodexAppServerEvents {
     private boolean failed;
     private String failureReason;
     private String turnId;
+    private AgentUsage latestUsage;
 
     synchronized void handleNotification(String method, JsonNode params) {
         if ("item/agentMessage/delta".equals(method)) {
@@ -17,6 +19,10 @@ final class CodexAppServerEvents {
         }
         if ("turn/started".equals(method)) {
             turnId = params.path("turn").path("id").asText(turnId);
+            return;
+        }
+        if ("thread/tokenUsage/updated".equals(method)) {
+            updateUsage(params);
             return;
         }
         if ("turn/completed".equals(method)) {
@@ -32,6 +38,38 @@ final class CodexAppServerEvents {
                         "codex turn completed with status=" + status);
             }
         }
+    }
+
+    private void updateUsage(JsonNode params) {
+        JsonNode tokenUsage = params.path("tokenUsage");
+        if (tokenUsage.isMissingNode() || !tokenUsage.isObject()) {
+            return;
+        }
+        JsonNode total = tokenUsage.path("total");
+        if (total.isMissingNode() || !total.isObject()) {
+            return;
+        }
+        // 当前每个 Run 新建 thread 且只执行一个 turn，固定读取 tokenUsage.total。
+        AgentUsage usage = new AgentUsage();
+        usage.setInputTokens(readLong(total.path("inputTokens")));
+        usage.setOutputTokens(readLong(total.path("outputTokens")));
+        usage.setCacheReadTokens(readLong(total.path("cachedInputTokens")));
+        // Codex 当前不提供 cache-write 指标。
+        usage.setCacheWriteTokens(null);
+        usage.setTotalTokens(readLong(total.path("totalTokens")));
+        usage.setRawUsageJson(total.toString());
+        this.latestUsage = usage;
+    }
+
+    private static Long readLong(JsonNode node) {
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            long value = node.asLong();
+            return value >= 0 ? value : null;
+        }
+        return null;
     }
 
     synchronized boolean isTurnDone() {
@@ -52,6 +90,10 @@ final class CodexAppServerEvents {
 
     synchronized String turnId() {
         return turnId;
+    }
+
+    synchronized AgentUsage latestUsage() {
+        return latestUsage;
     }
 
     synchronized void markFailed(String reason) {

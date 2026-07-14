@@ -1,8 +1,8 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -34,9 +34,6 @@ public class RunDto extends BaseEntityDto {
 
     @Schema(description = "触发来源")
     private TriggerSource triggerSource;
-
-    @Schema(description = "Run 类型")
-    private RunType runType;
 
     @Schema(description = "自动化循环 ID")
     private String loopId;
@@ -74,6 +71,36 @@ public class RunDto extends BaseEntityDto {
 
     @Schema(description = "退出码；终态前为 null")
     private Integer exitCode;
+
+    @Schema(description = "调用时的 Agent id 快照")
+    private String agentId;
+
+    @Schema(description = "调用时的 Agent name 快照")
+    private String agentName;
+
+    @Schema(description = "调用时的实际 CLI 工具名快照")
+    private String cliTool;
+
+    @Schema(description = "调用时请求的模型名快照；null 表示使用 CLI 默认模型")
+    private String model;
+
+    @Schema(description = "输入 token 数")
+    private Long inputTokens;
+
+    @Schema(description = "输出 token 数")
+    private Long outputTokens;
+
+    @Schema(description = "缓存读取 token 数")
+    private Long cacheReadTokens;
+
+    @Schema(description = "缓存写入 token 数")
+    private Long cacheWriteTokens;
+
+    @Schema(description = "总 token 数")
+    private Long totalTokens;
+
+    @Schema(description = "token usage 可用性状态")
+    private UsageStatus usageStatus;
 
     @Schema(description = "开始时间")
     private Date startedDate;

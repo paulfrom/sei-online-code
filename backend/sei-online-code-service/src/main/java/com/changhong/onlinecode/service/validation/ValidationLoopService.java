@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.service.validation;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentInvocationContext;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
@@ -8,7 +10,6 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -18,6 +19,8 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RunNumberService;
+import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -39,31 +42,29 @@ public class ValidationLoopService {
     private final RequirementCommentService commentService;
     private final AgentService agentService;
     private final CliRunnerRegistry runnerRegistry;
-    private final RunNumberService runNumberService;
+    private final AgentRunRecorder agentRunRecorder;
     private final ObjectMapper objectMapper;
 
     public ValidationLoopService(RunDao runDao,
                                  ExecutionPlanDao executionPlanDao, RequirementCommentService commentService,
                                  AgentService agentService, CliRunnerRegistry runnerRegistry,
-                                 RunNumberService runNumberService,
+                                 AgentRunRecorder agentRunRecorder,
                                  ObjectMapper objectMapper) {
         this.runDao = runDao;
         this.executionPlanDao = executionPlanDao;
         this.commentService = commentService;
         this.agentService = agentService;
         this.runnerRegistry = runnerRegistry;
-        this.runNumberService = runNumberService;
+        this.agentRunRecorder = agentRunRecorder;
         this.objectMapper = objectMapper;
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public ValidationOutcome validateTask(CodingTask task) {
         ExecutionPlan plan = executionPlanDao.findOne(task.getExecutionPlanId());
         return validate(task.getRequirementId(), task.getProjectId(), task.getLoopId(), task.getId(),
                 task.getPlanTaskKey(), task.getArea(), "task", plan);
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public ValidationOutcome validatePlan(Requirement requirement, ExecutionPlan plan) {
         return validate(requirement.getId(), requirement.getProjectId(), requirement.getActiveLoopId(), null,
                 null, "full-stack", "plan", plan);
@@ -92,23 +93,26 @@ public class ValidationLoopService {
         return new ValidationOutcome(result.passed(), facts);
     }
 
-    private Run newRun(String requirementId, String loopId, String codingTaskId, RunType type,
-                       String prompt, ExecutionPlan plan) {
-        Run run = new Run();
-        run.setRequirementId(requirementId);
-        run.setLoopId(loopId);
-        run.setCodingTaskId(codingTaskId);
-        run.setRunType(type);
-        run.setTriggerSource(TriggerSource.AUTO);
-        run.setUserPrompt(prompt);
-        run.setState(RunState.RUNNING);
-        run.setStartedDate(new Date());
+    private Run newRun(String requirementId, String loopId, String codingTaskId,
+                       String prompt, ExecutionPlan plan, Agent agent) {
+        AgentRunCreateCommand command = new AgentRunCreateCommand();
+        command.setRequirementId(requirementId);
+        command.setLoopId(loopId);
+        command.setCodingTaskId(codingTaskId);
+        command.setTriggerSource(TriggerSource.AUTO);
+        command.setUserPrompt(prompt);
         if (plan != null) {
-            run.setMemoryContextId(plan.getMemoryContextId());
-            run.setWorkspaceMemoryId(plan.getWorkspaceMemoryId());
+            command.setMemoryContextId(plan.getMemoryContextId());
+            command.setWorkspaceMemoryId(plan.getWorkspaceMemoryId());
         }
-        runNumberService.assign(run);
-        return runDao.save(run);
+        if (agent != null) {
+            command.setAgentId(agent.getId());
+            command.setAgentName(agent.getName());
+            command.setCliTool(agent.getCliTool());
+            command.setModel(agent.getModel());
+        }
+        // REQUIRES_NEW 确保 Run 在 CLI 启动前提交，避免长事务持有连接等待 CLI。
+        return agentRunRecorder.createAgentRun(command);
     }
 
     private TestAgentResult runTestAgent(String requirementId, String projectId, String loopId, String codingTaskId,
@@ -117,29 +121,43 @@ public class ValidationLoopService {
         if (agent == null) {
             return TestAgentResult.failed(null, "test-agent 不存在，无法执行验证。");
         }
-        Run review = newRun(requirementId, loopId, codingTaskId, RunType.TEST_REVIEW,
-                "Run workspace validation", plan);
+        Run review = newRun(requirementId, loopId, codingTaskId,
+                "Run workspace validation", plan, agent);
         AgentWorkspace workspace = runnerRegistry.workspace(projectId);
         String prompt = buildTestAgentPrompt(scope, area, taskKey, codingTaskId, plan);
         try {
             AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(), agent.getName(),
                     agent.getInstructions(), agent.getModel(), agent.getMcpConfig() != null, null);
-            String report = runnerRegistry.execute(workspace, agent.getCliTool(),
-                    requirementId, codingTaskId, review.getId(), prompt,
-                    agent.getModel(), agent.getMcpConfig()).get(30, TimeUnit.MINUTES);
+            String report = runnerRegistry.executeDetailed(workspace,
+                    new AgentInvocationContext(review.getId(), requirementId, codingTaskId,
+                            agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
+                    prompt, agent.getMcpConfig())
+                    .thenApply(CliRunResult::getOutput).get(30, TimeUnit.MINUTES);
             boolean passed = parsePassed(report);
-            review.setState(passed ? RunState.SUCCEEDED : RunState.FAILED);
-            review.setFailureReason(passed ? null : "test-agent validation did not pass");
-            review.setFinishedDate(new Date());
-            runDao.save(review);
+            settleRun(review.getId(),
+                    passed ? RunState.SUCCEEDED : RunState.FAILED,
+                    passed ? null : "test-agent validation did not pass");
             return new TestAgentResult(passed, report, review.getId(), extractFacts(report, review.getId()));
         } catch (Exception e) {
-            review.setState(RunState.FAILED);
-            review.setFailureReason(e.getMessage());
-            review.setFinishedDate(new Date());
-            runDao.save(review);
+            settleRun(review.getId(), RunState.FAILED, e.getMessage());
             return TestAgentResult.failed(review.getId(), "test-agent 验证失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
+     */
+    private void settleRun(String runId, RunState state, String reason) {
+        Run current = runDao.findOne(runId);
+        if (current == null || current.getState() != RunState.RUNNING) {
+            return;
+        }
+        current.setState(state);
+        current.setFinishedDate(new Date());
+        if (state == RunState.FAILED && reason != null) {
+            current.setFailureReason(reason);
+        }
+        runDao.save(current);
     }
 
     private String buildTestAgentPrompt(String scope, String area, String taskKey, String codingTaskId,

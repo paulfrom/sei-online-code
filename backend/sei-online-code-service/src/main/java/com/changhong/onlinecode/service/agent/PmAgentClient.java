@@ -1,7 +1,9 @@
 package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentInvocationContext;
 import com.changhong.onlinecode.agent.AgentWorkspace;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RunDao;
@@ -10,7 +12,6 @@ import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.ExecutionPlan;
@@ -60,6 +61,7 @@ public class PmAgentClient {
     private final WorkspaceManager workspaceManager;
     private final RunDao runDao;
     private final RunNumberService runNumberService;
+    private final AgentRunRecorder agentRunRecorder;
     private final ObjectMapper objectMapper;
 
     public PmAgentClient(AgentService agentService,
@@ -67,12 +69,14 @@ public class PmAgentClient {
                          WorkspaceManager workspaceManager,
                          RunDao runDao,
                          RunNumberService runNumberService,
+                         AgentRunRecorder agentRunRecorder,
                          ObjectMapper objectMapper) {
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.workspaceManager = workspaceManager;
         this.runDao = runDao;
         this.runNumberService = runNumberService;
+        this.agentRunRecorder = agentRunRecorder;
         this.objectMapper = objectMapper;
     }
 
@@ -100,9 +104,9 @@ public class PmAgentClient {
         }
 
         String prompt = buildPlanningPrompt(requirement, planType, context, previousComments, previousPlan);
-        Run run = createRun(requirement.getId(), loopId, RunType.PM_PLANNING, prompt,
+        Run run = createRun(requirement.getId(), loopId, prompt,
                 context == null ? null : context.getId(),
-                context == null ? null : context.getWorkspaceMemoryId());
+                context == null ? null : context.getWorkspaceMemoryId(), agent);
 
         String output = executeAgent(agent, requirement.getProjectId(), prompt, PLAN_TIMEOUT_SECONDS, run);
         if (output == null) {
@@ -141,8 +145,8 @@ public class PmAgentClient {
         }
 
         String prompt = buildAcceptancePrompt(requirement, plan, tasks, previousComments, context);
-        Run run = createRun(requirement.getId(), plan.getLoopId(), RunType.PM_ACCEPTANCE, prompt,
-                plan.getMemoryContextId(), plan.getWorkspaceMemoryId());
+        Run run = createRun(requirement.getId(), plan.getLoopId(), prompt,
+                plan.getMemoryContextId(), plan.getWorkspaceMemoryId(), agent);
 
         String output = executeAgent(agent, requirement.getProjectId(), prompt, ACCEPT_TIMEOUT_SECONDS, run);
         if (output == null) {
@@ -167,8 +171,11 @@ public class PmAgentClient {
                 agent.getInstructions(), agent.getModel(),
                 agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
 
-        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace, agent.getCliTool(),
-                projectId, null, run.getId(), prompt, agent.getModel(), agent.getMcpConfig());
+        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(run.getId(), projectId, null,
+                        agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
+                prompt, agent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
         try {
             return future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -179,20 +186,23 @@ public class PmAgentClient {
         }
     }
 
-    private Run createRun(String requirementId, String loopId, RunType runType, String prompt,
-                          String memoryContextId, String workspaceMemoryId) {
-        Run run = new Run();
-        run.setRequirementId(requirementId);
-        run.setLoopId(loopId);
-        run.setRunType(runType);
-        run.setTriggerSource(TriggerSource.AUTO);
-        run.setState(RunState.RUNNING);
-        run.setUserPrompt(prompt);
-        run.setMemoryContextId(memoryContextId);
-        run.setWorkspaceMemoryId(workspaceMemoryId);
-        run.setStartedDate(new Date());
-        runNumberService.assign(run);
-        return runDao.save(run);
+    private Run createRun(String requirementId, String loopId, String prompt,
+                          String memoryContextId, String workspaceMemoryId, Agent agent) {
+        AgentRunCreateCommand command = new AgentRunCreateCommand();
+        command.setRequirementId(requirementId);
+        command.setLoopId(loopId);
+        command.setTriggerSource(TriggerSource.AUTO);
+        command.setUserPrompt(prompt);
+        command.setMemoryContextId(memoryContextId);
+        command.setWorkspaceMemoryId(workspaceMemoryId);
+        if (agent != null) {
+            command.setAgentId(agent.getId());
+            command.setAgentName(agent.getName());
+            command.setCliTool(agent.getCliTool());
+            command.setModel(agent.getModel());
+        }
+        // REQUIRES_NEW 确保 Run 在 CLI 启动前提交，避免同步阻塞调用持有事务连接。
+        return agentRunRecorder.createAgentRun(command);
     }
 
     private void markRunSucceeded(Run run) {

@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentInvocationContext;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
@@ -12,13 +14,18 @@ import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
+import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
+import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -63,6 +70,8 @@ public class RequirementAgentService {
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignContextPromptAssembler designContextPromptAssembler;
     private final RequirementCommentService requirementCommentService;
+    private final AgentRunRecorder agentRunRecorder;
+    private final com.changhong.onlinecode.dao.RunDao runDao;
     private final ObjectMapper objectMapper;
 
     public RequirementAgentService(RequirementDao requirementDao,
@@ -76,6 +85,8 @@ public class RequirementAgentService {
                                    RequirementDesignContextService requirementDesignContextService,
                                    DesignContextPromptAssembler designContextPromptAssembler,
                                    RequirementCommentService requirementCommentService,
+                                   AgentRunRecorder agentRunRecorder,
+                                   com.changhong.onlinecode.dao.RunDao runDao,
                                    ObjectMapper objectMapper) {
         this.requirementDao = requirementDao;
         this.agentService = agentService;
@@ -88,6 +99,8 @@ public class RequirementAgentService {
         this.requirementDesignContextService = requirementDesignContextService;
         this.designContextPromptAssembler = designContextPromptAssembler;
         this.requirementCommentService = requirementCommentService;
+        this.agentRunRecorder = agentRunRecorder;
+        this.runDao = runDao;
         this.objectMapper = objectMapper;
     }
 
@@ -129,19 +142,33 @@ public class RequirementAgentService {
                     LOGGER);
         }
 
-        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
-                agent == null ? null : agent.getCliTool(), requirementId, fullPrompt,
-                agent == null ? null : agent.getModel(),
-                agent == null ? null : agent.getMcpConfig());
+        Run run = agentRunRecorder.createAgentRun(buildRunCommand(
+                requirement, prompt, agent, context));
+        final String runId = run.getId();
+
+        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(runId, requirementId, null,
+                        agent == null ? null : agent.getId(),
+                        agent == null ? null : agent.getName(),
+                        agent == null ? null : agent.getCliTool(),
+                        agent == null ? null : agent.getModel()),
+                fullPrompt, agent == null ? null : agent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
 
         future.thenApply(RequirementAgentService::normalizeMarkdown)
                 .thenAccept(content -> {
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
+                        settleRun(runId, RunState.FAILED, "已被新一轮生成接管");
                         return;
                     }
-                    validatePrdContent(content);
+                    try {
+                        validatePrdContent(content);
+                    } catch (RuntimeException ex) {
+                        settleRun(runId, RunState.FAILED, ex.getMessage());
+                        throw ex;
+                    }
                     latest.setPrdContent(content);
                     latest.setStatus(RequirementStatus.PRD_REVIEW);
                     latest.setDesignContextId(context.getId());
@@ -149,12 +176,14 @@ public class RequirementAgentService {
                     latest.setMemoryValidationResultJson(null);
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
+                    settleRun(runId, RunState.SUCCEEDED, null);
                     LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
                             requirementId, latest.getPrdVersion());
                     reviewMemory(requirementId, content, context);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
+                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期失败", requirementId);
@@ -186,18 +215,29 @@ public class RequirementAgentService {
         Agent agent = agentService.findByName(MEMORY_REVIEW_AGENT_NAME);
         AgentWorkspace workspace = cliRunnerRegistry.workspace(requirement.getProjectId());
         materializeSkills(agent, workspace.path());
-        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
-                agent == null ? null : agent.getCliTool(),
-                requirementId + "-memory-review-" + UUID.randomUUID(),
+        Run run = agentRunRecorder.createAgentRun(buildRunCommand(
+                requirement, content, agent, context));
+        final String runId = run.getId();
+        String iterationId = requirementId + "-memory-review-" + UUID.randomUUID();
+        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(runId, iterationId, null,
+                        agent == null ? null : agent.getId(),
+                        agent == null ? null : agent.getName(),
+                        agent == null ? null : agent.getCliTool(),
+                        agent == null ? null : agent.getModel()),
                 buildMemoryReviewPrompt(content, context),
-                agent == null ? null : agent.getModel(),
-                agent == null ? null : agent.getMcpConfig());
+                agent == null ? null : agent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
 
         future.thenApply(this::parseMemoryReview)
-                .thenAccept(result -> persistMemoryReview(requirementId, content, result))
+                .thenAccept(result -> {
+                    settleRun(runId, RunState.SUCCEEDED, null);
+                    persistMemoryReview(requirementId, content, result);
+                })
                 .exceptionally(e -> {
                     LOGGER.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
                             requirementId, e);
+                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     return null;
                 });
     }
@@ -341,6 +381,48 @@ public class RequirementAgentService {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    /**
+     * 构造 AgentRunCreateCommand，写入 Agent 快照。
+     */
+    private AgentRunCreateCommand buildRunCommand(Requirement requirement, String prompt,
+                                                  Agent agent,
+                                                  RequirementDesignContext context) {
+        AgentRunCreateCommand command = new AgentRunCreateCommand();
+        command.setRequirementId(requirement.getId());
+        command.setIterationId(requirement.getId());
+        command.setTriggerSource(TriggerSource.AUTO);
+        command.setUserPrompt(prompt);
+        command.setMemoryContextId(context == null ? null : context.getId());
+        command.setWorkspaceMemoryId(context == null ? null : context.getWorkspaceMemoryId());
+        if (agent != null) {
+            command.setAgentId(agent.getId());
+            command.setAgentName(agent.getName());
+            command.setCliTool(agent.getCliTool());
+            command.setModel(agent.getModel());
+        }
+        return command;
+    }
+
+    /**
+     * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
+     */
+    private void settleRun(String runId, RunState state, String reason) {
+        try {
+            Run current = runDao.findOne(runId);
+            if (current == null || current.getState() != RunState.RUNNING) {
+                return;
+            }
+            current.setState(state);
+            current.setFinishedDate(new Date());
+            if (state == RunState.FAILED) {
+                current.setFailureReason(reason);
+            }
+            runDao.save(current);
+        } catch (Exception e) {
+            LOGGER.warn("prd-agent: 更新 Run 终态失败 runId={}", runId, e);
+        }
     }
 
     private String toJson(DesignMemoryValidationService.ValidationResult result) {

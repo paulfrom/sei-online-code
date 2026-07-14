@@ -44,8 +44,8 @@ class CodexRunnerFakeExecutableTest {
     void execute_returnsAggregatedAgentMessageDeltas() throws Exception {
         CodexRunner runner = new CodexRunner(fakeAppServerHappy().toString());
 
-        String result = runner.execute("fake-it", "do something", workdir.toString(), "gpt-5-codex", null)
-                .get(60, TimeUnit.SECONDS);
+        String result = runner.executeDetailed("fake-it", null, null, "do something", workdir.toString(), "gpt-5-codex", null)
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertEquals("PONG", result);
     }
@@ -54,8 +54,8 @@ class CodexRunnerFakeExecutableTest {
     void execute_autoApprovesCommandRequestAndContinues() throws Exception {
         CodexRunner runner = new CodexRunner(fakeAppServerApproval().toString());
 
-        String result = runner.execute("fake-it", "do something", workdir.toString(), null, null)
-                .get(60, TimeUnit.SECONDS);
+        String result = runner.executeDetailed("fake-it", null, null, "do something", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertEquals("APPROVED", result);
     }
@@ -64,8 +64,8 @@ class CodexRunnerFakeExecutableTest {
     void execute_processExitsBeforeTurnCompletedReturnsNull() throws Exception {
         CodexRunner runner = new CodexRunner(fakeAppServerExitsEarly().toString());
 
-        assertNull(runner.execute("fake-it", "p", workdir.toString(), null, null)
-                .get(60, TimeUnit.SECONDS));
+        assertNull(runner.executeDetailed("fake-it", null, null, "p", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS).getOutput());
     }
 
     @Test
@@ -73,8 +73,8 @@ class CodexRunnerFakeExecutableTest {
         CodexRunner runner = new CodexRunner(fakeAppServerSnapshotConfig().toString());
         String mcpConfig = "{\"mcpServers\":{\"fetch\":{\"command\":\"uvx\",\"args\":[\"mcp-server-fetch\"]}}}";
 
-        String result = runner.execute("fake-it", "p", workdir.toString(), null, mcpConfig)
-                .get(60, TimeUnit.SECONDS);
+        String result = runner.executeDetailed("fake-it", null, null, "p", workdir.toString(), null, mcpConfig)
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertTrue(result.contains("[mcp_servers.fetch]"), result);
         assertTrue(result.contains("command = \"uvx\""), result);
@@ -86,8 +86,8 @@ class CodexRunnerFakeExecutableTest {
     void execute_sandboxConfigIncludesCurrentWorkdirWritableRoot() throws Exception {
         CodexRunner runner = new CodexRunner(fakeAppServerSnapshotConfig().toString());
 
-        String result = runner.execute("fake-it", "p", workdir.toString(), null, null)
-                .get(60, TimeUnit.SECONDS);
+        String result = runner.executeDetailed("fake-it", null, null, "p", workdir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertTrue(result.contains("sandbox_mode = \"workspace-write\""), result);
         assertTrue(result.contains("writable_roots = [\"" + workdir.toAbsolutePath().normalize() + "\"]"), result);

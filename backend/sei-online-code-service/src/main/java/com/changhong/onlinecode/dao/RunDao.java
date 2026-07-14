@@ -70,4 +70,37 @@ public interface RunDao extends BaseEntityDao<Run> {
     int updateStateIfMatch(@Param("id") String id,
                            @Param("expected") com.changhong.onlinecode.dto.enums.RunState expected,
                            @Param("target") com.changhong.onlinecode.dto.enums.RunState target);
+
+    /**
+     * 定向更新 usage 列，不覆盖业务终态字段。
+     *
+     * @param runId           运行 ID
+     * @param inputTokens     输入 token
+     * @param outputTokens    输出 token
+     * @param cacheReadTokens 缓存读取 token
+     * @param cacheWriteTokens 缓存写入 token
+     * @param totalTokens     总 token
+     * @param usageStatus     usage 状态
+     * @param rawUsageJson    原始 usage JSON
+     * @return 更新条数
+     */
+    @Modifying
+    @Query("UPDATE Run r SET "
+            + "r.inputTokens = :inputTokens, "
+            + "r.outputTokens = :outputTokens, "
+            + "r.cacheReadTokens = :cacheReadTokens, "
+            + "r.cacheWriteTokens = :cacheWriteTokens, "
+            + "r.totalTokens = :totalTokens, "
+            + "r.usageStatus = :usageStatus, "
+            + "r.rawUsageJson = :rawUsageJson, "
+            + "r.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE r.id = :runId")
+    int updateUsage(@Param("runId") String runId,
+                    @Param("inputTokens") Long inputTokens,
+                    @Param("outputTokens") Long outputTokens,
+                    @Param("cacheReadTokens") Long cacheReadTokens,
+                    @Param("cacheWriteTokens") Long cacheWriteTokens,
+                    @Param("totalTokens") Long totalTokens,
+                    @Param("usageStatus") com.changhong.onlinecode.dto.enums.UsageStatus usageStatus,
+                    @Param("rawUsageJson") String rawUsageJson);
 }

@@ -2,6 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
@@ -115,9 +116,10 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         when(taskService.save(any(Task.class))).thenReturn(savedTaskResult);
         when(cliRunnerRegistry.workspace("project1")).thenReturn(agentWorkspace);
         when(runService.save(any(Run.class))).thenReturn(savedRunResult);
-        when(cliRunnerRegistry.execute(any(), any(), anyString(), anyString(), anyString(),
-                anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("success"));
+        CliRunResult successResult = new CliRunResult();
+        successResult.setOutput("success");
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(successResult));
 
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build("fd1");
 
@@ -136,8 +138,7 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         assertTrue(generatedTask.getDescription().contains("支持按名称筛选"));
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(cliRunnerRegistry).execute(eq(agentWorkspace), eq("codex"), eq("fd1"),
-                eq("task1"), eq("run1"), promptCaptor.capture(), eq(null), eq(null));
+        verify(cliRunnerRegistry).executeDetailed(eq(agentWorkspace), any(), promptCaptor.capture(), any());
         assertTrue(promptCaptor.getValue().contains("实现库存列表查询与筛选"));
         assertTrue(promptCaptor.getValue().contains("src/pages/inventory/index.tsx"));
     }

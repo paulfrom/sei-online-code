@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentInvocationContext;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
@@ -13,7 +15,6 @@ import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -141,6 +142,7 @@ public class CodingTaskExecutionService {
 
         // 先解析工作区与基准 commit 再一次性 insert，避免二次 save 触发 preSave 的 existsById 校验失败。
         AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
+        Agent agent = agentService.findByName(task.getAssignedAgent());
         Run run = new Run();
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
@@ -150,10 +152,15 @@ public class CodingTaskExecutionService {
         run.setStartedDate(new Date());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
+        if (agent != null) {
+            run.setAgentId(agent.getId());
+            run.setAgentName(agent.getName());
+            run.setCliTool(agent.getCliTool());
+            run.setModel(agent.getModel());
+        }
         runNumberService.assign(run);
         runDao.save(run);
 
-        Agent agent = agentService.findByName(task.getAssignedAgent());
         String fullPrompt = buildExecutionPrompt(task, prompt);
 
         if (agent != null) {
@@ -165,14 +172,14 @@ public class CodingTaskExecutionService {
         }
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace,
-                agent == null ? null : agent.getCliTool(),
-                task.getRequirementId(),
-                task.getId(),
-                run.getId(),
-                fullPrompt,
-                agent == null ? null : agent.getModel(),
-                agent == null ? null : agent.getMcpConfig());
+        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(run.getId(), task.getRequirementId(), task.getId(),
+                        agent == null ? null : agent.getId(),
+                        agent == null ? null : agent.getName(),
+                        agent == null ? null : agent.getCliTool(),
+                        agent == null ? null : agent.getModel()),
+                fullPrompt, agent == null ? null : agent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
@@ -232,7 +239,6 @@ public class CodingTaskExecutionService {
         Run run = new Run();
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
-        run.setRunType(RunType.DEVELOPMENT);
         run.setLoopId(task.getLoopId());
         run.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
         ExecutionPlan executionPlan = task.getExecutionPlanId() == null
@@ -249,6 +255,10 @@ public class CodingTaskExecutionService {
         run.setStartedDate(new Date());
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
+        run.setAgentId(agent.getId());
+        run.setAgentName(agent.getName());
+        run.setCliTool(agent.getCliTool());
+        run.setModel(agent.getModel());
         runNumberService.assign(run);
         runDao.save(run);
 
@@ -259,13 +269,11 @@ public class CodingTaskExecutionService {
                 null);
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = cliRunnerRegistry.execute(workspace, agent.getCliTool(),
-                task.getRequirementId(),
-                task.getId(),
-                run.getId(),
-                buildExecutionPrompt(task, prompt),
-                agent.getModel(),
-                agent.getMcpConfig());
+        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(run.getId(), task.getRequirementId(), task.getId(),
+                        agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
+                buildExecutionPrompt(task, prompt), agent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
 
         final Run trackedRun = run;
         future.thenAccept(result -> {

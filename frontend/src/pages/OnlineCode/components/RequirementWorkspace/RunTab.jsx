@@ -1,9 +1,9 @@
 /**
  * Run tab: filterable run history list; click a row to open the log drawer.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { createStyles } from '@ead/antd-style';
-import { Button, FilterView, Space, Table, Tag } from '@ead/suid';
+import { Button, Space, Table, Tag } from '@ead/suid';
 
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`
@@ -20,16 +20,6 @@ const STATE_META = {
   FAILED: { color: 'error', label: '失败' },
   CANCELLED: { color: 'warning', label: '已取消' },
 };
-
-const RUN_TYPE_OPTIONS = [
-  { key: 'ALL', title: '全部' },
-  { key: 'DEVELOPMENT', title: '开发' },
-  { key: 'VALIDATION_COMMAND', title: '验证命令' },
-  { key: 'TEST_REVIEW', title: '测试评审' },
-  { key: 'PM_PLANNING', title: 'PM 规划' },
-  { key: 'PM_ACCEPTANCE', title: 'PM 验收' },
-  { key: 'DELIVERY', title: '交付' },
-];
 
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '-');
 
@@ -51,30 +41,13 @@ const computeDuration = (started, finished) => {
  */
 const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
   const { styles } = useStyles();
-  const [runTypeFilter, setRunTypeFilter] = useState(['ALL']);
 
   const filteredRuns = useMemo(() => {
-    const selectedType = runTypeFilter[0] || 'ALL';
-    const taskRuns = taskFilterId ? runs.filter((r) => r.codingTaskId === taskFilterId) : runs;
-    if (selectedType === 'ALL') return taskRuns;
-    return taskRuns.filter((r) => r.runType === selectedType);
-  }, [runs, runTypeFilter, taskFilterId]);
-
-  const handleFilterChange = (selectedItems) => {
-    const next = Array.isArray(selectedItems)
-      ? selectedItems.map((item) => item.key).filter(Boolean)
-      : [];
-    setRunTypeFilter(next.length > 0 ? next : ['ALL']);
-  };
+    return taskFilterId ? runs.filter((r) => r.codingTaskId === taskFilterId) : runs;
+  }, [runs, taskFilterId]);
 
   const columns = [
     { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
-    {
-      title: '类型',
-      dataIndex: 'runType',
-      width: 130,
-      render: (v) => v || '-',
-    },
     {
       title: '状态',
       dataIndex: 'state',
@@ -111,12 +84,6 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
   return (
     <div>
       <div className={styles.toolbar}>
-        <FilterView
-          dataSource={RUN_TYPE_OPTIONS}
-          selectedKeys={runTypeFilter}
-          rowKey="key"
-          onChange={handleFilterChange}
-        />
         {taskFilterId && (
           <Space>
             <Tag color="blue">已按任务筛选</Tag>

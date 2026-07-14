@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RunDao;
@@ -336,7 +337,7 @@ class CodingTaskExecutionServiceTest {
         when(cliRunnerRegistry.workspace("project-trace")).thenReturn(agentWorkspace);
         when(changeCollector.collect(any(), any())).thenReturn(
                 new com.changhong.onlinecode.service.memory.CodingTaskChangeResult());
-        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
                 .thenReturn(new CompletableFuture<>());
 
         service.executePlanTask("task-trace", "backend-dev-agent", "prompt");
@@ -385,8 +386,10 @@ class CodingTaskExecutionServiceTest {
         noChanges.setSuccess(true);
         noChanges.setChangedFiles(java.util.List.of());
         when(changeCollector.collect(tempDir.toString(), "base-1")).thenReturn(noChanges);
-        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("任务已完成"));
+        CliRunResult completedResult = new CliRunResult();
+        completedResult.setOutput("任务已完成");
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(completedResult));
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
 
@@ -429,10 +432,12 @@ class CodingTaskExecutionServiceTest {
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(cliRunnerRegistry.workspace("project-file-change")).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
-        when(cliRunnerRegistry.execute(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated.txt"), "hello");
-                    return CompletableFuture.completedFuture("DONE");
+                    CliRunResult doneResult = new CliRunResult();
+                    doneResult.setOutput("DONE");
+                    return CompletableFuture.completedFuture(doneResult);
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");

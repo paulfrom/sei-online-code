@@ -11,7 +11,6 @@ import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
@@ -87,7 +86,6 @@ public class RequirementDeliveryService {
         Run run = new Run();
         run.setRequirementId(requirementId);
         run.setLoopId(requirement.getActiveLoopId());
-        run.setRunType(RunType.DELIVERY);
         run.setTriggerSource(TriggerSource.AUTO);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new java.util.Date());

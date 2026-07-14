@@ -83,13 +83,10 @@ export interface CodingTaskDto {
   failureSummary?: string | null; createdDate: string; lastEditedDate: string;
 }
 
-export type RunType =
-  | 'DEVELOPMENT' | 'VALIDATION_COMMAND' | 'TEST_REVIEW'
-  | 'PM_PLANNING' | 'PM_ACCEPTANCE' | 'DELIVERY';
 export type RunState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 export interface RunDto {
   id: string; taskId?: string | null; codingTaskId?: string | null; requirementId?: string | null;
-  runNo?: number; triggerSource?: string | null; runType?: RunType | null; loopId?: string | null;
+  runNo?: number; triggerSource?: string | null; loopId?: string | null;
   cancelRequested?: boolean | null; invalidatedByCommentId?: string | null;
   memoryContextId?: string | null; workspaceMemoryId?: string | null;
   userPrompt?: string | null; failureSummary?: string | null; failureReason?: string | null;

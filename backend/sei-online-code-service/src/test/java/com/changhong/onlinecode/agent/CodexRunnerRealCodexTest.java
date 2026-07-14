@@ -71,9 +71,10 @@ class CodexRunnerRealCodexTest {
         // 确定性 echo prompt——codex 正常响应时 agentMessage delta 聚合必含 PONG，证明端到端
         // app-server 握手 + thread/start + turn/start + delta 聚合 + turn/completed 成功。
         String prompt = "Reply with exactly the word PONG and nothing else.";
-        CompletableFuture<String> future = runner.execute("real-codex-e2e", prompt, workdir.toString(), null, null);
+        CompletableFuture<CliRunResult> future = runner.executeDetailed("real-codex-e2e", null, null, prompt, workdir.toString(), null, null);
 
-        String result = future.get(180, TimeUnit.SECONDS);
+        CliRunResult runResult = future.get(180, TimeUnit.SECONDS);
+        String result = runResult != null ? runResult.getOutput() : null;
         assertNotNull(result, "codex app-server turn 未完成或 status=failed → future 返回 null");
         assertFalse(result.isBlank(), "result 文本不得为空");
         assertTrue(result.toLowerCase().contains("pong"),

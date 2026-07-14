@@ -62,6 +62,7 @@ public class RequirementAutomationService {
     private PmAgentClient pmAgentClient;
     private CliRunnerRegistry cliRunnerRegistry;
     private ValidationLoopService validationLoopService;
+    private FailureInfoSupport failureInfoSupport;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAutomationService(RequirementDao requirementDao,
@@ -97,6 +98,11 @@ public class RequirementAutomationService {
     @Autowired
     public void setValidationLoopService(ValidationLoopService validationLoopService) {
         this.validationLoopService = validationLoopService;
+    }
+
+    @Autowired
+    public void setFailureInfoSupport(FailureInfoSupport failureInfoSupport) {
+        this.failureInfoSupport = failureInfoSupport;
     }
 
     /**
@@ -334,6 +340,9 @@ public class RequirementAutomationService {
         createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), planResult.tasks());
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
+        if (failureInfoSupport != null) {
+            failureInfoSupport.clearRequirementFailure(requirement);
+        }
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
         requirementDao.save(requirement);
         eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId()));

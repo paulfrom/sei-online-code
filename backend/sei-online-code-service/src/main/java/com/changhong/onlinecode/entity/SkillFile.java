@@ -9,6 +9,9 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 技能辅助文件实体（对齐 multica 维度 e，独立子表 oc_skill_file，兑现契约 Phase 3 §1.1
@@ -34,6 +37,9 @@ import lombok.EqualsAndHashCode;
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
+@Slf4j
+@NoArgsConstructor
+@AllArgsConstructor
 public class SkillFile extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

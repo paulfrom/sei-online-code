@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dto.RunUsageDto;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
@@ -55,5 +56,36 @@ public class RunService extends BaseEntityService<Run> {
      */
     public List<Run> findByRequirementId(String requirementId) {
         return dao.findByRequirementIdOrderByCreatedDateDesc(requirementId);
+    }
+
+    /**
+     * 查询单次 Run 的 token usage 详情，包含原始 usage JSON。
+     *
+     * @param runId 运行 id
+     * @return usage 详情；Run 不存在时返回 null
+     */
+    public RunUsageDto findUsage(String runId) {
+        Run run = dao.findOne(runId);
+        return run == null ? null : toUsageDto(run);
+    }
+
+    /**
+     * 将 Run 实体转换为 usage 详情 DTO。
+     */
+    private RunUsageDto toUsageDto(Run run) {
+        RunUsageDto dto = new RunUsageDto();
+        dto.setRunId(run.getId());
+        dto.setAgentId(run.getAgentId());
+        dto.setAgentName(run.getAgentName());
+        dto.setCliTool(run.getCliTool());
+        dto.setModel(run.getModel());
+        dto.setInputTokens(run.getInputTokens());
+        dto.setOutputTokens(run.getOutputTokens());
+        dto.setCacheReadTokens(run.getCacheReadTokens());
+        dto.setCacheWriteTokens(run.getCacheWriteTokens());
+        dto.setTotalTokens(run.getTotalTokens());
+        dto.setUsageStatus(run.getUsageStatus());
+        dto.setRawUsageJson(run.getRawUsageJson());
+        return dto;
     }
 }

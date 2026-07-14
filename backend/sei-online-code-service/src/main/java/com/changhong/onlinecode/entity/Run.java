@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.entity;
 
+import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
@@ -15,6 +15,9 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Date;
 
@@ -32,6 +35,9 @@ import java.util.Date;
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
+@Slf4j
+@NoArgsConstructor
+@AllArgsConstructor
 public class Run extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
@@ -51,10 +57,6 @@ public class Run extends BaseAuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "trigger_source", length = 32)
     private TriggerSource triggerSource;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "run_type", length = 32)
-    private RunType runType;
 
     @Column(name = "loop_id", length = 64)
     private String loopId;
@@ -90,9 +92,42 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "worktree_path", length = 500)
     private String worktreePath;
 
-    /** CodingTask 开始执行前的 Git HEAD，用作完成后增量记忆采集基准。 */
     @Column(name = "base_commit", length = 64)
     private String baseCommit;
+
+    @Column(name = "agent_id", length = 36)
+    private String agentId;
+
+    @Column(name = "agent_name", length = 100)
+    private String agentName;
+
+    @Column(name = "cli_tool", length = 32)
+    private String cliTool;
+
+    @Column(name = "model", length = 100)
+    private String model;
+
+    @Column(name = "input_tokens")
+    private Long inputTokens;
+
+    @Column(name = "output_tokens")
+    private Long outputTokens;
+
+    @Column(name = "cache_read_tokens")
+    private Long cacheReadTokens;
+
+    @Column(name = "cache_write_tokens")
+    private Long cacheWriteTokens;
+
+    @Column(name = "total_tokens")
+    private Long totalTokens;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "usage_status", nullable = false, length = 20)
+    private UsageStatus usageStatus = UsageStatus.UNAVAILABLE;
+
+    @Column(name = "raw_usage_json", columnDefinition = "TEXT")
+    private String rawUsageJson;
 
     @Column(name = "exit_code")
     private Integer exitCode;

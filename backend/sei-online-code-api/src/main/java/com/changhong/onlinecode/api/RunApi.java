@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.api;
 
 import com.changhong.onlinecode.dto.RunDto;
+import com.changhong.onlinecode.dto.RunUsageDto;
 import com.changhong.sei.core.api.BaseEntityApi;
 import com.changhong.sei.core.api.FindByPageApi;
 import com.changhong.sei.core.dto.ResultData;
@@ -18,6 +19,7 @@ import java.util.List;
  * <ul>
  *   <li>#13 POST /run/findByPage —— FindByPageApi.findByPage（按 iterationId / taskId 过滤）</li>
  *   <li>#14 GET  /run/findOne    —— BaseEntityApi.findOne（轮询状态/exitCode）</li>
+ *   <li>GET /run/findUsage —— 查询单次 Run 的 token usage 详情（含原始 usage JSON）</li>
  * </ul>
  *
  * @author sei-online-code
@@ -35,4 +37,8 @@ public interface RunApi extends BaseEntityApi<RunDto>, FindByPageApi<RunDto> {
     @GetMapping(path = "findByRequirement")
     @Operation(summary = "按需求查询全部 Run 历史")
     ResultData<List<RunDto>> findByRequirement(@RequestParam("requirementId") String requirementId);
+
+    @GetMapping(path = "findUsage")
+    @Operation(summary = "查询 Run 的 token usage 详情")
+    ResultData<RunUsageDto> findUsage(@RequestParam("runId") String runId);
 }

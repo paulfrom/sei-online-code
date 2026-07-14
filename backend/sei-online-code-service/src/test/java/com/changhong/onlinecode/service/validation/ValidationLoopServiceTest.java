@@ -1,15 +1,17 @@
 package com.changhong.onlinecode.service.validation;
 
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.enums.RunType;
+import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementCommentService;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -38,8 +40,6 @@ class ValidationLoopServiceTest {
         RequirementCommentService comments = mock(RequirementCommentService.class);
         AgentService agents = mock(AgentService.class);
         CliRunnerRegistry runners = mock(CliRunnerRegistry.class);
-        com.changhong.onlinecode.service.RunNumberService runNumberService =
-                mock(com.changhong.onlinecode.service.RunNumberService.class);
         com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
                 mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
         AtomicInteger ids = new AtomicInteger();
@@ -48,15 +48,15 @@ class ValidationLoopServiceTest {
             if (run.getId() == null) run.setId("run-" + ids.incrementAndGet());
             return run;
         });
-        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(agentWorkspace.path()).thenReturn(workspace);
         when(agentWorkspace.pathString()).thenReturn(workspace.toString());
         when(runners.workspace("project-1")).thenReturn(agentWorkspace);
-        when(runners.execute(eq(agentWorkspace), eq("codex"), eq("requirement-1"), eq("task-1"),
-                eq("run-1"), any(), eq(null), eq(null)))
-                .thenReturn(CompletableFuture.completedFuture("""
-                        {"passed":true,"summary":"ok","commands":[{"command":"workspace-selected validation","exitCode":0,"result":"ok"}],"findings":[]}
-                        """));
+        CliRunResult validationResult = new CliRunResult();
+        validationResult.setOutput("""
+                {"passed":true,"summary":"ok","commands":[{"command":"workspace-selected validation","exitCode":0,"result":"ok"}],"findings":[]}
+                """);
+        when(runners.executeDetailed(eq(agentWorkspace), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(validationResult));
         ExecutionPlan plan = new ExecutionPlan();
         plan.setId("plan-1");
         plan.setPlanJson("{\"validation\":{\"mode\":\"test-agent\"}}");
@@ -65,9 +65,15 @@ class ValidationLoopServiceTest {
         agent.setName("test-agent");
         agent.setCliTool("codex");
         when(agents.findByName("test-agent")).thenReturn(agent);
+        AgentRunRecorder agentRunRecorder = mock(AgentRunRecorder.class);
+        Run agentRun = new Run();
+        agentRun.setId("run-1");
+        agentRun.setState(RunState.RUNNING);
+        when(agentRunRecorder.createAgentRun(any())).thenReturn(agentRun);
+        when(runDao.findOne("run-1")).thenReturn(agentRun);
 
         ValidationLoopService service = new ValidationLoopService(runDao, planDao, comments, agents, runners,
-                runNumberService, new ObjectMapper());
+                agentRunRecorder, new ObjectMapper());
         CodingTask task = new CodingTask();
         task.setId("task-1");
         task.setRequirementId("requirement-1");
@@ -79,10 +85,9 @@ class ValidationLoopServiceTest {
         ValidationLoopService.ValidationOutcome outcome = service.validateTask(task);
 
         assertTrue(outcome.passed());
-        verify(runners).execute(eq(agentWorkspace), eq("codex"), eq("requirement-1"), eq("task-1"),
-                eq("run-1"), any(), eq(null), eq(null));
+        verify(runners).executeDetailed(eq(agentWorkspace), any(), any(), any());
         verify(runDao, atLeastOnce()).save(org.mockito.ArgumentMatchers.<Run>argThat(
-                run -> run.getRunType() == RunType.TEST_REVIEW));
+                run -> "run-1".equals(run.getId())));
         verify(comments).append(eq("requirement-1"), eq("loop-1"), any(), eq("test-agent"), any(), any(), any());
     }
 }

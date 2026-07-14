@@ -2,6 +2,7 @@ package com.changhong.onlinecode.controller;
 
 import com.changhong.onlinecode.api.RunApi;
 import com.changhong.onlinecode.dto.RunDto;
+import com.changhong.onlinecode.dto.RunUsageDto;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.RunService;
 import com.changhong.sei.core.controller.BaseEntityController;
@@ -59,5 +60,14 @@ public class RunController extends BaseEntityController<Run, RunDto>
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
         return ResultData.success(dtos);
+    }
+
+    @Override
+    public ResultData<RunUsageDto> findUsage(String runId) {
+        RunUsageDto dto = service.findUsage(runId);
+        if (dto == null) {
+            return ResultData.fail("运行记录不存在: " + runId);
+        }
+        return ResultData.success(dto);
     }
 }

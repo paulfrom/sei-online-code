@@ -2,6 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
@@ -233,9 +234,10 @@ class FeatureDesignBuildServiceTest {
         when(taskService.save(any(Task.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedTask));
         when(cliRunnerRegistry.workspace(projId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
-        when(cliRunnerRegistry.execute(any(), any(), anyString(), anyString(), anyString(),
-                anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("success"));
+        CliRunResult successResult = new CliRunResult();
+        successResult.setOutput("success");
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(successResult));
 
         // 执行
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);

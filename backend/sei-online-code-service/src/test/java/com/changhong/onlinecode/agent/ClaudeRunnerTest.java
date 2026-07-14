@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClaudeRunnerTest {
@@ -44,9 +46,9 @@ class ClaudeRunnerTest {
                 """, "fake-claude");
 
         ClaudeRunner runner = new ClaudeRunner(fakeClaude.toString());
-        String result = runner.execute("it", "p", tempDir.toString(), null,
+        String result = runner.executeDetailed("it", null, null, "p", tempDir.toString(), null,
                 "{\"mcpServers\":{\"fetch\":{\"command\":\"uvx\"}}}")
-                .get(60, TimeUnit.SECONDS);
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertTrue(result.contains("mcpServers"));
         assertTrue(result.contains("fetch"));
@@ -60,13 +62,55 @@ class ClaudeRunnerTest {
                 """, "fake-claude-args");
 
         ClaudeRunner runner = new ClaudeRunner(fakeClaude.toString());
-        String result = runner.execute("it", "p", tempDir.toString(), null, " ")
-                .get(60, TimeUnit.SECONDS);
+        String result = runner.executeDetailed("it", null, null, "p", tempDir.toString(), null, " ")
+                .get(60, TimeUnit.SECONDS).getOutput();
 
         assertFalse(result.contains("--mcp-config"));
         assertFalse(result.contains("--strict-mcp-config"));
         assertTrue(result.contains("--add-dir"));
         assertTrue(result.contains("--permission-mode bypassPermissions"));
+    }
+
+    @Test
+    void execute_normalizesClaudeUsageEnvelope() throws Exception {
+        Path fakeClaude = installScript("""
+                #!/usr/bin/env bash
+                printf '{"result":"hello world","usage":{"input_tokens":80,"output_tokens":40,'
+                printf '"cache_read_input_tokens":20,"cache_creation_input_tokens":10}}\\n'
+                """, "fake-claude-usage");
+
+        ClaudeRunner runner = new ClaudeRunner(fakeClaude.toString());
+        CliRunResult runResult = runner.executeDetailed("it", null, null, "p", tempDir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS);
+
+        assertTrue(runResult.isProcessSucceeded());
+        assertEquals("hello world", runResult.getOutput());
+        AgentUsage usage = runResult.getUsage();
+        // input = input_tokens + cache_read + cache_creation
+        assertEquals(110L, usage.getInputTokens());
+        assertEquals(40L, usage.getOutputTokens());
+        assertEquals(20L, usage.getCacheReadTokens());
+        assertEquals(10L, usage.getCacheWriteTokens());
+        // total = input + output，不重复计算缓存分项
+        assertEquals(150L, usage.getTotalTokens());
+        assertEquals(com.changhong.onlinecode.dto.enums.UsageStatus.COMPLETE, usage.getStatus());
+    }
+
+    @Test
+    void execute_missingUsageMarksUnavailable() throws Exception {
+        Path fakeClaude = installScript("""
+                #!/usr/bin/env bash
+                printf '{"result":"no usage here"}\\n'
+                """, "fake-claude-no-usage");
+
+        ClaudeRunner runner = new ClaudeRunner(fakeClaude.toString());
+        CliRunResult runResult = runner.executeDetailed("it", null, null, "p", tempDir.toString(), null, null)
+                .get(60, TimeUnit.SECONDS);
+
+        assertTrue(runResult.isProcessSucceeded());
+        assertEquals("no usage here", runResult.getOutput());
+        assertEquals(com.changhong.onlinecode.dto.enums.UsageStatus.UNAVAILABLE, runResult.getUsage().getStatus());
+        assertNull(runResult.getUsage().getInputTokens());
     }
 
     @Test

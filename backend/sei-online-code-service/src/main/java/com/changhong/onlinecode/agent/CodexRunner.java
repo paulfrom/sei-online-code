@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.dto.run.RunLogFrame;
 import com.changhong.onlinecode.ws.RunLogWebSocketHub;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -75,13 +76,8 @@ public class CodexRunner implements CliRunner {
     }
 
     @Override
-    public CompletableFuture<String> execute(String iterationId, String prompt, String cwd, String model, String mcpConfig) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, null, null, prompt, cwd, model, mcpConfig));
-    }
-
-    @Override
-    public CompletableFuture<String> execute(String iterationId, String taskId, String runId,
-                                             String prompt, String cwd, String model, String mcpConfig) {
+    public CompletableFuture<CliRunResult> executeDetailed(String iterationId, String taskId, String runId,
+                                                           String prompt, String cwd, String model, String mcpConfig) {
         return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model, mcpConfig));
     }
 
@@ -91,8 +87,8 @@ public class CodexRunner implements CliRunner {
      * <p>per-run codex-home 在系统临时区建（避免污染用户 {@code ~/.codex/}），进程结束后
      * best-effort 清理。沙箱策略由 {@link CodexSandboxConfig} 按平台写入 config.toml。</p>
      */
-    private String runBlocking(String iterationId, String taskId, String runId, String prompt,
-                                String cwd, String model, String mcpConfig) {
+    private CliRunResult runBlocking(String iterationId, String taskId, String runId, String prompt,
+                                      String cwd, String model, String mcpConfig) {
         Path codexHome = null;
         try {
             codexHome = Files.createTempDirectory("codex-home-");
@@ -160,14 +156,15 @@ public class CodexRunner implements CliRunner {
 
                 waitForTurn(events, process, Duration.ofMinutes(30));
 
+                AgentUsage usage = buildUsage(events);
                 if (events.isFailed()) {
                     LOGGER.warn("codex app-server turn failed: iterationId={} reason={}", iterationId, events.failureReason());
                     emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
-                    return null;
+                    return failedResult(events.failureReason(), usage);
                 }
                 String output = stripFences(events.output());
                 emit(iterationId, taskId, runId, "system", "DONE", "PREVIEW");
-                return output.isBlank() ? null : output;
+                return successResult(output.isBlank() ? null : output, usage);
             } finally {
                 if (runId != null) {
                     activeProcesses.remove(runId);
@@ -181,21 +178,52 @@ public class CodexRunner implements CliRunner {
         } catch (IOException e) {
             LOGGER.warn("codex spawn failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            return failedResult(e.getMessage(), null);
         } catch (TimeoutException e) {
             LOGGER.warn("codex app-server timed out: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            return failedResult("codex app-server timed out", null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            return failedResult("interrupted", null);
         } catch (Exception e) {
             LOGGER.warn("codex app-server failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            return failedResult(e.getMessage(), null);
         } finally {
             if (codexHome != null) {
                 deleteTree(codexHome);
             }
         }
-        return null;
+    }
+
+    private AgentUsage buildUsage(CodexAppServerEvents events) {
+        AgentUsage usage = events.latestUsage();
+        if (usage == null) {
+            AgentUsage unavailable = new AgentUsage();
+            unavailable.setStatus(UsageStatus.UNAVAILABLE);
+            return unavailable;
+        }
+        // 收到终态且已有合法 usage 时标记 COMPLETE；进程提前退出但已有 usage 时标记 PARTIAL。
+        usage.setStatus(events.isTurnDone() ? UsageStatus.COMPLETE : UsageStatus.PARTIAL);
+        return usage;
+    }
+
+    private CliRunResult successResult(String output, AgentUsage usage) {
+        CliRunResult result = new CliRunResult();
+        result.setOutput(output);
+        result.setUsage(usage);
+        result.setProcessSucceeded(true);
+        return result;
+    }
+
+    private CliRunResult failedResult(String reason, AgentUsage usage) {
+        CliRunResult result = new CliRunResult();
+        result.setUsage(usage);
+        result.setProcessSucceeded(false);
+        result.setFailureReason(reason);
+        return result;
     }
 
     @Override

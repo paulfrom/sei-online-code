@@ -62,10 +62,7 @@ class CliRunnerRegistryTest {
     void cancel_routesToOwningRunner() {
         CliRunner cancellable = new CliRunner() {
             public String tool() { return "fake"; }
-            public CompletableFuture<String> execute(String i, String p, String c, String m, String mc) {
-                return CompletableFuture.completedFuture(null);
-            }
-            public CompletableFuture<String> execute(String i, String t, String r, String p, String c, String m, String mc) {
+            public CompletableFuture<CliRunResult> executeDetailed(String i, String t, String r, String p, String c, String m, String mc) {
                 return CompletableFuture.completedFuture(null);
             }
             public boolean cancel(String runId) { return "run-1".equals(runId); }
@@ -82,10 +79,12 @@ class CliRunnerRegistryTest {
                 new WorkspaceResolveResult(workspace.toString(), true, null));
         AtomicReference<String> actualCwd = new AtomicReference<>();
         CliRunner runner = capturingRunner(actualCwd);
-        CliRunnerRegistry boundRegistry = new CliRunnerRegistry(List.of(runner), workspaceManager);
+        CliRunnerRegistry boundRegistry = new CliRunnerRegistry(List.of(runner), workspaceManager, null);
 
         AgentWorkspace binding = boundRegistry.workspace("project-1");
-        boundRegistry.execute(binding, "fake", "iteration-1", "prompt", null, null).join();
+        boundRegistry.executeDetailed(binding,
+                new AgentInvocationContext("run-1", "iteration-1", null, null, null, "fake", null),
+                "prompt", null).thenApply(CliRunResult::getOutput).join();
 
         assertEquals(workspace.toAbsolutePath().normalize().toString(), actualCwd.get());
     }
@@ -100,26 +99,27 @@ class CliRunnerRegistryTest {
                 new WorkspaceResolveResult(changed.toString(), true, null));
         AtomicReference<String> actualCwd = new AtomicReference<>();
         CliRunnerRegistry boundRegistry = new CliRunnerRegistry(
-                List.of(capturingRunner(actualCwd)), workspaceManager);
+                List.of(capturingRunner(actualCwd)), workspaceManager, null);
 
         AgentWorkspace stale = boundRegistry.workspace("project-1");
 
         assertThrows(IllegalStateException.class,
-                () -> boundRegistry.execute(stale, "fake", "iteration-1", "prompt", null, null));
+                () -> boundRegistry.executeDetailed(stale,
+                        new AgentInvocationContext("run-1", "iteration-1", null, null, null, "fake", null),
+                        "prompt", null));
         assertEquals(null, actualCwd.get());
     }
 
     private static CliRunner capturingRunner(AtomicReference<String> cwd) {
         return new CliRunner() {
             public String tool() { return "fake"; }
-            public CompletableFuture<String> execute(String i, String p, String c, String m, String mc) {
-                cwd.set(c);
-                return CompletableFuture.completedFuture("ok");
-            }
-            public CompletableFuture<String> execute(String i, String t, String r, String p,
+            public CompletableFuture<CliRunResult> executeDetailed(String i, String t, String r, String p,
                                                      String c, String m, String mc) {
                 cwd.set(c);
-                return CompletableFuture.completedFuture("ok");
+                CliRunResult result = new CliRunResult();
+                result.setOutput("ok");
+                result.setProcessSucceeded(true);
+                return CompletableFuture.completedFuture(result);
             }
         };
     }

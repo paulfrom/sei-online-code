@@ -41,6 +41,59 @@ const useStyles = createStyles(({ token, css }) => ({
   highlightedRow: css`
     background: ${token.colorWarningBg};
   `,
+  reportBlock: css`
+    margin: 0;
+    padding: ${token.paddingSM}px;
+    background: ${token.colorFillTertiary};
+    border-radius: ${token.borderRadiusSM}px;
+    max-height: 480px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  `,
+  reportSection: css`
+    margin-bottom: ${token.marginMD}px;
+  `,
+  reportLabel: css`
+    font-weight: ${token.fontWeightStrong};
+    margin-bottom: ${token.marginXS}px;
+    display: block;
+  `,
+  reportTag: css`
+    margin-bottom: ${token.marginSM}px;
+  `,
+  commandItem: css`
+    margin-bottom: ${token.marginSM}px;
+    padding: ${token.paddingSM}px;
+    background: ${token.colorBgContainer};
+    border-radius: ${token.borderRadiusSM}px;
+  `,
+  commandCode: css`
+    font-family: ${token.fontFamilyCode};
+    font-size: ${token.fontSizeSM}px;
+    background: ${token.colorFillSecondary};
+    padding: ${token.paddingXS}px ${token.paddingSM}px;
+    border-radius: ${token.borderRadiusSM}px;
+    display: block;
+    margin-bottom: ${token.marginXS}px;
+    word-break: break-all;
+  `,
+  commandResult: css`
+    margin: 0;
+    font-size: ${token.fontSizeSM}px;
+    color: ${token.colorTextSecondary};
+  `,
+  findingItem: css`
+    margin: 0 0 ${token.marginXS}px 0;
+    padding-left: ${token.paddingMD}px;
+    position: relative;
+    &::before {
+      content: '•';
+      position: absolute;
+      left: 0;
+      color: ${token.colorTextSecondary};
+    }
+  `,
 }));
 
 const STATUS_META = {
@@ -63,6 +116,19 @@ const parseMetadata = (raw) => {
     return JSON.parse(raw);
   } catch {
     return {};
+  }
+};
+
+const parseValidationReport = (raw) => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && ('passed' in parsed || 'summary' in parsed)) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
   }
 };
 
@@ -92,6 +158,7 @@ const TaskTab = ({
 }) => {
   const { styles } = useStyles();
   const [scopeModal, setScopeModal] = useState({ open: false, title: '', files: [] });
+  const [reportModal, setReportModal] = useState({ open: false, title: '', content: '' });
   const [stopping, setStopping] = useState(false);
   const [rerunningTaskId, setRerunningTaskId] = useState(null);
 
@@ -165,6 +232,15 @@ const TaskTab = ({
   };
   const closeScope = () => setScopeModal((prev) => ({ ...prev, open: false }));
 
+  const openReport = (record, comment) => {
+    setReportModal({
+      open: true,
+      title: record.title || record.planTaskKey || record.id,
+      content: comment.content || '',
+    });
+  };
+  const closeReport = () => setReportModal((prev) => ({ ...prev, open: false }));
+
   const columns = [
     {
       title: 'Key',
@@ -208,20 +284,13 @@ const TaskTab = ({
       },
     },
     {
-      title: '最新验证报告',
-      width: 180,
-      render: (_v, record) => {
-        const comment = resultsByTask.get(record.id)?.validation;
-        return comment ? <Tooltip title={comment.content}>{comment.content}</Tooltip> : '-';
-      },
-    },
-    {
       title: '操作',
       dataIndex: 'id',
-      width: 280,
+      width: 320,
       render: (_id, record) => {
         const hasActiveRun = activeRunTaskIds.has(record.id);
         const rerunDisabled = hasActiveRun || !!rerunningTaskId;
+        const validationComment = resultsByTask.get(record.id)?.validation;
         return (
           <Space>
             {isRerunnable(record.status) && (
@@ -243,6 +312,14 @@ const TaskTab = ({
             <Button type="link" icon={<FileTextOutlined />} onClick={() => openScope(record)}>
               代码片段
             </Button>
+            {validationComment && (
+              <Button
+                type="link"
+                onClick={() => openReport(record, validationComment)}
+              >
+                验证报告
+              </Button>
+            )}
           </Space>
         );
       },
@@ -309,6 +386,62 @@ const TaskTab = ({
             ))}
           </pre>
         )}
+      </Modal>
+
+      <Modal
+        title={`最新验证报告 - ${reportModal.title}`}
+        open={reportModal.open}
+        onCancel={closeReport}
+        footer={<Button onClick={closeReport}>关闭</Button>}
+        width={800}
+      >
+        {(() => {
+          const report = parseValidationReport(reportModal.content);
+          if (!report) {
+            return <pre className={styles.reportBlock}>{reportModal.content || '暂无内容'}</pre>;
+          }
+          return (
+            <div className={styles.reportBlock}>
+              <div className={styles.reportSection}>
+                <Tag
+                  color={report.passed ? 'green' : report.passed === false ? 'red' : 'default'}
+                  className={styles.reportTag}
+                >
+                  {report.passed ? '通过' : report.passed === false ? '未通过' : '未知'}
+                </Tag>
+              </div>
+              {report.summary && (
+                <div className={styles.reportSection}>
+                  <span className={styles.reportLabel}>摘要</span>
+                  <div>{report.summary}</div>
+                </div>
+              )}
+              {Array.isArray(report.commands) && report.commands.length > 0 && (
+                <div className={styles.reportSection}>
+                  <span className={styles.reportLabel}>执行命令</span>
+                  {report.commands.map((cmd, index) => (
+                    <div key={index} className={styles.commandItem}>
+                      <code className={styles.commandCode}>{cmd.command}</code>
+                      <p className={styles.commandResult}>
+                        exitCode: {cmd.exitCode} · {cmd.result}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {Array.isArray(report.findings) && report.findings.length > 0 && (
+                <div className={styles.reportSection}>
+                  <span className={styles.reportLabel}>发现</span>
+                  {report.findings.map((finding, index) => (
+                    <p key={index} className={styles.findingItem}>
+                      {finding}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

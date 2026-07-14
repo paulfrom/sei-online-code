@@ -3,14 +3,18 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,6 +42,8 @@ class RequirementAgentServiceTest {
     private BuiltInSkillRegistry builtInSkillRegistry;
     private FailureInfoSupport failureInfoSupport;
     private RequirementCommentService requirementCommentService;
+    private AgentRunRecorder agentRunRecorder;
+    private RunDao runDao;
     private RequirementAgentService service;
 
     @BeforeEach
@@ -57,10 +63,16 @@ class RequirementAgentServiceTest {
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         requirementCommentService = mock(RequirementCommentService.class);
+        agentRunRecorder = mock(AgentRunRecorder.class);
+        runDao = mock(RunDao.class);
+        Run agentRun = new Run();
+        agentRun.setId("run-1");
+        when(agentRunRecorder.createAgentRun(any())).thenReturn(agentRun);
         service = new RequirementAgentService(requirementDao, agentService, skillService, projectService,
                 cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
                 mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
-                requirementCommentService, new com.fasterxml.jackson.databind.ObjectMapper());
+                requirementCommentService, agentRunRecorder, runDao,
+                new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test
@@ -73,8 +85,8 @@ class RequirementAgentServiceTest {
         when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
         when(agentService.findByName("prd-agent")).thenReturn(new Agent());
         when(projectService.findOne("p1")).thenReturn(new Project());
-        when(cliRunnerRegistry.execute(any(), any(), eq("req1"), anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("   "));
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(cliRunResult("   ")));
 
         service.spawnPrd("req1", null, "token-1");
 
@@ -112,8 +124,8 @@ class RequirementAgentServiceTest {
                 ## 功能需求
                 内容
                 """;
-        when(cliRunnerRegistry.execute(any(), any(), eq("req1"), anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(content));
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(cliRunResult(content)));
 
         service.spawnPrd("req1", null, "token-1");
 
@@ -131,12 +143,11 @@ class RequirementAgentServiceTest {
         context.setId("ctx1");
         when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
         when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
-        when(cliRunnerRegistry.execute(any(), any(),
-                org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"), anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture("""
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(cliRunResult("""
                         {"findings":[{"severity":"HIGH","message":"新增缓存策略尚未沉淀",
                         "suggestedAction":"交付后更新项目记忆"}]}
-                        """));
+                        """)));
 
         service.reviewMemory("req1", "# PRD", context);
 
@@ -158,18 +169,24 @@ class RequirementAgentServiceTest {
         latest.setPrdContent("new");
         RequirementDesignContext context = new RequirementDesignContext();
         context.setId("ctx1");
-        CompletableFuture<String> response = new CompletableFuture<>();
+        CompletableFuture<CliRunResult> response = new CompletableFuture<>();
         when(requirementDao.findOne("req1")).thenReturn(reviewed, latest);
         when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
-        when(cliRunnerRegistry.execute(any(), any(),
-                org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
-                anyString(), any(), any())).thenReturn(response);
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any())).thenReturn(response);
 
         service.reviewMemory("req1", "old", context);
-        response.complete("{\"findings\":[{\"message\":\"迟到差异\"}]}");
+        CliRunResult lateResult = new CliRunResult();
+        lateResult.setOutput("{\"findings\":[{\"message\":\"迟到差异\"}]}");
+        response.complete(lateResult);
 
         verify(requirementDao, never()).save(any(Requirement.class));
         verify(requirementCommentService, never()).append(anyString(), any(), any(), anyString(), any(),
                 anyString(), any());
+    }
+
+    private static CliRunResult cliRunResult(String output) {
+        CliRunResult result = new CliRunResult();
+        result.setOutput(output);
+        return result;
     }
 }

@@ -62,9 +62,10 @@ class ClaudeRunnerRealClaudeTest {
     void execute_returnsNonEmptyResult_whenClaudeResponds() throws Exception {
         // 确定性 echo prompt——claude 正常响应时必含 PONG，证明端到端 spawn + envelope 解析成功。
         String prompt = "Reply with exactly the word PONG and nothing else.";
-        CompletableFuture<String> future = runner.execute("real-claude-e2e", prompt, workdir.toString(), null, null);
+        CompletableFuture<CliRunResult> future = runner.executeDetailed("real-claude-e2e", null, null, prompt, workdir.toString(), null, null);
 
-        String result = future.get(120, TimeUnit.SECONDS);
+        CliRunResult runResult = future.get(120, TimeUnit.SECONDS);
+        String result = runResult != null ? runResult.getOutput() : null;
         assertNotNull(result, "claude 进程退出码非 0 或 result envelope 解析失败 → future 返回 null");
         assertFalse(result.isBlank(), "result 文本不得为空");
         assertTrue(result.toLowerCase().contains("pong"),
@@ -83,9 +84,10 @@ class ClaudeRunnerRealClaudeTest {
                 + " with exactly this single line and no extra text: " + marker
                 + ". Do not modify any other file. After writing it, reply with DONE.";
         try {
-            String result = runner.execute("real-claude-write-e2e", prompt,
+            CliRunResult writeRunResult = runner.executeDetailed("real-claude-write-e2e", null, null, prompt,
                             dataWorkspace.toString(), null, null)
                     .get(180, TimeUnit.SECONDS);
+            String result = writeRunResult != null ? writeRunResult.getOutput() : null;
 
             assertNotNull(result, "claude 进程退出码非 0 或 result envelope 解析失败");
             assertTrue(Files.exists(target), "Claude 必须在 project/data 第一个工作区写入测试文件: " + target);

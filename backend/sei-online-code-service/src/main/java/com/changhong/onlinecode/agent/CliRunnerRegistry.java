@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.agent;
 
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +21,9 @@ import java.util.concurrent.CompletableFuture;
  * {@link #resolve(String)} 在 tool 为 null/blank/未知时回落默认 claude（向后兼容：
  * 既有 agent {@code cliTool} 列为 null，行为不变）。</p>
  *
+ * <p>所有业务调用应使用带 {@link AgentInvocationContext} 的入口，确保每次 CLI 启动前已有
+ * 唯一已提交的 Agent Run。</p>
+ *
  * @author sei-online-code
  */
 @Component
@@ -30,18 +34,21 @@ public class CliRunnerRegistry {
 
     private final Map<String, CliRunner> runners;
     private final WorkspaceManager workspaceManager;
+    private final AgentRunRecorder agentRunRecorder;
 
     @Autowired
-    public CliRunnerRegistry(List<CliRunner> runners, WorkspaceManager workspaceManager) {
+    public CliRunnerRegistry(List<CliRunner> runners, WorkspaceManager workspaceManager,
+                             AgentRunRecorder agentRunRecorder) {
         this.runners = new HashMap<>();
         this.workspaceManager = workspaceManager;
+        this.agentRunRecorder = agentRunRecorder;
         for (CliRunner r : runners) {
             this.runners.put(r.tool(), r);
         }
     }
 
     CliRunnerRegistry(List<CliRunner> runners) {
-        this(runners, null);
+        this(runners, null, null);
     }
 
     /**
@@ -82,20 +89,49 @@ public class CliRunnerRegistry {
         return new AgentWorkspace(projectId, path);
     }
 
-    /** Execute only after revalidating that the binding still matches the project's current workspace. */
-    public CompletableFuture<String> execute(AgentWorkspace workspace, String tool,
-                                             String iterationId, String prompt,
-                                             String model, String mcpConfig) {
+    /**
+     * 执行一次 Agent CLI 调用，返回完整结果。
+     *
+     * @param workspace 已验证的项目工作区
+     * @param context   调用上下文，runId 必填
+     * @param prompt    提示词
+     * @param mcpConfig MCP 配置 JSON
+     * @return 完成后携带 {@link CliRunResult} 的 future
+     */
+    public CompletableFuture<CliRunResult> executeDetailed(AgentWorkspace workspace,
+                                                           AgentInvocationContext context,
+                                                           String prompt,
+                                                           String mcpConfig) {
+        Objects.requireNonNull(context, "AgentInvocationContext 不能为空");
+        Objects.requireNonNull(context.runId(), "runId 不能为空");
         String cwd = validate(workspace);
-        return resolve(tool).execute(iterationId, prompt, cwd, model, mcpConfig);
+        String tool = context.cliTool();
+        if (tool != null && !tool.isBlank() && !runners.containsKey(tool)) {
+            throw new IllegalArgumentException("未知的 CLI 工具: " + tool);
+        }
+        CompletableFuture<CliRunResult> future = resolve(tool).executeDetailed(
+                context.iterationId(),
+                context.taskId(),
+                context.runId(),
+                prompt,
+                cwd,
+                context.model(),
+                mcpConfig);
+        // CLI 完成后定向落 usage；落库失败不得改变业务 output future。
+        if (agentRunRecorder != null) {
+            future = future.whenComplete((result, ex) -> persistUsage(context.runId(), result, ex));
+        }
+        return future;
     }
 
-    /** Execute a fan-out run only in its validated project workspace. */
-    public CompletableFuture<String> execute(AgentWorkspace workspace, String tool,
-                                             String iterationId, String taskId, String runId,
-                                             String prompt, String model, String mcpConfig) {
-        String cwd = validate(workspace);
-        return resolve(tool).execute(iterationId, taskId, runId, prompt, cwd, model, mcpConfig);
+    private void persistUsage(String runId, CliRunResult result, Throwable ex) {
+        try {
+            if (result != null && result.getUsage() != null) {
+                agentRunRecorder.updateUsage(runId, result.getUsage());
+            }
+        } catch (Exception e) {
+            // usage 落库失败不影响业务输出。
+        }
     }
 
     private String validate(AgentWorkspace workspace) {

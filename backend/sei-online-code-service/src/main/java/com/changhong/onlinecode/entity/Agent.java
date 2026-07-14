@@ -3,6 +3,9 @@ package com.changhong.onlinecode.entity;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
@@ -35,6 +38,9 @@ import java.util.List;
         @Index(name = "uk_agent_name", columnList = "name", unique = true)
 })
 @Access(AccessType.FIELD)
+@Slf4j
+@NoArgsConstructor
+@AllArgsConstructor
 public class Agent extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

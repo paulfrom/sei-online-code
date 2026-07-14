@@ -3,13 +3,17 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.SpecDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.agent.AgentRunRecorder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,6 +41,8 @@ class SpecAgentServiceTest {
     private SkillMaterializer skillMaterializer;
     private BuiltInSkillRegistry builtInSkillRegistry;
     private FailureInfoSupport failureInfoSupport;
+    private AgentRunRecorder agentRunRecorder;
+    private RunDao runDao;
     private SpecAgentService service;
 
     @BeforeEach
@@ -55,8 +61,14 @@ class SpecAgentServiceTest {
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
+        agentRunRecorder = mock(AgentRunRecorder.class);
+        runDao = mock(RunDao.class);
+        Run agentRun = new Run();
+        agentRun.setId("run-1");
+        when(agentRunRecorder.createAgentRun(any())).thenReturn(agentRun);
         service = new SpecAgentService(specDao, agentService, skillService, projectLifecycleService,
-                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport);
+                cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
+                agentRunRecorder, runDao);
     }
 
     @Test
@@ -75,8 +87,10 @@ class SpecAgentServiceTest {
                   "entities":[{"key":"InventoryTask","fields":[{"name":"id","type":"string","description":"主键"}]}],
                   "apiContract":[{"method":"GET","path":"/api/inventory/tasks","requestShape":"InventoryQuery","responseShape":"ResultData<Page<InventoryTaskDto>>","description":"查询盘点任务"}]
                 """;
-        when(cliRunnerRegistry.execute(any(), any(), eq("p1"), anyString(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(truncated));
+        CliRunResult truncatedResult = new CliRunResult();
+        truncatedResult.setOutput(truncated);
+        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(truncatedResult));
 
         service.spawnRequirement("p1", null, "spec1");
 

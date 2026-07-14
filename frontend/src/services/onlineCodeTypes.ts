@@ -79,17 +79,12 @@ export type RunState =
   | 'FAILED'
   | 'CANCELLED';
 
-export type RunType =
-  | 'DEVELOPMENT' | 'VALIDATION_COMMAND' | 'TEST_REVIEW'
-  | 'PM_PLANNING' | 'PM_ACCEPTANCE' | 'DELIVERY';
-
 /** A single execution run of a coding task. */
 export interface RunDto {
   id: string;
   codingTaskId?: string | null;
   requirementId?: string | null;
   runNo?: number;
-  runType?: RunType | null;
   loopId?: string | null;
   cancelRequested?: boolean | null;
   invalidatedByCommentId?: string | null;

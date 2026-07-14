@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.AgentBriefWriter;
+import com.changhong.onlinecode.agent.AgentInvocationContext;
+import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
@@ -139,6 +141,10 @@ public class FeatureDesignBuildService {
         run.setTaskId(savedTask.getId());
         run.setIterationId(savedTask.getIterationId());
         run.setState(RunState.RUNNING);
+        run.setAgentId(devAgent.getId());
+        run.setAgentName(devAgent.getName());
+        run.setCliTool(devAgent.getCliTool());
+        run.setModel(devAgent.getModel());
         run.setWorktreePath(workspace.pathString());
         runNumberService.assign(run);
         OperateResultWithData<Run> runResult = runService.save(run);
@@ -158,14 +164,11 @@ public class FeatureDesignBuildService {
                 devAgent.getModel(),
                 devAgent.getMcpConfig() != null && !devAgent.getMcpConfig().isBlank(),
                 null);
-        CompletableFuture<String> executeFuture = cliRunnerRegistry.execute(workspace, devAgent.getCliTool(),
-                savedTask.getIterationId(),
-                savedTask.getId(),
-                savedRun.getId(),
-                prompt,
-                devAgent.getModel(),
-                devAgent.getMcpConfig()
-        );
+        CompletableFuture<String> executeFuture = cliRunnerRegistry.executeDetailed(workspace,
+                new AgentInvocationContext(savedRun.getId(), savedTask.getIterationId(), savedTask.getId(),
+                        devAgent.getId(), devAgent.getName(), devAgent.getCliTool(), devAgent.getModel()),
+                prompt, devAgent.getMcpConfig())
+                .thenApply(CliRunResult::getOutput);
         executeFuture.thenAccept(result -> {
             // 解析结果，判断成功或失败
             boolean success = parseSuccess(result);

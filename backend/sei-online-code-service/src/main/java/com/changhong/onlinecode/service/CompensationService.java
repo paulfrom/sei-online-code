@@ -17,7 +17,6 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
@@ -152,7 +151,8 @@ public class CompensationService {
     }
 
     private void failTimedOutPlanningRequirement(Run run, Date now) {
-        if (run.getRunType() != RunType.PM_PLANNING || run.getRequirementId() == null) {
+        // PM 规划 run 现以 agent_name 快照识别（RunType 已移除）。
+        if (!"pm-agent".equals(run.getAgentName()) || run.getRequirementId() == null) {
             return;
         }
         Requirement requirement = requirementDao.findOne(run.getRequirementId());

@@ -15,7 +15,6 @@ import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
@@ -215,8 +214,8 @@ class CompensationServiceTest {
         run.setId("run-plan");
         run.setRequirementId("req-plan");
         run.setLoopId("loop-1");
-        run.setRunType(RunType.PM_PLANNING);
         run.setState(RunState.RUNNING);
+        run.setAgentName("pm-agent");
         run.setStartedDate(new Date(now.getTime() - 31 * 60_000L));
         Requirement requirement = requirement("req-plan", RequirementAutomationStatus.PLANNING);
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
