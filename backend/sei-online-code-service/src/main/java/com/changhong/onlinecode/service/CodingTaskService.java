@@ -11,7 +11,6 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +33,7 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
 
     public CodingTaskService(CodingTaskDao dao,
                              RunDao runDao,
-                             @Lazy CodingTaskExecutionService executionService) {
+                             CodingTaskExecutionService executionService) {
         this.dao = dao;
         this.runDao = runDao;
         this.executionService = executionService;

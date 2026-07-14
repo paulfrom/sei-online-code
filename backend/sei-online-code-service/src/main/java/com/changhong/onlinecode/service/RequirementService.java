@@ -14,7 +14,6 @@ import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,7 +37,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private RequirementAutomationService requirementAutomationService;
 
     public RequirementService(RequirementDao dao,
-                              @Lazy RequirementAgentService requirementAgentService,
+                              RequirementAgentService requirementAgentService,
                               RequirementDesignContextDao requirementDesignContextDao,
                               RequirementDesignContextService requirementDesignContextService,
                               DesignMemoryValidationService designMemoryValidationService,
@@ -52,7 +51,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     }
 
     @Autowired
-    public void setRequirementAutomationService(@Lazy RequirementAutomationService requirementAutomationService) {
+    public void setRequirementAutomationService(RequirementAutomationService requirementAutomationService) {
         this.requirementAutomationService = requirementAutomationService;
     }
 

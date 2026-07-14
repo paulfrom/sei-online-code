@@ -14,7 +14,6 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,9 +39,9 @@ public class ProjectService extends BaseEntityService<Project> {
                           PlanService planService,
                           ProjectLifecycleService lifecycleService,
                           WorkspaceManager workspaceManager,
-                          @Lazy AgentMemoryTemplateService agentMemoryTemplateService,
-                          @Lazy MemoryJobService memoryJobService,
-                          @Lazy MemorySeedTemplateService memorySeedTemplateService) {
+                          AgentMemoryTemplateService agentMemoryTemplateService,
+                          MemoryJobService memoryJobService,
+                          MemorySeedTemplateService memorySeedTemplateService) {
         this.dao = dao;
         this.planService = planService;
         this.lifecycleService = lifecycleService;

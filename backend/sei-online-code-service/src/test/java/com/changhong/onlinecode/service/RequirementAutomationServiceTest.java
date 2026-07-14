@@ -52,7 +52,7 @@ class RequirementAutomationServiceTest {
     private RequirementDao requirementDao;
     private CodingTaskDao codingTaskDao;
     private ExecutionPlanDao executionPlanDao;
-    private CodingTaskScheduler codingTaskScheduler;
+    private ApplicationEventPublisher eventPublisher;
     private RequirementCommentService requirementCommentService;
     private RequirementDesignContextService requirementDesignContextService;
     private RunDao runDao;
@@ -66,7 +66,7 @@ class RequirementAutomationServiceTest {
         requirementDao = mock(RequirementDao.class);
         codingTaskDao = mock(CodingTaskDao.class);
         executionPlanDao = mock(ExecutionPlanDao.class);
-        codingTaskScheduler = mock(CodingTaskScheduler.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         requirementCommentService = mock(RequirementCommentService.class);
         requirementDesignContextService = mock(RequirementDesignContextService.class);
         runDao = mock(RunDao.class);
@@ -74,7 +74,7 @@ class RequirementAutomationServiceTest {
         pmAgentClient = mock(PmAgentClient.class);
         capturedPlanStatuses = new ArrayList<>();
 
-        service = new RequirementAutomationService(requirementDao, codingTaskDao, codingTaskScheduler);
+        service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher);
         service.setOptionalDependencies(executionPlanDao, requirementCommentService,
                 requirementDesignContextService, runDao, requirementDeliveryService,
                 pmAgentClient, new ObjectMapper());
@@ -132,6 +132,8 @@ class RequirementAutomationServiceTest {
         when(pmAgentClient.generatePlan(any(), any(), any(), any(), any(), any())).thenReturn(planResult);
 
         service.startInitialLoop("req-1");
+        service.executePreparedLoop("req-1", requirement.getActiveLoopId(),
+                ExecutionPlanType.INITIAL, "PRD 已确认，启动 PM 初始执行计划。");
 
         assertEquals(RequirementAutomationStatus.DEVELOPING, requirement.getAutomationStatus());
         assertNotNull(requirement.getActiveLoopId());
@@ -170,13 +172,15 @@ class RequirementAutomationServiceTest {
         when(pmAgentClient.generatePlan(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         service.startInitialLoop("req-1");
+        service.executePreparedLoop("req-1", requirement.getActiveLoopId(),
+                ExecutionPlanType.INITIAL, "PRD 已确认，启动 PM 初始执行计划。");
 
         assertEquals(RequirementAutomationStatus.FAILED, requirement.getAutomationStatus());
         verify(requirementCommentService).append(eq("req-1"), any(),
                 eq(RequirementCommentAuthorType.SYSTEM), eq("system"),
                 eq(RequirementCommentType.FAILURE), any(), eq(null));
         verify(codingTaskDao, never()).save(any(CodingTask.class));
-        verify(codingTaskScheduler, never()).schedule(any());
+        verify(eventPublisher, never()).publishEvent(any(CodingTaskSchedulingEvents.ScheduleRequested.class));
     }
 
     @Test
@@ -230,14 +234,11 @@ class RequirementAutomationServiceTest {
         requirement.setProjectId("proj-1");
         requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
         when(requirementDao.findOne("req-async")).thenReturn(requirement);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        service.setEventPublisher(publisher);
-
         service.startInitialLoop("req-async");
 
         assertNotNull(requirement.getActiveLoopId());
         assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
-        verify(publisher).publishEvent(any(RequirementAutomationLoopEvent.class));
+        verify(eventPublisher).publishEvent(any(RequirementAutomationLoopEvent.class));
         verify(pmAgentClient, never()).generatePlan(any(), any(), any(), any(), any(), any());
     }
 

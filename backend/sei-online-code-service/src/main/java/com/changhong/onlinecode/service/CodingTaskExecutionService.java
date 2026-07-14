@@ -28,7 +28,7 @@ import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,7 +64,7 @@ public class CodingTaskExecutionService {
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final CodingTaskChangeCollector codingTaskChangeCollector;
-    private CodingTaskScheduler codingTaskScheduler;
+    private final ApplicationEventPublisher eventPublisher;
 
     public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
                                       RunDao runDao,
@@ -79,7 +79,8 @@ public class CodingTaskExecutionService {
                                       DesignContextPromptAssembler designContextPromptAssembler,
                                       MemoryJobService memoryJobService,
                                       WorkspaceMemoryService workspaceMemoryService,
-                                      CodingTaskChangeCollector codingTaskChangeCollector) {
+                                      CodingTaskChangeCollector codingTaskChangeCollector,
+                                      ApplicationEventPublisher eventPublisher) {
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
         this.requirementService = requirementService;
@@ -94,14 +95,7 @@ public class CodingTaskExecutionService {
         this.memoryJobService = memoryJobService;
         this.workspaceMemoryService = workspaceMemoryService;
         this.codingTaskChangeCollector = codingTaskChangeCollector;
-    }
-
-    /**
-     * 延迟注入调度器，打破 CodingTaskScheduler ↔ CodingTaskExecutionService 循环依赖。
-     */
-    @Lazy
-    public void setCodingTaskScheduler(CodingTaskScheduler codingTaskScheduler) {
-        this.codingTaskScheduler = codingTaskScheduler;
+        this.eventPublisher = eventPublisher;
     }
 
     /** Requests logical cancellation and best-effort process termination. */
@@ -219,9 +213,7 @@ public class CodingTaskExecutionService {
             task.setFailureDetail("agentName=" + agentName);
             task.setLastFailedAt(new Date());
             codingTaskDao.save(task);
-            if (codingTaskScheduler != null) {
-                codingTaskScheduler.schedule(task.getRequirementId());
-            }
+            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(task.getRequirementId()));
             return ResultData.fail("开发代理不存在: " + agentName);
         }
 
@@ -332,16 +324,8 @@ public class CodingTaskExecutionService {
         runDao.save(persistedRun);
 
         if (schedulerManaged) {
-            if (codingTaskScheduler != null) {
-                codingTaskScheduler.onDevelopmentRunFinished(persistedTask.getId(), success, failureReason);
-            } else {
-                LOGGER.warn("scheduler-managed run finished but scheduler not injected, taskId={}", persistedTask.getId());
-                persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
-                codingTaskDao.save(persistedTask);
-                if (success && persistedTask.getExecutionPlanId() == null) {
-                    submitMemoryUpdateJob(persistedTask, persistedRun);
-                }
-            }
+            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                    persistedTask.getId(), success, failureReason));
             return;
         }
 

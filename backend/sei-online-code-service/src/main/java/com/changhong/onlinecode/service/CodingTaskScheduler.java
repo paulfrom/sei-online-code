@@ -19,7 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,19 +64,20 @@ public class CodingTaskScheduler {
     private final WorkspaceManager workspaceManager;
     private final RunDao runDao;
     private final CodingTaskChangeCollector changeCollector;
+    private final ApplicationEventPublisher eventPublisher;
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
     private RequirementCommentService requirementCommentService;
-    private RequirementAutomationService requirementAutomationService;
     private ValidationLoopService validationLoopService;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public CodingTaskScheduler(CodingTaskDao codingTaskDao,
                                RequirementDao requirementDao,
-                               @Lazy CodingTaskExecutionService executionService,
+                               CodingTaskExecutionService executionService,
                                ValidationCommandExecutor validationCommandExecutor,
                                WorkspaceManager workspaceManager,
                                RunDao runDao,
-                               CodingTaskChangeCollector changeCollector) {
+                               CodingTaskChangeCollector changeCollector,
+                               ApplicationEventPublisher eventPublisher) {
         this.codingTaskDao = codingTaskDao;
         this.requirementDao = requirementDao;
         this.executionService = executionService;
@@ -84,13 +85,12 @@ public class CodingTaskScheduler {
         this.workspaceManager = workspaceManager;
         this.runDao = runDao;
         this.changeCollector = changeCollector;
+        this.eventPublisher = eventPublisher;
     }
 
     @Autowired
-    public void setOptionalDependencies(RequirementCommentService requirementCommentService,
-                                        RequirementAutomationService requirementAutomationService) {
+    public void setRequirementCommentService(RequirementCommentService requirementCommentService) {
         this.requirementCommentService = requirementCommentService;
-        this.requirementAutomationService = requirementAutomationService;
     }
 
     @Autowired
@@ -214,9 +214,11 @@ public class CodingTaskScheduler {
             occupiedAreas.add(task.getArea());
             occupiedScopes.add(candidateScope);
         }
-        if (requirementAutomationService != null) {
-            requirementAutomationService.onPlanTasksSettled(requirementId);
-        }
+        eventPublisher.publishEvent(new SchedulingPassCompletedEvent(requirementId));
+    }
+
+    /** 调度轮次完成事件，由自动化编排边界判断计划是否已全部进入终态。 */
+    public record SchedulingPassCompletedEvent(String requirementId) {
     }
 
     /**

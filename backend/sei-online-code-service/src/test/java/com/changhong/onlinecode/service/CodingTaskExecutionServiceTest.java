@@ -22,6 +22,7 @@ import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.lang.reflect.Method;
 
@@ -46,7 +47,7 @@ class CodingTaskExecutionServiceTest {
     private MemoryJobService memoryJobService;
     private WorkspaceMemoryService workspaceMemoryService;
     private AgentService agentService;
-    private CodingTaskScheduler codingTaskScheduler;
+    private ApplicationEventPublisher eventPublisher;
     private ExecutionPlanDao executionPlanDao;
     private WorkspaceManager workspaceManager;
     private CliRunnerRegistry cliRunnerRegistry;
@@ -61,7 +62,7 @@ class CodingTaskExecutionServiceTest {
         memoryJobService = mock(MemoryJobService.class);
         workspaceMemoryService = mock(WorkspaceMemoryService.class);
         agentService = mock(AgentService.class);
-        codingTaskScheduler = mock(CodingTaskScheduler.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         executionPlanDao = mock(ExecutionPlanDao.class);
         workspaceManager = mock(WorkspaceManager.class);
         cliRunnerRegistry = mock(CliRunnerRegistry.class);
@@ -80,9 +81,9 @@ class CodingTaskExecutionServiceTest {
                 mock(DesignContextPromptAssembler.class),
                 memoryJobService,
                 workspaceMemoryService,
-                changeCollector
+                changeCollector,
+                eventPublisher
         );
-        service.setCodingTaskScheduler(codingTaskScheduler);
     }
 
     @Test
@@ -233,7 +234,8 @@ class CodingTaskExecutionServiceTest {
         invokeFinishRun(callbackRun, callbackTask, true, null, true);
 
         assertEquals(RunState.SUCCEEDED, persistedRun.getState());
-        verify(codingTaskScheduler).onDevelopmentRunFinished("task5", true, null);
+        verify(eventPublisher).publishEvent(
+                new CodingTaskSchedulingEvents.DevelopmentFinished("task5", true, null));
         verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
         verify(codingTaskDao, never()).save(any(CodingTask.class));
     }
@@ -258,7 +260,8 @@ class CodingTaskExecutionServiceTest {
         invokeFinishRun(callbackRun, callbackTask, false, "compile error", true);
 
         assertEquals(RunState.FAILED, persistedRun.getState());
-        verify(codingTaskScheduler).onDevelopmentRunFinished("task6", false, "compile error");
+        verify(eventPublisher).publishEvent(
+                new CodingTaskSchedulingEvents.DevelopmentFinished("task6", false, "compile error"));
         verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -281,7 +284,7 @@ class CodingTaskExecutionServiceTest {
         assertEquals(CodingTaskStatus.FAILED, task.getStatus());
         assertEquals("开发代理未找到", task.getFailureSummary());
         verify(codingTaskDao).save(task);
-        verify(codingTaskScheduler).schedule("req-7");
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested("req-7"));
     }
 
     @Test

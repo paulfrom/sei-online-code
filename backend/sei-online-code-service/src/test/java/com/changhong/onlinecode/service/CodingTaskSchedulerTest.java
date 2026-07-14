@@ -15,6 +15,7 @@ import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -44,6 +45,7 @@ class CodingTaskSchedulerTest {
     private ValidationCommandExecutor validationCommandExecutor;
     private WorkspaceManager workspaceManager;
     private RunDao runDao;
+    private ApplicationEventPublisher eventPublisher;
     private CodingTaskScheduler scheduler;
 
     private final AtomicInteger savedTasks = new AtomicInteger(0);
@@ -56,8 +58,10 @@ class CodingTaskSchedulerTest {
         validationCommandExecutor = mock(ValidationCommandExecutor.class);
         workspaceManager = mock(WorkspaceManager.class);
         runDao = mock(RunDao.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
-                validationCommandExecutor, workspaceManager, runDao, mock(CodingTaskChangeCollector.class));
+                validationCommandExecutor, workspaceManager, runDao, mock(CodingTaskChangeCollector.class),
+                eventPublisher);
         when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
@@ -66,6 +70,17 @@ class CodingTaskSchedulerTest {
         });
         when(workspaceManager.resolve(anyString())).thenReturn(
                 new WorkspaceResolveResult("/tmp/ws", true, WorkspaceSource.SCAFFOLD));
+    }
+
+    @Test
+    void schedule_publishesCompletionEventWithoutDependingOnAutomationService() {
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of());
+
+        scheduler.schedule("req-1");
+
+        verify(eventPublisher).publishEvent(new CodingTaskScheduler.SchedulingPassCompletedEvent("req-1"));
     }
 
     @Test

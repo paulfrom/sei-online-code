@@ -52,7 +52,7 @@ public class RequirementAutomationService {
 
     private final RequirementDao requirementDao;
     private final CodingTaskDao codingTaskDao;
-    private final CodingTaskScheduler codingTaskScheduler;
+    private final ApplicationEventPublisher eventPublisher;
     private ExecutionPlanDao executionPlanDao;
     private RequirementCommentService requirementCommentService;
     private RequirementDesignContextService requirementDesignContextService;
@@ -61,15 +61,14 @@ public class RequirementAutomationService {
     private PmAgentClient pmAgentClient;
     private CliRunnerRegistry cliRunnerRegistry;
     private ValidationLoopService validationLoopService;
-    private ApplicationEventPublisher eventPublisher;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAutomationService(RequirementDao requirementDao,
                                         CodingTaskDao codingTaskDao,
-                                        CodingTaskScheduler codingTaskScheduler) {
+                                        ApplicationEventPublisher eventPublisher) {
         this.requirementDao = requirementDao;
         this.codingTaskDao = codingTaskDao;
-        this.codingTaskScheduler = codingTaskScheduler;
+        this.eventPublisher = eventPublisher;
     }
 
     @Autowired
@@ -97,11 +96,6 @@ public class RequirementAutomationService {
     @Autowired
     public void setValidationLoopService(ValidationLoopService validationLoopService) {
         this.validationLoopService = validationLoopService;
-    }
-
-    @Autowired
-    public void setEventPublisher(ApplicationEventPublisher eventPublisher) {
-        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -340,7 +334,7 @@ public class RequirementAutomationService {
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
         requirementDao.save(requirement);
-        codingTaskScheduler.schedule(requirement.getId());
+        eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId()));
     }
 
     private String interruptActiveLoop(Requirement requirement, RequirementComment comment) {
@@ -389,11 +383,7 @@ public class RequirementAutomationService {
                                       ExecutionPlanType planType, String summary) {
         RequirementAutomationLoopEvent event = new RequirementAutomationLoopEvent(
                 requirementId, loopId, planType, summary);
-        if (eventPublisher != null) {
-            eventPublisher.publishEvent(event);
-        } else {
-            executePreparedLoop(requirementId, loopId, planType, summary);
-        }
+        eventPublisher.publishEvent(event);
     }
 
     private void createCodingTasks(String requirementId, String executionPlanId, String loopId,
@@ -499,7 +489,8 @@ public class RequirementAutomationService {
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
         requirementDao.save(requirement);
-        TransactionUtil.afterCommit(() -> codingTaskScheduler.schedule(requirement.getId()));
+        TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
+                new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId())));
     }
 
     private List<PlanTask> parsePlanTasks(String planJson) {
