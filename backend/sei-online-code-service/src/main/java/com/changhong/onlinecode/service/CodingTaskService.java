@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.dao.BaseEntityDao;
@@ -95,11 +96,21 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
                 && task.getStatus() != CodingTaskStatus.VALIDATION_FAILED) {
             return ResultData.fail("仅开发失败或验证失败任务可重跑");
         }
-        if (task.getExecutionPlanId() != null) {
-            return executionService.executePlanTask(id, task.getAssignedAgent(), rerunPrompt,
-                    com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION);
+        CodingTaskStatus failedStatus = task.getStatus();
+        if (dao.updateStatusIfMatch(id, failedStatus, CodingTaskStatus.RUNNING) == 0) {
+            return ResultData.fail("任务已被补偿任务或其他重跑请求抢占，请刷新后查看最新状态");
         }
-        return executionService.execute(id, rerunPrompt);
+        ResultData<CodingTaskDto> result;
+        if (task.getExecutionPlanId() != null) {
+            result = executionService.executePlanTask(id, task.getAssignedAgent(), rerunPrompt,
+                    TriggerSource.USER_ACTION);
+        } else {
+            result = executionService.execute(id, rerunPrompt);
+        }
+        if (result == null || !result.successful()) {
+            dao.updateStatusIfMatch(id, CodingTaskStatus.RUNNING, failedStatus);
+        }
+        return result;
     }
 
     /**

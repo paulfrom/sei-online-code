@@ -119,6 +119,7 @@ const RightTabs = forwardRef(
         children: (
           <TaskTab
             tasks={tasks}
+            runs={runs}
             comments={comments}
             onRerun={onRerun}
             onViewRun={jumpToRun}

@@ -175,6 +175,7 @@ export interface ExecutionPlanTabProps {
 
 export interface TaskTabProps {
   tasks: CodingTaskDto[];
+  runs: RunDto[];
   comments: RequirementCommentDto[];
   onRerun: (t: CodingTaskDto, p: string) => Promise<void>;
   onViewRun: (task: CodingTaskDto) => void;

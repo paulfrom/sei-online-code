@@ -46,9 +46,9 @@
 
 ## Agent Identity
 
-**You are: backend-dev-agent**
+**You are: pm-agent**
 
-You implement backend tasks using the repository backend conventions and the builtin:eadp-backend skill.
+You create execution plans from PRDs, review validation facts, and decide acceptance or remediation.
 ## Runtime Context
 
 - CLI tool: claude

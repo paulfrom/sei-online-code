@@ -105,15 +105,49 @@ class CodingTaskServiceTest {
         }) {
             CodingTask task = taskWithStatus(status);
             when(codingTaskDao.findOne(task.getId())).thenReturn(task);
+            when(codingTaskDao.updateStatusIfMatch(task.getId(), status, CodingTaskStatus.RUNNING))
+                    .thenReturn(1);
             when(executionService.execute(eq(task.getId()), eq("rerun-prompt")))
                     .thenReturn(ResultData.success(new CodingTaskDto()));
 
             ResultData<CodingTaskDto> result = service.rerun(task.getId(), "rerun-prompt");
 
             assertTrue(result.successful(), "status=" + status + " 应该允许重跑");
+            verify(codingTaskDao).updateStatusIfMatch(task.getId(), status, CodingTaskStatus.RUNNING);
             verify(executionService).execute(eq(task.getId()), eq("rerun-prompt"));
             clearInvocations(executionService);
+            clearInvocations(codingTaskDao);
         }
+    }
+
+    @Test
+    void rerun_claimedByCompensation_rejectsWithoutExecuting() {
+        CodingTask task = taskWithStatus(CodingTaskStatus.FAILED);
+        when(codingTaskDao.findOne(task.getId())).thenReturn(task);
+        when(codingTaskDao.updateStatusIfMatch(task.getId(), CodingTaskStatus.FAILED, CodingTaskStatus.RUNNING))
+                .thenReturn(0);
+
+        ResultData<CodingTaskDto> result = service.rerun(task.getId(), "rerun-prompt");
+
+        assertFalse(result.successful());
+        assertTrue(result.getMessage().contains("抢占"));
+        verify(executionService, never()).execute(any(), any());
+        verify(executionService, never()).executePlanTask(any(), any(), any(), any());
+    }
+
+    @Test
+    void rerun_executionServiceFailureRestoresFailedStatus() {
+        CodingTask task = taskWithStatus(CodingTaskStatus.FAILED);
+        when(codingTaskDao.findOne(task.getId())).thenReturn(task);
+        when(codingTaskDao.updateStatusIfMatch(task.getId(), CodingTaskStatus.FAILED, CodingTaskStatus.RUNNING))
+                .thenReturn(1);
+        when(executionService.execute(task.getId(), "rerun-prompt"))
+                .thenReturn(ResultData.fail("已有运行中 Run"));
+
+        ResultData<CodingTaskDto> result = service.rerun(task.getId(), "rerun-prompt");
+
+        assertFalse(result.successful());
+        verify(codingTaskDao).updateStatusIfMatch(task.getId(), CodingTaskStatus.RUNNING, CodingTaskStatus.FAILED);
     }
 
     @Test
@@ -165,6 +199,8 @@ class CodingTaskServiceTest {
         task.setExecutionPlanId("plan-1");
         task.setAssignedAgent("backend-dev-agent");
         when(codingTaskDao.findOne(task.getId())).thenReturn(task);
+        when(codingTaskDao.updateStatusIfMatch(task.getId(), CodingTaskStatus.VALIDATION_FAILED,
+                CodingTaskStatus.RUNNING)).thenReturn(1);
         when(executionService.executePlanTask(task.getId(), "backend-dev-agent", "修复验证",
                 com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION))
                 .thenReturn(ResultData.success(new CodingTaskDto()));

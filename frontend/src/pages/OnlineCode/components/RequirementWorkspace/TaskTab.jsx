@@ -69,6 +69,7 @@ const parseMetadata = (raw) => {
 /**
  * @param {{
  *   tasks: any[],
+ *   runs?: any[],
  *   comments?: any[],
  *   onRerun?: (t: any, p: string) => Promise<void>,
  *   onViewRun?: (t: any) => void,
@@ -80,6 +81,7 @@ const parseMetadata = (raw) => {
  */
 const TaskTab = ({
   tasks,
+  runs = [],
   comments = [],
   onRerun,
   onViewRun,
@@ -91,6 +93,7 @@ const TaskTab = ({
   const { styles } = useStyles();
   const [scopeModal, setScopeModal] = useState({ open: false, title: '', files: [] });
   const [stopping, setStopping] = useState(false);
+  const [rerunningTaskId, setRerunningTaskId] = useState(null);
 
   const resultsByTask = useMemo(() => {
     const result = new Map();
@@ -119,6 +122,16 @@ const TaskTab = ({
     return map;
   }, [tasks]);
 
+  const activeRunTaskIds = useMemo(() => {
+    const ids = new Set();
+    runs.forEach((run) => {
+      if (run && run.state === 'RUNNING' && run.codingTaskId) {
+        ids.add(run.codingTaskId);
+      }
+    });
+    return ids;
+  }, [runs]);
+
   useEffect(() => {
     if (highlightTaskKey && onHighlightTaskConsumed) {
       onHighlightTaskConsumed();
@@ -135,9 +148,16 @@ const TaskTab = ({
   };
 
   const handleRerun = async (task) => {
+    if (rerunningTaskId || activeRunTaskIds.has(task.id)) return;
     const prompt = window.prompt('请输入重跑提示词（必填）');
     if (!prompt) return;
-    if (onRerun) await onRerun(task, prompt);
+    if (!onRerun) return;
+    setRerunningTaskId(task.id);
+    try {
+      await onRerun(task, prompt);
+    } finally {
+      setRerunningTaskId(null);
+    }
   };
 
   const openScope = (task) => {
@@ -199,21 +219,33 @@ const TaskTab = ({
       title: '操作',
       dataIndex: 'id',
       width: 280,
-      render: (_id, record) => (
-        <Space>
-          {isRerunnable(record.status) && (
-            <Button type="link" icon={<RedoOutlined />} onClick={() => handleRerun(record)}>
-              重跑
+      render: (_id, record) => {
+        const hasActiveRun = activeRunTaskIds.has(record.id);
+        const rerunDisabled = hasActiveRun || !!rerunningTaskId;
+        return (
+          <Space>
+            {isRerunnable(record.status) && (
+              <Tooltip title={hasActiveRun ? '该任务已有运行中的 Run，请等待完成' : '重新执行当前失败任务'}>
+                <Button
+                  type="link"
+                  icon={<RedoOutlined />}
+                  loading={rerunningTaskId === record.id}
+                  disabled={rerunDisabled}
+                  onClick={() => handleRerun(record)}
+                >
+                  重新执行
+                </Button>
+              </Tooltip>
+            )}
+            <Button type="link" icon={<HistoryOutlined />} onClick={() => onViewRun && onViewRun(record)}>
+              查看运行
             </Button>
-          )}
-          <Button type="link" icon={<HistoryOutlined />} onClick={() => onViewRun && onViewRun(record)}>
-            查看运行
-          </Button>
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => openScope(record)}>
-            代码片段
-          </Button>
-        </Space>
-      ),
+            <Button type="link" icon={<FileTextOutlined />} onClick={() => openScope(record)}>
+              代码片段
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
