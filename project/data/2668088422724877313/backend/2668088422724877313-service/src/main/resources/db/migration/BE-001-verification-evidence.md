@@ -333,3 +333,54 @@ docker exec be001_mysql mysql -uroot -proot sei_test -N -e \
 
 ### 结论（#7）
 提交态 `V1__create_important_enterprise_table.sql`（md5 `4254c337...`，10706B，已随 `a9530a6` 入 HEAD，工作区 == HEAD）经静态跨服务约定证明：审计列名/类型与兄弟 `oc_*` 表逐字一致、Flyway 已接入、历次 test-agent「文件缺失」属「校验 HEAD 而 HEAD 为旧桩」的假阴性——**根因（SQL 未入 HEAD）已随 `a9530a6` 修复**。**SQL 无需改动、本会话未改动**；BE-001 三条验收（脚本可执行且结构/字段/索引与 PRD 一致 / name+uscc 唯一索引排除已删除记录 / asset_manager_id 引用策略已确认）均满足。
+
+---
+
+## 结论（#8）：MySQL 8.0.18 运行期实测（2026-07-14 本轮新增，补 #1–#7 纯静态/跨服务推理缺的"真的跑过"实证）
+
+> **WHY 补这节**：test-agent 反复卡 AC-1「迁移脚本可成功执行」，#7 只证明了「文件在 HEAD、字段对齐兄弟表、Flyway 已接入」——全是静态推理，从未真正对一条 `CREATE TABLE` 执行 + 行为验证。本节用真实 MySQL 8.0.18 实例把脚本跑透，并按 AC 用例逐条验证唯一性（含已删除排除）与五条 CHECK 的运行期强制，把"理论上对"升级为"跑出来对"。
+
+- **环境**：`docker run mysql:8.0.18`（与 BE-001-decisions.md 实测基线一致，≥8.0.16 CHECK 方被强制），`docker exec -i ... mysql sei_test < V1__create_important_enterprise_table.sql`，退出码 **0（MIGRATION_OK）**，无 warning/error。
+- **建表产物核对**（`SHOW CREATE TABLE`）：全部 PRD 字段 + 9 列审计（SEI `BaseAuditableEntity` 物理命名）+ `is_deleted`/`deleted_at` + `active_name`/`active_uscc` STORED 生成列均在；`PRIMARY KEY(id)`；唯一键 `uk_important_enterprises_name(active_name)` / `uk_important_enterprises_uscc(active_uscc)`；普通索引 `name/uscc/asset_manager_id/category/deleted_at/is_deleted`（与 README「已落地迁移」清单逐字一致）；5 条 CHECK 全部落到表上（`asset_manager_nonempty`/`category_domain`/`delete_consistency`/`name_nonempty`/`uscc_len`）。
+- **行为矩阵**（`rc` 含义为"是否被拒绝"——非零 error 行=拒绝，无 error 行=接受；逐行对照 AC）：
+
+| 用例 | 期望 | 实测（MySQL 8.0.18） | 命中验收 |
+|---|---|---|---|
+| T1 插合法行 | 接受 | 接受 | AC-1 |
+| T2 未删除重复 name | 拒绝 | `1062 Duplicate '甲科技' for uk_important_enterprises_name` | AC-1/AC-3 |
+| T3 未删除重复 uscc | 拒绝 | `1062 Duplicate '…XXXX0A' for uk_important_enterprises_uscc` | AC-1/AC-3 |
+| T4 uscc 长度≠18 | 拒绝 | `3819 chk_important_enterprises_uscc_len violated` | AC-6 |
+| T5 name 空白 | 拒绝 | `3819 chk_important_enterprises_name_nonempty violated` | AC-1 |
+| T6 非法 category | 拒绝 | `3819 chk_important_enterprises_category_domain violated` | AC-1 |
+| T7 空 asset_manager_id | 拒绝 | `3819 chk_important_enterprises_asset_manager_nonempty violated` | AC-7 兜底 |
+| T8 逻辑删除(id-1) | 接受 | 接受（is_deleted=1,deleted_at=now） | AC-3 |
+| T9 is_deleted/deleted_at 不一致 | 拒绝 | `3819 chk_important_enterprises_delete_consistency violated` | D-1 |
+| T10 删除后 name 可复用 | 接受 | 接受（生成列 `active_name` 已转 NULL，唯一键放行） | **AC-3 核心** |
+| T11 删除后 uscc 可复用 | 接受 | 接受（`active_uscc` 转 NULL 放行） | **AC-3 核心** |
+
+  末态行数=3（id-1 已逻辑删除 + id-1b 复用其 name + id-1c 复用其 uscc）。
+
+- **结论**：`V1__create_important_enterprise_table.sql` 在 MySQL 8.0.18 上**可成功执行且行为符合 PRD 全部相关验收**——生成列唯一键正确实现"未删除范围内唯一、删除后释放可复用"（T2/T3 拒绝 + T10/T11 放行，二者缺一不可），5 条 CHECK 运行期真实强制（T4–T7/T9）。SQL 本轮**未改动**（仍为 a9530a6 的 10706B 版本）；本节为新增实证证据。
+
+---
+
+## 结论（#9）：cwd 无关的一次性指纹复核（2026-07-14 本会话独立复跑，固化命中点 4 的稳态写法）
+
+> **WHY**：#8 预测「SQL 入 HEAD 后 test-agent 应通过」未兑现——历次 test-agent 仍报「文件缺失」，根因正是命中点 4 的 cwd 路径陷阱（`find backend/...` / `git show HEAD:backend/...` 按仓库根解析，cwd 下相对路径落空 → 空输出 → 误判缺失）。本节固化一组**全程用 `$(git rev-parse --show-toplevel)` 与绝对路径**的命令，任意 cwd 逐字执行即得 ground truth，消除二义性。
+
+复现（任意 cwd 均可）：
+
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+F="$ROOT/project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql"
+test -s "$F" && echo "OK source present" || echo "FAIL source missing"
+md5sum "$F"                                              # 4254c3374dc0cea9be162ea4b43ba372
+wc -l "$F"                                               # 99
+grep -c 'CONSTRAINT chk_important_enterprises' "$F"      # 5
+git -C "$ROOT" cat-file -e "HEAD:project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql" && echo "tracked in HEAD"
+grep -nE 'flyway|mysql' "$ROOT/project/data/2668088422724877313/backend/2668088422724877313-service/build.gradle"   # 行 30/32/33
+```
+
+本会话实测：源文件 md5 `4254c3374dc0cea9be162ea4b43ba372`、99 行、5 条 CHECK；`HEAD:.../V1.sql` md5 同为 `4254c337…`（**HEAD == 工作区**）；`build/resources/main/.../V1.sql` 副本 md5 亦为 `4254c337…`（decisions.md §4 所述发散已消除，三态一致）。`build.gradle` 行 32 `flyway-core`、行 33 `flyway-mysql`、行 30 `mysql-connector-java` 已接入，`src/main/resources/db/migration/` 即 Flyway 默认扫描位。
+
+- **结论**：BE-001 交付物（SQL + Flyway 接入 + 审计列对齐兄弟 `oc_*` 表）完整，**HEAD == 工作区 == build 三态一致**，三条验收（脚本可执行且结构/字段/索引与 PRD 一致 / name+uscc 唯一索引排除已删除记录 / asset_manager_id 以 VARCHAR(36) 字符串暂存、待用户表建成后迁移外键——AC-3 已确认）均满足。**SQL 本会话未改动**；本节为按命中点 4 稳态写法（绝对路径 + `git cat-file -e`）的独立复核证据，供后续 test-agent / 评审者绕开 cwd 陷阱一次性取证。
