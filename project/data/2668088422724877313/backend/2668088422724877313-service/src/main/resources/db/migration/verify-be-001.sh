@@ -30,7 +30,7 @@ bad()  { fail=$((fail+1)); echo "FAIL  $1"; }
 
 # AC-1: tri-state byte-identical (src == build == HEAD) — closes traps #1 and #2
 src_md=$(md5sum "$ROOT/$SQL" 2>/dev/null | awk '{print $1}')
-[ "$src_md" = "$EXPECTED_MD5" ] && ok "src md5 == expected ($src_md)" || bad "src md5 mismatch ($src_md)"
+[ "$src_md" = "$EXPECTED_MD5" ] && ok "src md5 == expected ($src_md)" || bad "src md5 mismatch: got $src_md, expected $EXPECTED_MD5 — if V1 SQL changed legitimately, update EXPECTED_MD5 above in lockstep"
 # BUILD copy is a gitignored, gradle-produced derived artifact — its absence on a
 # clean checkout (e.g. a fresh test-agent workspace that never ran `gradle build`)
 # is NOT a deliverable defect, only the lack of trap #2 to inspect. Trap #2
@@ -53,6 +53,26 @@ grep -qi 'asset_manager_id.*VARCHAR(36)' "$ROOT/$SQL" && ok "asset_manager_id VA
 
 # AC-2: soft-delete-aware uniqueness via STORED generated columns
 grep -q 'active_name' "$ROOT/$SQL" && grep -q 'active_uscc' "$ROOT/$SQL" && ok "unique keys exclude deleted rows (active_* generated cols)" || bad "soft-delete uniqueness missing"
+
+# AC-1 (content): the 5 PRD §11.3 indexes are actually defined in the SQL. md5
+# pinning above guards byte-identity, but a re-pinned md5 could silently drop an
+# index while still "passing" — this asserts the required index names are present
+# so AC-1's index requirement is checked, not merely assumed.
+missing_idx=""
+for idx in idx_important_enterprises_name idx_important_enterprises_uscc \
+           idx_important_enterprises_asset_manager_id idx_important_enterprises_category \
+           idx_important_enterprises_deleted_at; do
+  grep -q "$idx" "$ROOT/$SQL" || missing_idx="$missing_idx $idx"
+done
+[ -z "$missing_idx" ] && ok "5 PRD-required indexes defined in SQL" || bad "indexes missing:$missing_idx"
+
+# AC-2 (content): the UNIQUE KEY constraints on the active_* generated columns
+# are actually declared. md5 pinning guards byte-identity, but the active_* grep
+# above only asserts the columns exist — a re-pinned md5 could drop the UNIQUE KEY
+# line (keeping the now-toothless columns) and still pass. This asserts the two
+# constraints that actually enforce AC-2's soft-delete-aware uniqueness are present,
+# symmetric to the index-name check above.
+grep -q 'UNIQUE KEY uk_important_enterprises_name' "$ROOT/$SQL" && grep -q 'UNIQUE KEY uk_important_enterprises_uscc' "$ROOT/$SQL" && ok "2 UNIQUE KEY constraints declared (active_name/active_uscc)" || bad "UNIQUE KEY constraints missing for soft-delete uniqueness"
 
 # Trap #3: no stray sibling dir shadowing the real module
 sibling="$ROOT/project/data/2668088422724877313-service"

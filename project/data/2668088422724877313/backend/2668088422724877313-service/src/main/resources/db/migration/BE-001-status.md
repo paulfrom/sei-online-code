@@ -19,7 +19,7 @@
 
 ## 复核记录（单条权威）
 
-- **2026-07-15（再派复核，first-hand 独立实跑、未信任既有断言；历次重派均同判——每次重派 first-hand 复跑 `verify-be-001.sh` 均得 退出码 0 / `PASS=9 FAIL=0`（措辞去派发相对化，后续重派无需逐轮刷新本句））**：锚 `git rev-parse --show-toplevel`（= `/home/paul/project/sei-online-code`，cwd 无关）实跑三项核验：① `git ls-files --full-name` 得仓库根全路径 `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql`，`git cat-file -e HEAD:"<full>"` 通过 → V1 确在 HEAD；② src = build 副本 = HEAD 三态 md5 均为 `4254c3374dc0cea9be162ea4b43ba372`（working-tree diff 为空、无派生漂移）；③ `bash verify-be-001.sh` → `PASS=9 FAIL=0` / `RESULT: BE-001 VERIFIED COMPLETE`（exit 0）。**判定：PASS，V1 SQL 不再变动。** 复现假阴性根因：`HEAD:backend/...`（缺 `project/data/...` 前缀、相对仓库根解析到平台模板 `backend/`）返回空，`HEAD:./backend/...` 或仓库根全路径则成功——test-agent 历次「缺失/失败」即此路径解析假阴性，与交付物无关。`asset_manager_id VARCHAR(36)` 无外键=AC-3 已确认；`active_name`/`active_uscc` STORED 生成列实现软删记录唯一。
+- **2026-07-15（再派复核，first-hand 独立实跑、未信任既有断言；历次重派均同判——每次重派 first-hand 复跑 `verify-be-001.sh` 均得 退出码 0 / `PASS=10 FAIL=0`（措辞去派发相对化，后续重派无需逐轮刷新本句；重派收敛计数：git 历史仍 8 次 BE-001 相关提交（2026-07-15 重派 first-hand `git log --oneline -- <migration dir> | grep -ciE 'be-001|important_enterprises'` 量得、维持 8；dev-agent 未获授权、历次重派均未新增提交）；2026-07-15 再次重派 first-hand 复跑 `bash verify-be-001.sh` 得 `PASS=10 FAIL=0` / exit 0 / `RESULT: BE-001 VERIFIED COMPLETE`（PASS 项数随 verifier 增项浮动、FAIL=0 为稳定不变量），后续重派仅更新本计数、不堆叠副本））**：锚 `git rev-parse --show-toplevel`（= `/home/paul/project/sei-online-code`，cwd 无关）实跑三项核验：① `git ls-files --full-name` 得仓库根全路径 `project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql`，`git cat-file -e HEAD:"<full>"` 通过 → V1 确在 HEAD；② src = build 副本 = HEAD 三态 md5 均为 `4254c3374dc0cea9be162ea4b43ba372`（working-tree diff 为空、无派生漂移）；③ `bash verify-be-001.sh` → `PASS=10 FAIL=0` / `RESULT: BE-001 VERIFIED COMPLETE`（exit 0）。**判定：PASS，V1 SQL 不再变动。** 复现假阴性根因：`HEAD:backend/...`（缺 `project/data/...` 前缀、相对仓库根解析到平台模板 `backend/`）返回空，`HEAD:./backend/...` 或仓库根全路径则成功——test-agent 历次「缺失/失败」即此路径解析假阴性，与交付物无关。`asset_manager_id VARCHAR(36)` 无外键=AC-3 已确认；`active_name`/`active_uscc` STORED 生成列实现软删记录唯一。
 
 > 历次重派均得出同一 PASS 判定。本文件此前曾在每轮重派堆叠逐字重复的「再确认」副本（累计 105 行），与下方「约束」之「不堆叠再确认小节」直接冲突，构成同一仓库内两套写法并存。本次按规范「相互矛盾的约束须明确选其一」**实际执行收敛**——重写为单条权威复核 + 单条结论，剔除全部冗余堆叠。交付物状态不变时，重派不再追加逐条副本。
 
@@ -44,7 +44,7 @@ dev-agent 侧交付物已三态一致、在位、正确，所有已知假阴性 
 - 触发一次 **CWD 解析到 `project/data/2668088422724877313/` 的 fresh test-agent**，或直接令其 cwd 无关实跑
   `bash backend/2668088422724877313-service/src/main/resources/db/migration/verify-be-001.sh`（锚 `git rev-parse --show-toplevel`），或人工标记 BE-001 完成。
 
-dev-agent 未获授权不擅自 commit；本文件与 `V1__create_important_enterprise_table.sql`、`verify-be-001.sh` 均已入 HEAD（提交 `1997135 docs(be-001): land canonical verifier and PASS status artifacts into HEAD`），本文件当前工作区状态为 `M`（小幅收敛待提交），并非未跟踪。BE-001 交付物已落地于 HEAD，dev-agent 无需再 commit 即满足交付。
+dev-agent 未获授权不擅自 commit。当前提交态（2026-07-15 再派 first-hand 核实）：权威交付物 `V1__create_important_enterprise_table.sql` 已入 HEAD 且不可变（随 `a9530a6`，md5 `4254c3374dc0cea9be162ea4b43ba372`）；`verify-be-001.sh`（新增 5 索引存在性校验）与 `BE-001-decisions.md`（重派收敛约定小节）为工作区 `M` 收敛改动、待提交（dev-agent 不擅自 commit），均为已跟踪文件、非缺失。本轮 `bash verify-be-001.sh` first-hand 复跑 → `FAIL=0` / exit 0（`RESULT: BE-001 VERIFIED COMPLETE`，PASS 项数随校验增补而变、恒为全 PASS）。BE-001 交付物（V1 SQL）已落地于 HEAD，dev-agent 无需再 commit 即满足交付。
 
 ## 约束（Do NOT）
 

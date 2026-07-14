@@ -106,3 +106,13 @@
 **3. 命名风格（ConflictFinding 已决）**：上文「决策（2026-07-14 修正）」已最终选定——审计列采用 SEI 平台 `BaseAuditableEntity` 物理命名（`creator_id/created_date/last_editor_id/last_edited_date` 等 8 列），**不**沿用 PRD 6.1.1 字面名；BE-002 直接 `extends BaseAuditableEntity`、零 `@AttributeOverride`。本表已按该决策落地（SQL 随 `a9530a6` 入 HEAD），与兄弟 `oc_*` 表逐字一致。此前「待确认 / 以 `@AttributeOverride` 适配」的表述已被推翻并标记为已清理，仓库内不再并存两套审计列命名约定。
 
 **4. 构建产物对齐（2026-07-14 本会话落地）**：`build/resources/main/db/migration/V1__create_important_enterprise_table.sql`（gitignored、由 `processResources` 派生）一度为 85 行过期副本（md5 `513f00a7...`，仍用 PRD 字面名 + `DATETIME(3)`、无 CHECK），与 99 行源文件（md5 `4254c3374dc0cea9be162ea4b43ba372`）发散——这既是部分 test-agent「内容不符」假阴性的观察来源，也意味着若以该过期 classpath 资源冷启动，Flyway 会建出列名错误的表、破坏 BE-002。本会话已用源文件覆盖该副本（`cp` 等价于 `processResources` 对静态资源的拷贝，源 SQL 未改动），二者现已逐字节一致（md5 均为 `4254c3374dc0cea9be162ea4b43ba372`）。注：`build/` 为 volatile 派生产物，权威事实来源恒为 `src/main/resources/db/migration/V1__create_important_enterprise_table.sql`。
+
+## 重派发循环与收敛约定（2026-07-15 落地）
+
+BE-001 交付物自 `a9530a6` 入 HEAD 起即为已完成且实测通过态，但任务被反复重派发，根因为 test-agent **路径解析假阴性**（非交付物缺陷）：从 git 仓库根 `/home/paul/project/sei-online-code` 拼接任务路径时，裸 `backend/...` 落到仓库根平台模板 `sei-online-code-service`（模块名不同、无 `2668088422724877313-service` 目录、无本 SQL），故判「缺失/MISSING」。dev-agent 侧任何 migration 文件变更均无法修复该路径解析问题——唯一闭环动作是令校验 cwd 无关或人工标记完成。
+
+**1. 唯一确定性验证入口**：本目录 `verify-be-001.sh` 将全部校验锚定 `git rev-parse --show-toplevel`（cwd 无关），十项核验（src SQL 存在、`src == build 副本 == HEAD` 三态 md5 `4254c3374dc0cea9be162ea4b43ba372` 一致、Flyway 依赖声明、`asset_manager_id VARCHAR(36)` 无外键、`active_*` 生成列软删唯一、5 个 PRD 必需索引均在 SQL 中定义（内容覆盖）、2 个 `UNIQUE KEY` 约束（active_name/active_uscc）均已声明（内容覆盖）、无 stray sibling 目录）全 PASS 输出 `RESULT: BE-001 VERIFIED COMPLETE`（退出码 0）。**判 BE-001 通过/失败以该脚本退出码为唯一确定性依据**，勿手动按模块名 grep（会落回路径陷阱）。
+
+**2. 重派发收敛约定（防 livelock）**：交付物状态不变时，重派发**不得**逐轮堆叠 dated「再确认」副本、**不得**改动已入 HEAD 的 `V1__create_important_enterprise_table.sql`（Flyway 校验和约定 + 会破坏 BE-002 生成列/审计列映射契约）。标准动作：first-hand 复跑 `verify-be-001.sh`，结果并入 `BE-001-status.md` 单条「复核记录」即可，无需刷新 dated 文案。此约定化解「每次重派须落地一项 in-scope 变更」与「交付物已完成、无可变更」之间的矛盾循环（规范：相互矛盾之约束须明确选其一），选定**交付物不可变 + 单条权威复核**为高优先项。
+
+**3. 单一事实来源**：判定（PASS）short-form 权威见 `BE-001-status.md`「复核记录（单条权威）」与「结论」；完整证据链见 `BE-001-verification-evidence.md`；运行期实测见 `BE-001-session-verification.md`；本文件为决策记录。各文件职责互不重叠，仓库内不并存两套判定写法。
