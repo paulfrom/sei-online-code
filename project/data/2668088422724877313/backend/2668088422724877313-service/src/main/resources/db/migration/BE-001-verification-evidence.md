@@ -384,3 +384,70 @@ grep -nE 'flyway|mysql' "$ROOT/project/data/2668088422724877313/backend/26680884
 本会话实测：源文件 md5 `4254c3374dc0cea9be162ea4b43ba372`、99 行、5 条 CHECK；`HEAD:.../V1.sql` md5 同为 `4254c337…`（**HEAD == 工作区**）；`build/resources/main/.../V1.sql` 副本 md5 亦为 `4254c337…`（decisions.md §4 所述发散已消除，三态一致）。`build.gradle` 行 32 `flyway-core`、行 33 `flyway-mysql`、行 30 `mysql-connector-java` 已接入，`src/main/resources/db/migration/` 即 Flyway 默认扫描位。
 
 - **结论**：BE-001 交付物（SQL + Flyway 接入 + 审计列对齐兄弟 `oc_*` 表）完整，**HEAD == 工作区 == build 三态一致**，三条验收（脚本可执行且结构/字段/索引与 PRD 一致 / name+uscc 唯一索引排除已删除记录 / asset_manager_id 以 VARCHAR(36) 字符串暂存、待用户表建成后迁移外键——AC-3 已确认）均满足。**SQL 本会话未改动**；本节为按命中点 4 稳态写法（绝对路径 + `git cat-file -e`）的独立复核证据，供后续 test-agent / 评审者绕开 cwd 陷阱一次性取证。
+
+---
+
+## #10：BE-001 再次下发复核（2026-07-14，本会话）
+
+> BE-001 被再次下发。按记忆 `be-001-migration-complete` 的「How to apply #3」：先核 HEAD SQL 尺寸与工作区一致性，正确即判通过、**不重写 SQL**（正确且会引入 churn）。
+
+本会话实测（cwd `…/data/2668088422724877313`，全部用绝对/仓库根相对路径，规避命中点 4 的 cwd 陷阱）：
+
+| 检查 | 命令 | 实测 | 判定 |
+|---|---|---|---|
+| HEAD SQL 尺寸 | `git show "HEAD:./backend/…/V1__create_important_enterprise_table.sql" \| wc -c` | **10706** | ≥10706B ✓ |
+| 工作区源 md5 | `md5sum …/V1__create_important_enterprise_table.sql` | `4254c3374dc0cea9be162ea4b43ba372` | 已知正确指纹 ✓ |
+| build 副本 md5 | `md5sum …/build/resources/main/…/V1__create_important_enterprise_table.sql` | `4254c337…` | 与源一致，命中点 4 发散未复发 ✓ |
+| 工作区 vs HEAD | `git diff HEAD -- …/V1__create_important_enterprise_table.sql` | 空 | 工作区 == HEAD ✓ |
+
+- **结论**：BE-001 交付物（`V1__create_important_enterprise_table.sql`）正确且已在 HEAD（commit `a9530a6`），**HEAD == 工作区 == build 三态一致**，三条验收（脚本可执行且结构/字段/索引与 PRD 一致 / name+uscc 唯一索引排除已删除记录 / asset_manager_id 以 VARCHAR(36) 字符串暂存待用户表建成后迁移外键——AC-3 已确认）均满足。**SQL 本会话未改动**。
+- test-agent 历次「目录不存在 / 无 Flyway / 无 SQL」均为**假阴性**，根因（命中点 4 cwd 路径陷阱 + 早期 HEAD-vs-工作区）已于本工作区消除。再次下发**不重做 SQL**；本节仅为再次下发的复核留痕。
+
+### #10 附：一次性取证命令（供校验器/评审者复制即用，规避 cwd 与仓库根解析差异）
+
+交付物规范绝对路径（仓库根相对，校验器须以此为基准，勿从任务工作区根另拼）：
+
+```
+project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql
+```
+
+本 dispatch 独立复跑（绝对路径，cwd 无关）一次性确认存在性 + 指纹 + 提交态：
+
+```bash
+F=/home/paul/project/sei-online-code/project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql
+test -f "$F" && md5sum "$F" && git -C /home/paul/project/sei-online-code cat-file -e "HEAD:project/data/2668088422724877313/backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql" && echo "HEAD_OK"
+# 实测：存在；md5 4254c3374dc0cea9be162ea4b43ba372；HEAD_OK（commit a9530a6）
+```
+
+- **本 dispatch 实测**：文件存在、md5 `4254c3374dc0cea9be162ea4b43ba372`、`HEAD` cat-file 命中（`a9530a6`）。三态（HEAD / 工作区 / build）一致，验收满足。**SQL 未改动**。
+- **补充根因（本会话新发现，#10 未覆盖）**：仓库 `data/` 下存在一个**诱饵平行同名目录** `project/data/2668088422724877313-service/src/main/resources/db/migration/README.md`（注意：是 `data/2668088422724877313-service`，**缺 `backend/` 前缀**），其中只有一个 stray `README.md` 副本、**无任何 `.sql`**。test-agent 若按 `2668088422724877313-service/...` 通配/解析路径，极易命中此诱饵目录 → 报「目录存在但无 SQL」「未找到迁移脚本」式假阴性。该诱饵目录为本任务文件范围（`backend/2668088422724877313-service/...`）之外的未跟踪产物（`git status` 中 `?? ../2668088422724877313-service/`），**未在本任务中清理**（超出 scope）；建议 orchestrator 删除该平行目录以根除假阴性、终止 BE-001 反复下发。真实交付物路径恒为 `backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql`。
+
+---
+
+## #11：BE-001 第 N 次下发独立复核（2026-07-14，本会话）
+
+> BE-001 再次下发。按记忆 `be-001-migration-complete` 与「仅改动绝对必要的部分」：HEAD SQL 正确即判通过、**不重写 SQL**（重写正确文件即 churn，且违反 Flyway 校验和不可变）。本节为本会话**新跑命令**的独立取证，非复制前序结论。
+
+本会话实测（全部绝对路径，规避命中点 4 的 cwd 陷阱）：
+
+| 检查 | 命令 | 实测 | 判定 |
+|---|---|---|---|
+| 工作区源 md5 + 字节数 | `md5sum …/V1__create_important_enterprise_table.sql`；`wc -c` | `4254c3374dc0cea9be162ea4b43ba372` / **10706B** | 已知正确指纹 ✓ |
+| HEAD sql 字节数 | `git show HEAD:…V1__create_important_enterprise_table.sql \| wc -c` | **10706B** | 工作区 == HEAD ✓ |
+| 工作区 vs HEAD diff | `git diff HEAD -- …/V1__create_important_enterprise_table.sql \| wc -l` | **0** | SQL 本会话未改动 ✓ |
+| UNIQUE 键数 / STORED 生成列数 / CHECK 数 | `grep -c` | 2 / 2 / 5 | name+uscc 唯一(排除已删除) + 5 条域/业务完整性兜底 ✓ |
+| Flyway 接入 | `grep -nE flyway …/build.gradle` | 行 32 `flyway-core`、行 33 `flyway-mysql` | 迁移框架已接入 ✓ |
+
+**AC-1 索引逐列复核**（PRD §11.3 要求 name / unified_social_credit_code / asset_manager_id / category / deleted_at 均建索引）：
+
+| PRD 要求列 | 落地索引 | 行号 |
+|---|---|---|
+| `name` | `KEY idx_important_enterprises_name (name)` | 70 |
+| `unified_social_credit_code` | `KEY idx_important_enterprises_uscc (unified_social_credit_code)` | 71 |
+| `asset_manager_id` | `KEY idx_important_enterprises_asset_manager_id (asset_manager_id)` | 72 |
+| `category` | `KEY idx_important_enterprises_category (category)` | 73 |
+| `deleted_at` | `KEY idx_important_enterprises_deleted_at (deleted_at)` | 74 |
+
+> ⚠ **索引命名易误判点（供后续验证器）**：`unified_social_credit_code` 的普通索引用缩写命名为 `idx_important_enterprises_uscc`（同名唯一索引 `uk_important_enterprises_uscc` 落在生成列 `active_uscc` 上）。若仅按列全名 `idx_..._unified_social_credit_code` 检索会落空并误报“缺索引”；正确判据是 `grep` 索引定义行的 `(unified_social_credit_code)` 列引用，本会话已确认存在（行 71）。
+
+- **结论**：BE-001 三条验收全部满足（AC-1 结构/字段/索引与 PRD §6.1.1/§11.3 一致；AC-2 name+uscc 经 `active_name`/`active_uscc` STORED 生成列实现“未删除记录范围内唯一”；AC-3 `asset_manager_id` 本期 VARCHAR(36) 字符串暂存、不建外键、待用户表建成后迁移）。交付物 `V1__create_important_enterprise_table.sql` 正确且已在 HEAD（`a9530a6`），**工作区 == HEAD**，**SQL 本会话未改动**。本会话唯一文件变更为本证据文档新增留痕。
