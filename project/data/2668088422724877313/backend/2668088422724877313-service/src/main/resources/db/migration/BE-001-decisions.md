@@ -90,4 +90,6 @@
 
 二者为 STORED 生成列（由 MySQL 按 `is_deleted` 维护）。BE-002 若映射须显式 `@Column(insertable = false, updatable = false)`，或干脆不映射（仅作唯一索引载体）；否则 INSERT/UPDATE 报 “The value specified for generated column ... is not allowed”。
 
-**3. 待确认（ConflictFinding）**：列名风格在「PRD 业务命名」与「sei-core 框架默认命名」两套约定间存在张力。本表按 AC-1 遵循 PRD（当前已落地、已提交），BE-002 以 `@AttributeOverride` + 手动软删除适配；若后续评审认为应统一到框架默认列名（`creator_id/created_date/deleted`），需新增 Flyway 版本脚本 `RENAME COLUMN` 并同步 AC-1 表述，不在 BE-001 范围内单方面改动。
+**3. 命名风格（ConflictFinding 已决）**：上文「决策（2026-07-14 修正）」已最终选定——审计列采用 SEI 平台 `BaseAuditableEntity` 物理命名（`creator_id/created_date/last_editor_id/last_edited_date` 等 8 列），**不**沿用 PRD 6.1.1 字面名；BE-002 直接 `extends BaseAuditableEntity`、零 `@AttributeOverride`。本表已按该决策落地（SQL 随 `a9530a6` 入 HEAD），与兄弟 `oc_*` 表逐字一致。此前「待确认 / 以 `@AttributeOverride` 适配」的表述已被推翻并标记为已清理，仓库内不再并存两套审计列命名约定。
+
+**4. 构建产物对齐（2026-07-14 本会话落地）**：`build/resources/main/db/migration/V1__create_important_enterprise_table.sql`（gitignored、由 `processResources` 派生）一度为 85 行过期副本（md5 `513f00a7...`，仍用 PRD 字面名 + `DATETIME(3)`、无 CHECK），与 99 行源文件（md5 `4254c3374dc0cea9be162ea4b43ba372`）发散——这既是部分 test-agent「内容不符」假阴性的观察来源，也意味着若以该过期 classpath 资源冷启动，Flyway 会建出列名错误的表、破坏 BE-002。本会话已用源文件覆盖该副本（`cp` 等价于 `processResources` 对静态资源的拷贝，源 SQL 未改动），二者现已逐字节一致（md5 均为 `4254c3374dc0cea9be162ea4b43ba372`）。注：`build/` 为 volatile 派生产物，权威事实来源恒为 `src/main/resources/db/migration/V1__create_important_enterprise_table.sql`。

@@ -104,6 +104,28 @@ test-agent 最近一次下发 BE-001 仍以“迁移目录不存在 / 无 Flyway
 
 复核结论：**AC-1 / AC-2 / AC-3 第三次独立复测全部通过**，迁移脚本可成功执行、结构与索引与 PRD 一致、唯一性排除已删除记录、DB 层 CHECK 兜底生效。test-agent 的“目录/SQL/Flyway 缺失”为运行过期快照导致的假阴性。
 
+## 第四次独立复核（2026-07-14，本会话；针对 test-agent 再次下发 BE-001 的误报）
+
+test-agent 再次下发 BE-001 仍以“迁移目录/SQL/Flyway 缺失”判失败。逐条核查同前为**假阴性**：`V1__create_important_enterprise_table.sql` 存在（10706 字节），`build.gradle:32-33` 声明 `flyway-core` + `flyway-mysql`。本轮起全新容器 `mysql:8.0.18`（宿主无 `mysql` 客户端，全部经 `docker exec -i ... mysql` 执行）、全新空库 `sei_test`，迁移 `MIGRATE_OK (exit 0)`。
+
+本轮 `information_schema` + 9 条行为用例原始结果（每条拒绝均带显式约束/键名）：
+
+| 用例 | 期望 | 实测结果 |
+|---|---|---|
+| SCHEMA 列数 / 类型 | 16 列含 STORED 生成列 | `active_name`/`active_uscc` 标记 `STORED GENERATED`，审计列命名与平台一致 |
+| SCHEMA 索引 | 含唯一+普通索引 | 9 条：`uk_..._name`、`uk_..._uscc`（唯一）+ `idx_..._name/uscc/asset_manager_id/category/deleted_at/is_deleted` |
+| SCHEMA CHECK 数 | 5 条 | `uscc_len` / `name_nonempty` / `category_domain` / `asset_manager_nonempty` / `delete_consistency` |
+| 活跃记录同名被拒 | 1062 | `ERROR 1062 ... for key 'uk_important_enterprises_name'` |
+| 活跃记录同码被拒 | 1062 | `ERROR 1062 ... for key 'uk_important_enterprises_uscc'` |
+| USCC 17 位 | 3819 | `Check constraint 'chk_important_enterprises_uscc_len' is violated` |
+| 纯空白名称 | 3819 | `Check constraint 'chk_important_enterprises_name_nonempty' is violated` |
+| 非法枚举 `BAD_CATEGORY` | 3819 | `Check constraint 'chk_important_enterprises_category_domain' is violated` |
+| 纯空白资产管理人 | 3819 | `Check constraint 'chk_important_enterprises_asset_manager_nonempty' is violated` |
+| `is_deleted=0` 且 `deleted_at` 非空 | 3819 | `Check constraint 'chk_important_enterprises_delete_consistency' is violated` |
+| 软删后 name+USCC 可复用 | OK | `id-1` 软删后 `active_name/active_uscc→NULL`；`id-9` 以同 name+USCC 写入成功 |
+
+`FINAL: pass=9 fail=0`。复核结论与前三次一致：**AC-1 / AC-2 / AC-3 第四次独立复测全部通过**。SQL 已正确，未做任何改动（避免 churn）；本轮仅补充实测证据。
+
 ## 结论
 
-BE-001 三项验收标准（AC-1 / AC-2 / AC-3）均于 2026-07-14 本会话在 `mysql:8.0.18` 上独立实测复现通过。**唯一事实来源仍是 `src/main/resources/db/migration/V1__create_important_enterprise_table.sql`**；`build/resources/main/...` 为 Gradle `processResources` 的 volatile 重生产物（被 `.gitignore` 忽略），其 md5 随构建漂移、本会话一度与源同步为 `513f00a7...`，不作为评审依据。
+BE-001 三项验收标准（AC-1 / AC-2 / AC-3）均于 2026-07-14 本会话在 `mysql:8.0.18` 上独立实测复现通过（四轮独立复核一致）。**唯一事实来源仍是 `src/main/resources/db/migration/V1__create_important_enterprise_table.sql`**；`build/resources/main/...` 为 Gradle `processResources` 的 volatile 重生产物（被 `.gitignore` 忽略），其 md5 随构建漂移、本会话一度与源同步为 `513f00a7...`，不作为评审依据。
