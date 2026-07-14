@@ -1,11 +1,7 @@
 /**
  * Local panel props and shared types for the requirement workspace.
  *
- * DTO types here are an overriding local declaration for the PRD-loop contract;
- * they intentionally supersede the older shapes previously imported from
- * `@/services/onlineCodeTypes`. Consumers of the removed legacy Props
- * (OverviewDesignPanel / DetailedDesignPanel / CodingTaskPanel / RunHistoryPanel /
- * PrdPanel / index.tsx WorkspaceTab) are cleaned up in a later task.
+ * DTO types here describe the PRD comment-driven execution loop.
  */
 
 /** Generic EADP ResultData<T> envelope returned by the JS service layer. */
@@ -66,7 +62,7 @@ export interface ExecutionPlanJson {
   goal?: string | null;
   tasks?: ExecutionPlanTask[];
   risks?: string[];
-  validation?: string | null;
+  validation?: string | { commands?: Array<string | { area?: string; command?: string }> } | null;
 }
 export interface ExecutionPlanDto {
   id: string; requirementId: string; loopId?: string | null;
@@ -162,7 +158,6 @@ export interface RightTabsProps {
   delivery: DeliverySummary;
   comments: RequirementCommentDto[];
   onRunLog: (run: RunDto) => void;
-  onRun: (t: CodingTaskDto) => Promise<void>;
   onRerun: (t: CodingTaskDto, p: string) => Promise<void>;
   onStop: () => Promise<void>;
   onRetryMr: () => Promise<void>;
@@ -174,14 +169,15 @@ export interface RightTabsProps {
 export interface ExecutionPlanTabProps {
   plan: ExecutionPlanDto | null;
   tasks: CodingTaskDto[];
+  comments: RequirementCommentDto[];
   onJumpTask?: (taskKey: string) => void;
 }
 
 export interface TaskTabProps {
   tasks: CodingTaskDto[];
-  onRun: (t: CodingTaskDto) => Promise<void>;
+  comments: RequirementCommentDto[];
   onRerun: (t: CodingTaskDto, p: string) => Promise<void>;
-  onViewRun: (run: RunDto) => void;
+  onViewRun: (task: CodingTaskDto) => void;
   onStop: () => Promise<void>;
   stopEnabled: boolean;
   highlightTaskKey?: string | null;
@@ -190,6 +186,8 @@ export interface TaskTabProps {
 
 export interface RunTabProps {
   runs: RunDto[];
+  taskFilterId?: string | null;
+  onClearTaskFilter?: () => void;
   onOpenLog: (run: RunDto) => void;
 }
 

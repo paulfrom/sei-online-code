@@ -197,6 +197,12 @@ public class CodingTaskExecutionService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ResultData<CodingTaskDto> executePlanTask(String codingTaskId, String agentName, String prompt) {
+        return executePlanTask(codingTaskId, agentName, prompt, TriggerSource.AUTO);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ResultData<CodingTaskDto> executePlanTask(String codingTaskId, String agentName, String prompt,
+                                                     TriggerSource triggerSource) {
         CodingTask task = codingTaskDao.findOne(codingTaskId);
         if (Objects.isNull(task)) {
             return ResultData.fail("编码任务不存在: " + codingTaskId);
@@ -228,7 +234,13 @@ public class CodingTaskExecutionService {
         run.setRunNo(nextRunNo(codingTaskId));
         run.setRunType(RunType.DEVELOPMENT);
         run.setLoopId(task.getLoopId());
-        run.setTriggerSource(TriggerSource.AUTO);
+        run.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
+        ExecutionPlan executionPlan = task.getExecutionPlanId() == null
+                ? null : executionPlanDao.findOne(task.getExecutionPlanId());
+        if (executionPlan != null) {
+            run.setMemoryContextId(executionPlan.getMemoryContextId());
+            run.setWorkspaceMemoryId(executionPlan.getWorkspaceMemoryId());
+        }
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());

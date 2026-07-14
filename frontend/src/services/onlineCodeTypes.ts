@@ -1,7 +1,7 @@
 /**
  * Shared DTO types for the requirement-workspace redesign.
  * Mirrors the API contract for the new flow:
- * Requirement -> Overview Design -> Detailed Design -> Coding Task -> Run.
+ * Requirement(PRD) -> ExecutionPlan -> CodingTask -> Run -> GitLab MR.
  */
 
 /** Requirement lifecycle states (contract §3.1). */
@@ -11,6 +11,10 @@ export type RequirementStatus =
   | 'PRD_CONFIRMED'
   | 'FAILED';
 
+export type RequirementAutomationStatus =
+  | 'IDLE' | 'PLANNING' | 'DEVELOPING' | 'VALIDATING' | 'ACCEPTING'
+  | 'DELIVERING' | 'INTERRUPTED' | 'WAITING_HUMAN' | 'COMPLETED' | 'FAILED';
+
 /** A product requirement document attached to a project. */
 export interface RequirementDto {
   id: string;
@@ -18,11 +22,19 @@ export interface RequirementDto {
   title: string;
   description?: string | null;
   status: RequirementStatus;
+  automationStatus?: RequirementAutomationStatus | null;
   prdVersion: number;
   prdContent?: string | null;
   designContextId?: string | null;
   memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
   memoryValidationResultJson?: string | null;
+  activeLoopId?: string | null;
+  acceptedAt?: string | null;
+  acceptedByAgent?: string | null;
+  deliveryBranch?: string | null;
+  deliveryCommitHash?: string | null;
+  deliveryMrUrl?: string | null;
+  deliveryTargetBranch?: string | null;
   failureSummary?: string | null;
   createdDate: string;
   lastEditedDate: string;
@@ -31,19 +43,26 @@ export interface RequirementDto {
 /** Coding task lifecycle states (contract §3.4). */
 export type CodingTaskStatus =
   | 'PENDING'
+  | 'BLOCKED'
   | 'RUNNING'
+  | 'VALIDATING'
   | 'SUCCEEDED'
   | 'FAILED'
+  | 'VALIDATION_FAILED'
   | 'CANCELLED'
   | 'STALE';
 
-/** A concrete coding task generated from a detailed design. */
+/** A concrete coding task generated from an execution plan. */
 export interface CodingTaskDto {
   id: string;
   projectId: string;
   requirementId: string;
-  detailedDesignId: string;
-  detailedDesignVersion: number;
+  executionPlanId?: string | null;
+  planTaskKey?: string | null;
+  assignedAgent?: string | null;
+  loopId?: string | null;
+  area?: string | null;
+  dependsOn?: string[] | null;
   status: CodingTaskStatus;
   title: string;
   description?: string | null;
@@ -60,11 +79,20 @@ export type RunState =
   | 'FAILED'
   | 'CANCELLED';
 
+export type RunType =
+  | 'DEVELOPMENT' | 'VALIDATION_COMMAND' | 'TEST_REVIEW'
+  | 'PM_PLANNING' | 'PM_ACCEPTANCE' | 'DELIVERY';
+
 /** A single execution run of a coding task. */
 export interface RunDto {
   id: string;
-  codingTaskId: string;
-  runNo: number;
+  codingTaskId?: string | null;
+  requirementId?: string | null;
+  runNo?: number;
+  runType?: RunType | null;
+  loopId?: string | null;
+  cancelRequested?: boolean | null;
+  invalidatedByCommentId?: string | null;
   triggerSource: string;
   state: RunState;
   userPrompt?: string | null;

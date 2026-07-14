@@ -457,12 +457,12 @@ rg "MEMORY_UPDATE_AFTER_REQUIREMENT_DELIVERY|MEMORY_UPDATED|MEMORY_UPDATE_FAILED
 
 ### Task 12: PRD Comment Surface
 
-- [ ] Add a comment panel under the PRD view.
-- [ ] Render human, PM, frontend agent, backend agent, test agent, delivery, memory, and system comments distinctly.
-- [ ] Add comment composer for human feedback.
-- [ ] Show interruption/re-planning state immediately after a human comment.
-- [ ] Warn that human comments interrupt active automation and trigger PM re-planning.
-- [ ] After completion, explain that a human comment creates a CHANGE_REQUEST loop against the delivered MR.
+- [x] Add a comment panel under the PRD view.
+- [x] Render human, PM, frontend agent, backend agent, test agent, delivery, memory, and system comments distinctly.
+- [x] Add comment composer for human feedback.
+- [x] Show interruption/re-planning state immediately after a human comment.
+- [x] Warn that human comments interrupt active automation and trigger PM re-planning.
+- [x] After completion, explain that a human comment creates a CHANGE_REQUEST loop against the delivered MR.
 
 Verification:
 
@@ -473,12 +473,12 @@ rg "RequirementComment|commentType|HUMAN_FEEDBACK|EXECUTION_PLAN|VALIDATION_RESU
 
 ### Task 13: Execution Plan, Task, Run, and Delivery View
 
-- [ ] Show latest PM execution plan below PRD comments.
-- [ ] Show per-task assigned agent, status, run history, and latest result comment.
-- [ ] Show task-level and plan-level validation reports.
-- [ ] Show Run history grouped/filterable by `runType`.
-- [ ] Show MR link, branch, commit hash, and MR retry action when delivery is waiting for human configuration.
-- [ ] Keep actions minimal: human comment, rerun failed task, stop automation, retry MR.
+- [x] Show latest PM execution plan below PRD comments.
+- [x] Show per-task assigned agent, status, run history, and latest result comment.
+- [x] Show task-level and plan-level validation reports.
+- [x] Show Run history grouped/filterable by `runType`.
+- [x] Show MR link, branch, commit hash, and MR retry action when delivery is waiting for human configuration.
+- [x] Keep actions minimal: human comment, rerun failed task, stop automation, retry MR.
 
 Verification:
 

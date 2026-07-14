@@ -44,3 +44,7 @@ export async function addRequirementComment(id, { content, metadataJson }) {
 export async function retryMr(id) {
   return request({ url: `${API}/requirement/${id}/mr/retry`, method: 'POST' });
 }
+
+export async function stopRequirementAutomation(id) {
+  return request({ url: `${API}/requirement/${id}/stop`, method: 'POST' });
+}

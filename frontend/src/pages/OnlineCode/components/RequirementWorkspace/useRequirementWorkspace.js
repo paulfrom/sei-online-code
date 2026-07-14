@@ -21,6 +21,7 @@ import {
   editPrd,
   confirmPrd,
   regeneratePrd,
+  stopRequirementAutomation,
 } from '@/services/requirement';
 // @ts-ignore JS service module has no declaration file
 import { findCommentsByRequirement } from '@/services/requirementComment';
@@ -29,12 +30,10 @@ import { findLatestPlanByRequirement } from '@/services/executionPlan';
 // @ts-ignore JS service module has no declaration file
 import {
   findCodingTasksByPage,
-  runCodingTask,
   rerunCodingTask,
-  cancelCodingTask,
 } from '@/services/codingTask';
 // @ts-ignore JS service module has no declaration file
-import { findRunsByCodingTask } from '@/services/run';
+import { findRunsByRequirement } from '@/services/run';
 
 const FAST_STATUSES = new Set([
   'PLANNING',
@@ -104,12 +103,14 @@ export function useRequirementWorkspace(requirementId) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sendingComment, setSendingComment] = useState(false);
 
   // Guards re-entrancy of refresh so overlapping polls can't fight each other.
   const inFlightRef = useRef(false);
   // Guards teardown so a late-settling refresh after unmount can't setState.
   const cancelledRef = useRef(false);
   const timerRef = useRef(null);
+  const commentInFlightRef = useRef(false);
 
   const safeSet = useCallback((setter, value) => {
     if (cancelledRef.current) return;
@@ -147,18 +148,9 @@ export function useRequirementWorkspace(requirementId) {
         ctRes && ctRes.success && ctRes.data && ctRes.data.rows ? ctRes.data.rows : [];
       safeSet(setCodingTasks, tasks);
 
-      const runLists = await Promise.all(
-        tasks.map(async (task) => {
-          const res = await findRunsByCodingTask(task.id);
-          return res && res.success && res.data ? res.data : [];
-        }),
-      );
-      const flatRuns = runLists.flat().sort((a, b) => {
-        const na = a.runNo || 0;
-        const nb = b.runNo || 0;
-        return nb - na;
-      });
-      safeSet(setRuns, flatRuns);
+      const runRes = await findRunsByRequirement(requirementId);
+      const requirementRuns = runRes && runRes.success && runRes.data ? runRes.data : [];
+      safeSet(setRuns, requirementRuns);
 
       safeSet(setError, null);
       safeSet(setLoading, false);
@@ -244,13 +236,20 @@ export function useRequirementWorkspace(requirementId) {
   const actions = useMemo(
     () => ({
       async sendComment(content) {
-        if (!requirementId || !content) return;
-        const res = await addRequirementComment(requirementId, { content });
-        if (res && res.success) {
+        if (!requirementId || !content || commentInFlightRef.current) return;
+        commentInFlightRef.current = true;
+        safeSet(setSendingComment, true);
+        try {
+          const res = await addRequirementComment(requirementId, { content });
+          if (!res || !res.success) throw new Error((res && res.message) || '发送失败');
           message.success('评论已发送');
           await refresh();
-        } else {
-          message.error((res && res.message) || '发送失败');
+        } catch (err) {
+          message.error((err && err.message) || '发送失败');
+          throw err;
+        } finally {
+          commentInFlightRef.current = false;
+          safeSet(setSendingComment, false);
         }
       },
       async confirmPrd() {
@@ -277,14 +276,6 @@ export function useRequirementWorkspace(requirementId) {
           message.error((res && res.message) || '重新生成失败');
         }
       },
-      async runTask(t) {
-        const res = await runCodingTask(t.id, undefined);
-        if (res && res.success) {
-          await refresh();
-        } else {
-          message.error((res && res.message) || '启动失败');
-        }
-      },
       async rerunTask(t, p) {
         const res = await rerunCodingTask(t.id, p);
         if (res && res.success) {
@@ -293,22 +284,13 @@ export function useRequirementWorkspace(requirementId) {
           message.error((res && res.message) || '重跑失败');
         }
       },
-      async cancelTask(t) {
-        const res = await cancelCodingTask(t.id);
-        if (res && res.success) {
-          await refresh();
-        } else {
-          message.error((res && res.message) || '取消失败');
-        }
-      },
-      // TODO: replace with POST /requirement/{id}/stop once backend exposes it
       async stopAutomation() {
-        const running = codingTasks.filter((t) => t.status === 'RUNNING');
-        if (running.length === 0) {
-          await refresh();
+        const res = await stopRequirementAutomation(requirementId);
+        if (!res || !res.success) {
+          message.error((res && res.message) || '停止自动化失败');
           return;
         }
-        await Promise.allSettled(running.map((t) => cancelCodingTask(t.id)));
+        message.success('自动化已停止');
         await refresh();
       },
       async retryMr() {
@@ -321,7 +303,7 @@ export function useRequirementWorkspace(requirementId) {
       },
       refresh,
     }),
-    [requirementId, codingTasks, refresh],
+    [requirementId, codingTasks, refresh, safeSet],
   );
 
   return {
@@ -333,6 +315,7 @@ export function useRequirementWorkspace(requirementId) {
     delivery,
     loading,
     error,
+    sendingComment,
     activeLoopId,
     planVersion,
     actions,

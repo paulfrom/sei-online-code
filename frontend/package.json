@@ -5,6 +5,7 @@
   "scripts": {
     "analyze": "cross-env ANALYZE=1 umi build",
     "build": "cross-env ESLINT=none umi build",
+    "test:regression": "node --test tests/requirement-workspace-regression.test.cjs",
     "lint": "npm run lint:script && npm run lint:style",
     "lint-fix": "npm run lint-fix:script && npm run lint-fix:style",
     "lint-fix:script": "npm run lint:script --fix",

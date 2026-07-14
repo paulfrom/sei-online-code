@@ -34,6 +34,14 @@ public interface RunDao extends BaseEntityDao<Run> {
     List<Run> findByCodingTaskId(String codingTaskId);
 
     /**
+     * 按需求查询全部运行记录，包含未绑定编码任务的 PM、计划级验证和交付 Run。
+     *
+     * @param requirementId 需求 ID
+     * @return 按创建时间倒序排列的 Run 列表
+     */
+    List<Run> findByRequirementIdOrderByCreatedDateDesc(String requirementId);
+
+    /**
      * 按运行状态查询运行记录。
      *
      * @param state 运行状态

@@ -101,13 +101,15 @@ public class RequirementDeliveryService {
             requirement.setDeliveryMrUrl(result.mrUrl());
             requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
             requirementDao.save(requirement);
+            com.changhong.onlinecode.entity.RequirementComment validationComment =
+                    latestComment(requirementId, RequirementCommentType.VALIDATION_RESULT);
             requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.SYSTEM, "delivery", result.created()
                             ? RequirementCommentType.MR_CREATED : RequirementCommentType.MR_UPDATED,
                     (result.created() ? "GitLab MR 已创建：" : "GitLab MR 已更新：") + result.mrUrl(),
-                    "{\"branch\":\"" + result.branch() + "\",\"commitHash\":\"" + result.commitHash()
-                            + "\",\"targetBranch\":\"" + result.targetBranch() + "\",\"runId\":\""
-                            + run.getId() + "\"}");
+                    buildSuccessMetadata(result.branch(), result.commitHash(), result.targetBranch(),
+                            result.mrUrl(), run.getId(),
+                            validationComment == null ? null : validationComment.getContent()));
             submitDeliveryMemoryJob(requirement, plan, result, run);
         } catch (Exception e) {
             LOGGER.warn("requirement delivery failed requirementId={}", requirementId, e);
@@ -121,7 +123,8 @@ public class RequirementDeliveryService {
             requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.SYSTEM, "delivery", RequirementCommentType.MR_FAILED,
                     "GitLab MR 交付失败：" + e.getMessage(),
-                    "{\"runId\":\"" + run.getId() + "\"}");
+                    toJson(Map.of("runId", run.getId(), "failureReason",
+                            Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -245,7 +248,7 @@ public class RequirementDeliveryService {
                         RequirementCommentAuthorType.SYSTEM, "memory",
                         RequirementCommentType.MEMORY_UPDATE_FAILED,
                         "Requirement 交付后记忆更新任务提交失败：" + submitted.getMessage(),
-                        "{\"mrUrl\":\"" + result.mrUrl() + "\"}");
+                        toJson(Map.of("mrUrl", result.mrUrl())));
             }
         } catch (Exception e) {
             requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
@@ -269,6 +272,18 @@ public class RequirementDeliveryService {
         } catch (Exception e) {
             throw new IllegalStateException("交付记忆载荷序列化失败", e);
         }
+    }
+
+    private String buildSuccessMetadata(String branch, String commitHash, String targetBranch,
+                                        String mrUrl, String runId, String validationSummary) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("branch", branch);
+        metadata.put("commitHash", commitHash);
+        metadata.put("targetBranch", targetBranch);
+        metadata.put("mrUrl", mrUrl);
+        metadata.put("runId", runId);
+        metadata.put("validationSummary", validationSummary);
+        return toJson(metadata);
     }
 
     private CommandResult runCommand(Path cwd, String... command) throws Exception {

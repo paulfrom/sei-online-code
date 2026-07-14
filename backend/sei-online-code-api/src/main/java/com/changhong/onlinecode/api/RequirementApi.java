@@ -49,4 +49,8 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     @PostMapping(path = "{id}/mr/retry")
     @Operation(summary = "重试 GitLab MR 交付", description = "修复 GitLab 配置后重试交付，不重新执行开发或验收")
     ResultData<RequirementDto> retryMr(@PathVariable("id") String id);
+
+    @PostMapping(path = "{id}/stop")
+    @Operation(summary = "停止需求自动化", description = "中断当前计划、取消活跃 Run，并旋转 loop 使旧结果失效")
+    ResultData<RequirementDto> stopAutomation(@PathVariable("id") String id);
 }

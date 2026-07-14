@@ -4,6 +4,7 @@ import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
@@ -12,6 +13,8 @@ import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.entity.Agent;
+import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.dto.CodingTaskDto;
@@ -31,6 +34,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
+
+import java.util.concurrent.CompletableFuture;
 
 class CodingTaskExecutionServiceTest {
 
@@ -41,6 +47,10 @@ class CodingTaskExecutionServiceTest {
     private WorkspaceMemoryService workspaceMemoryService;
     private AgentService agentService;
     private CodingTaskScheduler codingTaskScheduler;
+    private ExecutionPlanDao executionPlanDao;
+    private WorkspaceManager workspaceManager;
+    private CliRunnerRegistry cliRunnerRegistry;
+    private CodingTaskChangeCollector changeCollector;
     private CodingTaskExecutionService service;
 
     @BeforeEach
@@ -52,21 +62,25 @@ class CodingTaskExecutionServiceTest {
         workspaceMemoryService = mock(WorkspaceMemoryService.class);
         agentService = mock(AgentService.class);
         codingTaskScheduler = mock(CodingTaskScheduler.class);
+        executionPlanDao = mock(ExecutionPlanDao.class);
+        workspaceManager = mock(WorkspaceManager.class);
+        cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        changeCollector = mock(CodingTaskChangeCollector.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
                 mock(RequirementService.class),
-                mock(com.changhong.onlinecode.dao.ExecutionPlanDao.class),
+                executionPlanDao,
                 mock(RequirementCommentService.class),
-                mock(WorkspaceManager.class),
+                workspaceManager,
                 agentService,
-                mock(CliRunnerRegistry.class),
+                cliRunnerRegistry,
                 failureInfoSupport,
                 mock(RequirementDesignContextService.class),
                 mock(DesignContextPromptAssembler.class),
                 memoryJobService,
                 workspaceMemoryService,
-                mock(CodingTaskChangeCollector.class)
+                changeCollector
         );
         service.setCodingTaskScheduler(codingTaskScheduler);
     }
@@ -268,6 +282,49 @@ class CodingTaskExecutionServiceTest {
         assertEquals("开发代理未找到", task.getFailureSummary());
         verify(codingTaskDao).save(task);
         verify(codingTaskScheduler).schedule("req-7");
+    }
+
+    @Test
+    void executePlanTask_copiesPlanMemoryTraceToDevelopmentRun() {
+        CodingTask task = new CodingTask();
+        task.setId("task-trace");
+        task.setRequirementId("req-trace");
+        task.setProjectId("project-trace");
+        task.setExecutionPlanId("plan-trace");
+        task.setLoopId("loop-trace");
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setMemoryContextId("context-1");
+        plan.setWorkspaceMemoryId("memory-1");
+        com.changhong.onlinecode.agent.CliRunner runner = mock(com.changhong.onlinecode.agent.CliRunner.class);
+
+        when(codingTaskDao.findOne("task-trace")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-trace")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) run.setId("run-trace");
+            return run;
+        });
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(executionPlanDao.findOne("plan-trace")).thenReturn(plan);
+        when(workspaceManager.resolve("project-trace")).thenReturn(
+                new com.changhong.onlinecode.dto.WorkspaceResolveResult(System.getProperty("java.io.tmpdir"), true,
+                        com.changhong.onlinecode.dto.enums.WorkspaceSource.SCAFFOLD));
+        when(cliRunnerRegistry.resolve("codex")).thenReturn(runner);
+        when(changeCollector.collect(any(), any())).thenReturn(
+                new com.changhong.onlinecode.service.memory.CodingTaskChangeResult());
+        when(runner.execute(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        service.executePlanTask("task-trace", "backend-dev-agent", "prompt");
+
+        ArgumentCaptor<Run> captor = ArgumentCaptor.forClass(Run.class);
+        verify(runDao, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        Run developmentRun = captor.getAllValues().get(0);
+        assertEquals("context-1", developmentRun.getMemoryContextId());
+        assertEquals("memory-1", developmentRun.getWorkspaceMemoryId());
     }
 
     private void invokeFinishRun(Run run, CodingTask task, boolean success, String reason) throws Exception {

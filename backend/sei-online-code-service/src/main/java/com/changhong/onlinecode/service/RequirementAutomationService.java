@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +61,7 @@ public class RequirementAutomationService {
     private PmAgentClient pmAgentClient;
     private CliRunnerRegistry cliRunnerRegistry;
     private ValidationLoopService validationLoopService;
+    private ApplicationEventPublisher eventPublisher;
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public RequirementAutomationService(RequirementDao requirementDao,
@@ -97,18 +99,24 @@ public class RequirementAutomationService {
         this.validationLoopService = validationLoopService;
     }
 
+    @Autowired
+    public void setEventPublisher(ApplicationEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
+    }
+
     /**
      * PRD 确认后的自动化入口。当前实现生成结构化初始计划并启动调度；
      * PM agent JSON 直连失败时也能保留可追踪计划和评论。
      */
-    @Transactional(rollbackFor = Exception.class)
     public void startInitialLoop(String requirementId) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
             LOGGER.warn("startInitialLoop: requirement not found {}", requirementId);
             return;
         }
-        startLoop(requirement, ExecutionPlanType.INITIAL, "PRD 已确认，启动 PM 初始执行计划。");
+        String loopId = prepareLoop(requirement);
+        dispatchPreparedLoop(requirementId, loopId, ExecutionPlanType.INITIAL,
+                "PRD 已确认，启动 PM 初始执行计划。");
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -120,14 +128,53 @@ public class RequirementAutomationService {
         RequirementComment comment = appendComment(requirementId, requirement.getActiveLoopId(),
                 RequirementCommentAuthorType.HUMAN, "human", RequirementCommentType.HUMAN_FEEDBACK,
                 content, metadataJson);
+        if (requirementDesignContextService != null) {
+            requirementDesignContextService.invalidate(requirementId);
+        }
 
         if (isActive(requirement.getAutomationStatus())) {
-            interruptActiveLoop(requirement, comment);
-            startLoop(requirement, ExecutionPlanType.CHANGE_REQUEST, "人类评论中断当前自动化，PM 基于完整评论历史重规划。");
+            String loopId = interruptActiveLoop(requirement, comment);
+            TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
+                    ExecutionPlanType.CHANGE_REQUEST,
+                    "人类评论中断当前自动化，PM 基于完整评论历史重规划。"));
         } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.COMPLETED) {
-            startLoop(requirement, ExecutionPlanType.CHANGE_REQUEST, "已完成需求收到人类评论，启动 CHANGE_REQUEST loop。");
+            String loopId = prepareLoop(requirement);
+            TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
+                    ExecutionPlanType.CHANGE_REQUEST,
+                    "已完成需求收到人类评论，启动 CHANGE_REQUEST loop。"));
         }
         return comment;
+    }
+
+    /** 人工停止当前自动化，不触发重规划。 */
+    @Transactional(rollbackFor = Exception.class)
+    public Requirement stopAutomation(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (!isActive(requirement.getAutomationStatus())) {
+            throw new IllegalStateException("当前状态不可停止自动化: " + requirement.getAutomationStatus());
+        }
+        String oldLoopId = requirement.getActiveLoopId();
+        if (executionPlanDao != null && oldLoopId != null) {
+            ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                    requirementId, oldLoopId);
+            if (plan != null && !isPlanTerminal(plan.getStatus())) {
+                plan.setStatus(ExecutionPlanStatus.INTERRUPTED);
+                executionPlanDao.save(plan);
+            }
+        }
+        cancelRunningRuns(requirementId, null);
+        String invalidationLoopId = newLoopId();
+        requirement.setActiveLoopId(invalidationLoopId);
+        requirement.setAutomationStatus(RequirementAutomationStatus.INTERRUPTED);
+        requirementDao.save(requirement);
+        appendComment(requirementId, invalidationLoopId,
+                RequirementCommentAuthorType.SYSTEM, "system", RequirementCommentType.INTERRUPTION,
+                "用户已停止自动化，活跃 Run 已请求取消，旧 loop 结果已失效。",
+                "{\"previousLoopId\":\"" + Objects.toString(oldLoopId, "") + "\"}");
+        return requirement;
     }
 
     private static final int MAX_REMEDIATION_ROUNDS = 3;
@@ -158,6 +205,13 @@ public class RequirementAutomationService {
         if (validationLoopService != null) {
             validationLoopService.validatePlan(requirement, plan);
         }
+        Requirement currentRequirement = requirementDao.findOne(requirementId);
+        if (!isCurrentLoop(currentRequirement, plan.getLoopId())) {
+            LOGGER.info("plan validation result ignored because loop changed. requirementId={}, planLoopId={}",
+                    requirementId, plan.getLoopId());
+            return;
+        }
+        requirement = currentRequirement;
         requirement.setAutomationStatus(RequirementAutomationStatus.ACCEPTING);
         requirementDao.save(requirement);
         plan.setStatus(ExecutionPlanStatus.ACCEPTING);
@@ -170,6 +224,13 @@ public class RequirementAutomationService {
 
         PmAgentClient.PmAcceptanceResult result = pmAgentClient.reviewAcceptance(
                 requirement, plan, planTasks, previousComments, context);
+        currentRequirement = requirementDao.findOne(requirementId);
+        if (!isCurrentLoop(currentRequirement, plan.getLoopId())) {
+            LOGGER.info("PM acceptance result ignored because loop changed. requirementId={}, planLoopId={}",
+                    requirementId, plan.getLoopId());
+            return;
+        }
+        requirement = currentRequirement;
         if (result == null) {
             appendComment(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.SYSTEM, "system", RequirementCommentType.FAILURE,
@@ -221,15 +282,18 @@ public class RequirementAutomationService {
         startRemediationLoop(requirement, plan, context, previousComments, result);
     }
 
-    private void startLoop(Requirement requirement, ExecutionPlanType planType, String summary) {
+    public void executePreparedLoop(String requirementId, String loopId,
+                                    ExecutionPlanType planType, String summary) {
         if (executionPlanDao == null || requirementCommentService == null || pmAgentClient == null) {
-            LOGGER.warn("startLoop skipped because automation dependencies are not initialized");
+            LOGGER.warn("executePreparedLoop skipped because automation dependencies are not initialized");
             return;
         }
-        String loopId = newLoopId();
-        requirement.setActiveLoopId(loopId);
-        requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
-        requirementDao.save(requirement);
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (!isCurrentLoop(requirement, loopId)) {
+            LOGGER.info("prepared loop skipped because it is stale. requirementId={}, loopId={}",
+                    requirementId, loopId);
+            return;
+        }
 
         RequirementDesignContext context = prepareContext(requirement);
         List<RequirementComment> previousComments = requirementCommentService.findByRequirementId(requirement.getId());
@@ -237,6 +301,13 @@ public class RequirementAutomationService {
 
         PmAgentClient.PmPlanResult planResult = pmAgentClient.generatePlan(
                 requirement, loopId, planType, context, previousComments, previousPlan);
+        Requirement currentRequirement = requirementDao.findOne(requirementId);
+        if (!isCurrentLoop(currentRequirement, loopId)) {
+            LOGGER.info("PM plan result ignored because loop changed. requirementId={}, loopId={}",
+                    requirementId, loopId);
+            return;
+        }
+        requirement = currentRequirement;
         if (planResult == null) {
             requirement.setAutomationStatus(RequirementAutomationStatus.FAILED);
             requirementDao.save(requirement);
@@ -263,16 +334,16 @@ public class RequirementAutomationService {
 
         appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
                 RequirementCommentType.EXECUTION_PLAN, summary + "\n\n" + renderTasks(planResult.tasks()),
-                "{\"executionPlanId\":\"" + plan.getId() + "\",\"planType\":\"" + planType + "\"}");
+                planCommentMetadata(plan));
         createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), planResult.tasks());
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
         requirementDao.save(requirement);
-        TransactionUtil.afterCommit(() -> codingTaskScheduler.schedule(requirement.getId()));
+        codingTaskScheduler.schedule(requirement.getId());
     }
 
-    private void interruptActiveLoop(Requirement requirement, RequirementComment comment) {
+    private String interruptActiveLoop(Requirement requirement, RequirementComment comment) {
         if (executionPlanDao != null && requirement.getActiveLoopId() != null) {
             ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                     requirement.getId(), requirement.getActiveLoopId());
@@ -281,23 +352,48 @@ public class RequirementAutomationService {
                 executionPlanDao.save(plan);
             }
         }
-        if (runDao != null) {
-            for (Run run : runDao.findByRequirementIdAndState(requirement.getId(), RunState.RUNNING)) {
-                run.setCancelRequested(Boolean.TRUE);
-                run.setInvalidatedByCommentId(comment.getId());
-                runDao.save(run);
-                if (cliRunnerRegistry != null) {
-                    cliRunnerRegistry.cancel(run.getId());
-                }
-            }
-        }
+        cancelRunningRuns(requirement.getId(), comment.getId());
         requirement.setAutomationStatus(RequirementAutomationStatus.INTERRUPTED);
-        requirement.setActiveLoopId(newLoopId());
         requirementDao.save(requirement);
-        appendComment(requirement.getId(), requirement.getActiveLoopId(),
+        String loopId = prepareLoop(requirement);
+        appendComment(requirement.getId(), loopId,
                 RequirementCommentAuthorType.SYSTEM, "system", RequirementCommentType.INTERRUPTION,
                 "人类评论已中断活跃自动化，旧 loop 的结果将被视为过期。",
                 "{\"commentId\":\"" + comment.getId() + "\"}");
+        return loopId;
+    }
+
+    private void cancelRunningRuns(String requirementId, String invalidatedByCommentId) {
+        if (runDao == null) {
+            return;
+        }
+        for (Run run : runDao.findByRequirementIdAndState(requirementId, RunState.RUNNING)) {
+            run.setCancelRequested(Boolean.TRUE);
+            run.setInvalidatedByCommentId(invalidatedByCommentId);
+            runDao.save(run);
+            if (cliRunnerRegistry != null) {
+                cliRunnerRegistry.cancel(run.getId());
+            }
+        }
+    }
+
+    private String prepareLoop(Requirement requirement) {
+        String loopId = newLoopId();
+        requirement.setActiveLoopId(loopId);
+        requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        requirementDao.save(requirement);
+        return loopId;
+    }
+
+    private void dispatchPreparedLoop(String requirementId, String loopId,
+                                      ExecutionPlanType planType, String summary) {
+        RequirementAutomationLoopEvent event = new RequirementAutomationLoopEvent(
+                requirementId, loopId, planType, summary);
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(event);
+        } else {
+            executePreparedLoop(requirementId, loopId, planType, summary);
+        }
     }
 
     private void createCodingTasks(String requirementId, String executionPlanId, String loopId,
@@ -397,7 +493,7 @@ public class RequirementAutomationService {
 
         appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
                 RequirementCommentType.EXECUTION_PLAN, "PM 生成补救执行计划。\n\n" + renderTasks(remediationTasks),
-                "{\"executionPlanId\":\"" + plan.getId() + "\",\"planType\":\"REMEDIATION\"}");
+                planCommentMetadata(plan));
         createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), remediationTasks);
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
@@ -425,10 +521,12 @@ public class RequirementAutomationService {
                 String area = taskNode.path("area").asText(null);
                 List<String> dependsOn = readStringList(taskNode.path("dependsOn"));
                 List<String> fileScope = readStringList(taskNode.path("fileScope"));
+                List<String> acceptanceCriteria = readStringList(taskNode.path("acceptanceCriteria"));
                 if (taskKey == null || title == null || agent == null || area == null) {
                     continue;
                 }
-                tasks.add(new PlanTask(taskKey, title, description, agent, area, dependsOn, fileScope));
+                tasks.add(new PlanTask(taskKey, title, description, agent, area, dependsOn, fileScope,
+                        acceptanceCriteria));
             }
             return tasks;
         } catch (Exception e) {
@@ -508,7 +606,7 @@ public class RequirementAutomationService {
                 item.put("area", task.area());
                 item.put("dependsOn", task.dependsOn());
                 item.put("fileScope", task.fileScope());
-                item.put("acceptanceCriteria", List.of("开发执行成功", "任务级验证通过"));
+                item.put("acceptanceCriteria", task.acceptanceCriteria());
                 return item;
             }).toList());
             root.put("risks", planResult.risks().isEmpty() ? List.of() : planResult.risks());
@@ -561,6 +659,21 @@ public class RequirementAutomationService {
                 || status == RequirementAutomationStatus.ACCEPTING;
     }
 
+    private String planCommentMetadata(ExecutionPlan plan) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "executionPlanId", plan.getId(),
+                    "planType", plan.getPlanType().name(),
+                    "planVersion", plan.getVersion()));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isCurrentLoop(Requirement requirement, String expectedLoopId) {
+        return requirement != null && Objects.equals(requirement.getActiveLoopId(), expectedLoopId);
+    }
+
     private static boolean containsAny(String text, String... needles) {
         for (String needle : needles) {
             if (text.contains(needle)) {
@@ -583,11 +696,18 @@ public class RequirementAutomationService {
                            String agent,
                            String area,
                            List<String> dependsOn,
-                           List<String> fileScope) {
+                           List<String> fileScope,
+                           List<String> acceptanceCriteria) {
+        public PlanTask(String taskKey, String title, String description, String agent, String area,
+                        List<String> dependsOn, List<String> fileScope) {
+            this(taskKey, title, description, agent, area, dependsOn, fileScope, List.of());
+        }
+
         public PlanTask {
             Objects.requireNonNull(taskKey, "taskKey");
             dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
             fileScope = fileScope == null ? List.of() : List.copyOf(fileScope);
+            acceptanceCriteria = acceptanceCriteria == null ? List.of() : List.copyOf(acceptanceCriteria);
         }
     }
 }

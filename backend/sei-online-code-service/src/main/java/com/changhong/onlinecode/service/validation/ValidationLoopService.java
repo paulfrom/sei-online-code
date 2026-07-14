@@ -69,17 +69,18 @@ public class ValidationLoopService {
     public ValidationOutcome validateTask(CodingTask task) {
         ExecutionPlan plan = executionPlanDao.findOne(task.getExecutionPlanId());
         return validate(task.getRequirementId(), task.getProjectId(), task.getLoopId(), task.getId(),
-                task.getArea(), "task", plan);
+                task.getPlanTaskKey(), task.getArea(), "task", plan);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ValidationOutcome validatePlan(Requirement requirement, ExecutionPlan plan) {
         return validate(requirement.getId(), requirement.getProjectId(), requirement.getActiveLoopId(), null,
-                "full-stack", "plan", plan);
+                null, "full-stack", "plan", plan);
     }
 
     private ValidationOutcome validate(String requirementId, String projectId, String loopId,
-                                       String codingTaskId, String area, String scope, ExecutionPlan plan) {
+                                       String codingTaskId, String taskKey, String area, String scope,
+                                       ExecutionPlan plan) {
         WorkspaceResolveResult workspace = workspaceManager.resolve(projectId);
         Path cwd = Path.of(workspace.getPath());
         List<String> commands = resolveCommands(plan, projectDao.findOne(projectId), area);
@@ -106,6 +107,8 @@ public class ValidationLoopService {
         String report = askTestAgent(requirementId, projectId, loopId, codingTaskId, area, scope, facts, plan);
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("scope", scope);
+        metadata.put("taskId", codingTaskId);
+        metadata.put("taskKey", taskKey);
         metadata.put("area", area);
         metadata.put("passed", passed);
         metadata.put("commands", facts);

@@ -101,8 +101,7 @@ class CodingTaskServiceTest {
     void rerun_allowedStatuses_delegatesToExecutionService() {
         for (CodingTaskStatus status : new CodingTaskStatus[]{
                 CodingTaskStatus.FAILED,
-                CodingTaskStatus.SUCCEEDED,
-                CodingTaskStatus.CANCELLED
+                CodingTaskStatus.VALIDATION_FAILED
         }) {
             CodingTask task = taskWithStatus(status);
             when(codingTaskDao.findOne(task.getId())).thenReturn(task);
@@ -122,6 +121,10 @@ class CodingTaskServiceTest {
         for (CodingTaskStatus status : new CodingTaskStatus[]{
                 CodingTaskStatus.PENDING,
                 CodingTaskStatus.RUNNING,
+                CodingTaskStatus.VALIDATING,
+                CodingTaskStatus.SUCCEEDED,
+                CodingTaskStatus.CANCELLED,
+                CodingTaskStatus.BLOCKED,
                 CodingTaskStatus.STALE
         }) {
             CodingTask task = taskWithStatus(status);
@@ -133,6 +136,45 @@ class CodingTaskServiceTest {
             verify(executionService, never()).execute(any(), any());
             clearInvocations(executionService);
         }
+    }
+
+    @Test
+    void convertToDto_preservesExecutionPlanTraceFields() {
+        CodingTask task = taskWithStatus(CodingTaskStatus.PENDING);
+        task.setExecutionPlanId("plan-1");
+        task.setPlanTaskKey("FE-001");
+        task.setAssignedAgent("frontend-dev-agent");
+        task.setLoopId("loop-1");
+        task.setArea("frontend");
+        task.setDependsOn(java.util.List.of("BE-001"));
+        task.setFileScope(java.util.List.of("frontend/src"));
+
+        CodingTaskDto dto = service.convertToDto(task);
+
+        assertEquals("plan-1", dto.getExecutionPlanId());
+        assertEquals("FE-001", dto.getPlanTaskKey());
+        assertEquals("frontend-dev-agent", dto.getAssignedAgent());
+        assertEquals("loop-1", dto.getLoopId());
+        assertEquals("frontend", dto.getArea());
+        assertEquals(java.util.List.of("BE-001"), dto.getDependsOn());
+    }
+
+    @Test
+    void rerun_executionPlanTaskUsesSchedulerManagedExecution() {
+        CodingTask task = taskWithStatus(CodingTaskStatus.VALIDATION_FAILED);
+        task.setExecutionPlanId("plan-1");
+        task.setAssignedAgent("backend-dev-agent");
+        when(codingTaskDao.findOne(task.getId())).thenReturn(task);
+        when(executionService.executePlanTask(task.getId(), "backend-dev-agent", "修复验证",
+                com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION))
+                .thenReturn(ResultData.success(new CodingTaskDto()));
+
+        ResultData<CodingTaskDto> result = service.rerun(task.getId(), "修复验证");
+
+        assertTrue(result.successful());
+        verify(executionService).executePlanTask(task.getId(), "backend-dev-agent", "修复验证",
+                com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION);
+        verify(executionService, never()).execute(any(), any());
     }
 
     private CodingTask taskWithStatus(CodingTaskStatus status) {

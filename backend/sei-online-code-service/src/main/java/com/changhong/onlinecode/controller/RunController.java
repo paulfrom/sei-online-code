@@ -52,4 +52,12 @@ public class RunController extends BaseEntityController<Run, RunDto>
                 .collect(Collectors.toList());
         return ResultData.success(dtos);
     }
+
+    @Override
+    public ResultData<List<RunDto>> findByRequirement(String requirementId) {
+        List<RunDto> dtos = service.findByRequirementId(requirementId).stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+        return ResultData.success(dtos);
+    }
 }

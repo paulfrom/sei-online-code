@@ -15,6 +15,7 @@ import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -66,6 +68,7 @@ public class CodingTaskScheduler {
     private RequirementCommentService requirementCommentService;
     private RequirementAutomationService requirementAutomationService;
     private ValidationLoopService validationLoopService;
+    private ObjectMapper objectMapper = new ObjectMapper();
 
     public CodingTaskScheduler(CodingTaskDao codingTaskDao,
                                RequirementDao requirementDao,
@@ -88,6 +91,11 @@ public class CodingTaskScheduler {
                                         RequirementAutomationService requirementAutomationService) {
         this.requirementCommentService = requirementCommentService;
         this.requirementAutomationService = requirementAutomationService;
+    }
+
+    @Autowired
+    public void setObjectMapper(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
     @Autowired
@@ -184,20 +192,19 @@ public class CodingTaskScheduler {
                 continue;
             }
 
+            // BLOCKED is reserved for failed dependencies. Once dependencies recover,
+            // return the task to PENDING before applying transient lane/scope limits.
+            if (task.getStatus() == CodingTaskStatus.BLOCKED) {
+                task.setStatus(CodingTaskStatus.PENDING);
+                codingTaskDao.save(task);
+            }
+
             if (occupiedAreas.contains(task.getArea())) {
-                if (task.getStatus() != CodingTaskStatus.BLOCKED) {
-                    task.setStatus(CodingTaskStatus.BLOCKED);
-                    codingTaskDao.save(task);
-                }
                 continue;
             }
 
             FileScope candidateScope = FileScope.of(task);
             if (candidateScope.conflictsWith(occupiedScopes)) {
-                if (task.getStatus() != CodingTaskStatus.BLOCKED) {
-                    task.setStatus(CodingTaskStatus.BLOCKED);
-                    codingTaskDao.save(task);
-                }
                 continue;
             }
 
@@ -254,6 +261,12 @@ public class CodingTaskScheduler {
 
         if (validationLoopService != null) {
             ValidationLoopService.ValidationOutcome outcome = validationLoopService.validateTask(task);
+            if (!isCurrentLoop(task)) {
+                task.setStatus(CodingTaskStatus.STALE);
+                codingTaskDao.save(task);
+                schedule(task.getRequirementId());
+                return;
+            }
             if (outcome.passed()) {
                 task.setStatus(CodingTaskStatus.SUCCEEDED);
                 task.setFailureSummary(null);
@@ -272,6 +285,12 @@ public class CodingTaskScheduler {
         String command = resolveValidationCommand(task);
         Path workspace = resolveWorkspace(task.getProjectId());
         ValidationCommandExecutor.ValidationResult result = validationCommandExecutor.execute(workspace, command);
+        if (!isCurrentLoop(task)) {
+            task.setStatus(CodingTaskStatus.STALE);
+            codingTaskDao.save(task);
+            schedule(task.getRequirementId());
+            return;
+        }
         if (result.isSuccess()) {
             task.setStatus(CodingTaskStatus.SUCCEEDED);
             task.setFailureSummary(null);
@@ -303,18 +322,22 @@ public class CodingTaskScheduler {
                 .orElse(null);
         CodingTaskChangeResult changes = run == null ? null
                 : changeCollector.collect(run.getWorktreePath(), run.getBaseCommit());
-        String changedFiles = changes != null && changes.isSuccess()
-                ? String.join(",", changes.getChangedFiles()) : "";
+        List<String> changedFiles = changes != null && changes.isSuccess()
+                ? changes.getChangedFiles() : List.of();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("taskId", task.getId());
+        metadata.put("taskKey", task.getPlanTaskKey());
+        metadata.put("success", success);
+        metadata.put("runId", run == null ? null : run.getId());
+        metadata.put("runState", run == null ? null : run.getState());
+        metadata.put("changedFiles", changedFiles);
+        metadata.put("failureReason", Objects.toString(failureReason, ""));
+        metadata.put("remediationHint", success ? "" : "根据失败日志修复后重试");
         requirementCommentService.append(task.getRequirementId(), task.getLoopId(), authorType,
                 task.getAssignedAgent(), RequirementCommentType.DEV_RESULT,
                 success ? "开发任务完成：" + task.getPlanTaskKey()
                         : "开发任务失败：" + task.getPlanTaskKey() + "\n" + Objects.toString(failureReason, ""),
-                "{\"taskId\":\"" + task.getId() + "\",\"success\":" + success
-                        + ",\"runId\":\"" + (run == null ? "" : run.getId())
-                        + "\",\"runState\":\"" + (run == null ? "" : run.getState())
-                        + "\",\"changedFiles\":\"" + changedFiles
-                        + "\",\"failureReason\":\"" + Objects.toString(failureReason, "")
-                        + "\",\"remediationHint\":\"" + (success ? "" : "根据失败日志修复后重试") + "\"}");
+                toJson(metadata));
     }
 
     private void appendValidationResult(CodingTask task,
@@ -323,12 +346,27 @@ public class CodingTaskScheduler {
         if (requirementCommentService == null) {
             return;
         }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("scope", "task");
+        metadata.put("taskId", task.getId());
+        metadata.put("taskKey", task.getPlanTaskKey());
+        metadata.put("area", task.getArea());
+        metadata.put("passed", success);
+        metadata.put("exitCode", result.getExitCode());
+        metadata.put("durationMs", result.getDuration().toMillis());
         requirementCommentService.append(task.getRequirementId(), task.getLoopId(),
                 RequirementCommentAuthorType.TEST_AGENT, "test-agent", RequirementCommentType.VALIDATION_RESULT,
                 (success ? "任务级验证通过：" : "任务级验证失败：") + task.getPlanTaskKey(),
-                "{\"taskId\":\"" + task.getId() + "\",\"area\":\"" + task.getArea()
-                        + "\",\"exitCode\":" + result.getExitCode()
-                        + ",\"durationMs\":" + result.getDuration().toMillis() + "}");
+                toJson(metadata));
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            LOGGER.warn("serialize coding-task comment metadata failed", e);
+            return "{}";
+        }
     }
 
     private String buildPrompt(CodingTask task) {
@@ -354,6 +392,11 @@ public class CodingTaskScheduler {
     private Path resolveWorkspace(String projectId) {
         WorkspaceResolveResult result = workspaceManager.resolve(projectId);
         return result == null || result.getPath() == null ? Path.of(".") : Path.of(result.getPath());
+    }
+
+    private boolean isCurrentLoop(CodingTask task) {
+        Requirement current = requirementDao.findOne(task.getRequirementId());
+        return current != null && Objects.equals(task.getLoopId(), current.getActiveLoopId());
     }
 
     /**

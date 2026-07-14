@@ -31,4 +31,8 @@ public interface RunApi extends BaseEntityApi<RunDto>, FindByPageApi<RunDto> {
     @GetMapping(path = "findByCodingTask")
     @Operation(summary = "按编码任务查询 Run 历史")
     ResultData<List<RunDto>> findByCodingTask(@RequestParam("codingTaskId") String codingTaskId);
+
+    @GetMapping(path = "findByRequirement")
+    @Operation(summary = "按需求查询全部 Run 历史")
+    ResultData<List<RunDto>> findByRequirement(@RequestParam("requirementId") String requirementId);
 }

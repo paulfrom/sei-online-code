@@ -23,6 +23,7 @@ const useStyles = createStyles(({ token, css }) => ({
 const TASK_STATUS_META = {
   PENDING: { color: 'default', label: '待执行' },
   RUNNING: { color: 'processing', label: '执行中' },
+  VALIDATING: { color: 'processing', label: '验证中' },
   SUCCEEDED: { color: 'green', label: '成功' },
   FAILED: { color: 'error', label: '失败' },
   VALIDATION_FAILED: { color: 'red', label: '验证失败' },
@@ -35,12 +36,27 @@ const TASK_STATUS_META = {
  * @param {{
  *   plan?: (ExecutionPlanDto & { planJson?: string | null }) | null,
  *   tasks: any[],
+ *   comments?: any[],
  *   onJumpTask?: (taskKey: string) => void,
  * }} props
  */
-const ExecutionPlanTab = ({ plan, tasks, onJumpTask }) => {
+const ExecutionPlanTab = ({ plan, tasks, comments = [], onJumpTask }) => {
   const { styles } = useStyles();
   const parsed = useMemo(() => parsePlanJson(plan && plan.planJson), [plan && plan.planJson]);
+  const planValidationReport = useMemo(() => {
+    const candidates = comments.filter((comment) => {
+      if (comment.commentType !== 'VALIDATION_RESULT') return false;
+      try {
+        return JSON.parse(comment.metadataJson || '{}').scope === 'plan';
+      } catch {
+        return false;
+      }
+    });
+    return candidates.reduce((latest, comment) => {
+      if (!latest) return comment;
+      return new Date(comment.createdDate || 0) >= new Date(latest.createdDate || 0) ? comment : latest;
+    }, null);
+  }, [comments]);
 
   const taskStatusByKey = useMemo(() => {
     const map = new Map();
@@ -129,6 +145,15 @@ const ExecutionPlanTab = ({ plan, tasks, onJumpTask }) => {
                   children: <pre>{parsed.validation}</pre>,
                 },
               ]}
+            />
+          )}
+          {planValidationReport && (
+            <Collapse
+              items={[{
+                key: 'plan-validation-report',
+                label: '最新计划级验证报告',
+                children: <pre>{planValidationReport.content}</pre>,
+              }]}
             />
           )}
         </Space>

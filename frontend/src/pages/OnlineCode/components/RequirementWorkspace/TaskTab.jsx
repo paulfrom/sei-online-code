@@ -1,6 +1,5 @@
 /**
- * Task tab: list of coding tasks with run/rerun/view-run/view-snippet actions.
- * Includes the (degraded) stop-automation toolbar button.
+ * Task tab: list of coding tasks with latest development/validation results.
  */
 import React, { useMemo, useState, useEffect } from 'react';
 import { createStyles } from '@ead/antd-style';
@@ -11,18 +10,13 @@ import {
   Table,
   Tag,
   Tooltip,
-  message,
 } from '@ead/suid';
 import {
-  PlayCircleFilled,
   RedoOutlined,
   HistoryOutlined,
   FileTextOutlined,
   StopOutlined,
 } from '@ead/suid-icons';
-// @ts-ignore JS service module has no declaration file
-import { runCodingTask, rerunCodingTask } from '@/services/codingTask';
-
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`
     display: flex;
@@ -52,6 +46,7 @@ const useStyles = createStyles(({ token, css }) => ({
 const STATUS_META = {
   PENDING: { color: 'default', label: '待执行' },
   RUNNING: { color: 'processing', label: '执行中' },
+  VALIDATING: { color: 'processing', label: '验证中' },
   SUCCEEDED: { color: 'green', label: '成功' },
   FAILED: { color: 'error', label: '失败' },
   VALIDATION_FAILED: { color: 'red', label: '验证失败' },
@@ -60,13 +55,21 @@ const STATUS_META = {
   BLOCKED: { color: 'orange', label: '阻塞' },
 };
 
-const isTerminal = (s) =>
-  s === 'FAILED' || s === 'SUCCEEDED' || s === 'CANCELLED' || s === 'VALIDATION_FAILED';
+const isRerunnable = (s) => s === 'FAILED' || s === 'VALIDATION_FAILED';
+
+const parseMetadata = (raw) => {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+};
 
 /**
  * @param {{
  *   tasks: any[],
- *   onRun?: (t: any) => Promise<void>,
+ *   comments?: any[],
  *   onRerun?: (t: any, p: string) => Promise<void>,
  *   onViewRun?: (t: any) => void,
  *   onStop: () => Promise<void>,
@@ -77,7 +80,7 @@ const isTerminal = (s) =>
  */
 const TaskTab = ({
   tasks,
-  onRun,
+  comments = [],
   onRerun,
   onViewRun,
   onStop,
@@ -88,6 +91,25 @@ const TaskTab = ({
   const { styles } = useStyles();
   const [scopeModal, setScopeModal] = useState({ open: false, title: '', files: [] });
   const [stopping, setStopping] = useState(false);
+
+  const resultsByTask = useMemo(() => {
+    const result = new Map();
+    comments.forEach((comment) => {
+      if (comment.commentType !== 'DEV_RESULT' && comment.commentType !== 'VALIDATION_RESULT') return;
+      const metadata = parseMetadata(comment.metadataJson);
+      const task = tasks.find((item) => item.id === metadata.taskId
+        || item.planTaskKey === metadata.taskKey);
+      if (!task) return;
+      const current = result.get(task.id) || {};
+      const field = comment.commentType === 'DEV_RESULT' ? 'development' : 'validation';
+      const previous = current[field];
+      if (!previous || new Date(comment.createdDate || 0) >= new Date(previous.createdDate || 0)) {
+        current[field] = comment;
+      }
+      result.set(task.id, current);
+    });
+    return result;
+  }, [comments, tasks]);
 
   const stats = useMemo(() => {
     const map = {};
@@ -112,26 +134,10 @@ const TaskTab = ({
     }
   };
 
-  const handleRun = async (task) => {
-    const res = await runCodingTask(task.id, null);
-    if (res.success) {
-      message.success('运行已启动');
-      await onRun(task);
-    } else {
-      message.error(res.message ?? '运行失败');
-    }
-  };
-
   const handleRerun = async (task) => {
     const prompt = window.prompt('请输入重跑提示词（必填）');
     if (!prompt) return;
-    const res = await rerunCodingTask(task.id, prompt);
-    if (res.success) {
-      message.success('重跑已启动');
-      await onRerun(task, prompt);
-    } else {
-      message.error(res.message ?? '重跑失败');
-    }
+    if (onRerun) await onRerun(task, prompt);
   };
 
   const openScope = (task) => {
@@ -174,17 +180,28 @@ const TaskTab = ({
       render: (v) => v || '-',
     },
     {
+      title: '最新开发结果',
+      width: 180,
+      render: (_v, record) => {
+        const comment = resultsByTask.get(record.id)?.development;
+        return comment ? <Tooltip title={comment.content}>{comment.content}</Tooltip> : '-';
+      },
+    },
+    {
+      title: '最新验证报告',
+      width: 180,
+      render: (_v, record) => {
+        const comment = resultsByTask.get(record.id)?.validation;
+        return comment ? <Tooltip title={comment.content}>{comment.content}</Tooltip> : '-';
+      },
+    },
+    {
       title: '操作',
       dataIndex: 'id',
       width: 280,
       render: (_id, record) => (
         <Space>
-          {record.status === 'PENDING' && (
-            <Button type="link" icon={<PlayCircleFilled />} onClick={() => handleRun(record)}>
-              运行
-            </Button>
-          )}
-          {isTerminal(record.status) && (
+          {isRerunnable(record.status) && (
             <Button type="link" icon={<RedoOutlined />} onClick={() => handleRerun(record)}>
               重跑
             </Button>
@@ -209,13 +226,11 @@ const TaskTab = ({
           {stats.FAILED > 0 && <Tag color="error">失败 {stats.FAILED}</Tag>}
           {stats.BLOCKED > 0 && <Tag color="orange">阻塞 {stats.BLOCKED}</Tag>}
         </Space>
-        {/* TODO: replace with POST /requirement/{id}/stop once backend exposes it.
-            Current degraded behavior: batch-cancel RUNNING coding tasks via /coding-task/{id}/cancel. */}
         <Tooltip
           title={
             stopEnabled
-              ? '停止当前所有执行中的任务（降级：逐个取消）'
-              : '无可停止的运行任务'
+              ? '中断当前计划并取消所有活跃 Run'
+              : '当前自动化状态不可停止'
           }
         >
           <Button

@@ -106,7 +106,8 @@ const CommentItem = ({
   onJumpPlan,
   onHighlightTask,
 }) => {
-  const meta = COMMENT_META[comment.commentType];
+  const meta = COMMENT_META[comment.commentType]
+    || { color: 'default', label: comment.commentType || '未知事件', icon: ClockCircleOutlined };
   const metadata = useMemo(() => parseMetadata(comment.metadataJson), [comment.metadataJson]);
   const isHuman = comment.authorType === 'HUMAN';
 

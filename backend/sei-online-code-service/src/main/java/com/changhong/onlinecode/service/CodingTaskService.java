@@ -92,14 +92,13 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         if (Objects.isNull(task)) {
             return ResultData.fail("编码任务不存在: " + id);
         }
-        if (task.getStatus() == CodingTaskStatus.RUNNING) {
-            return ResultData.fail("任务正在执行中");
+        if (task.getStatus() != CodingTaskStatus.FAILED
+                && task.getStatus() != CodingTaskStatus.VALIDATION_FAILED) {
+            return ResultData.fail("仅开发失败或验证失败任务可重跑");
         }
-        if (task.getStatus() == CodingTaskStatus.PENDING) {
-            return ResultData.fail("请先运行任务");
-        }
-        if (task.getStatus() == CodingTaskStatus.STALE) {
-            return ResultData.fail("任务已过期，无法重跑");
+        if (task.getExecutionPlanId() != null) {
+            return executionService.executePlanTask(id, task.getAssignedAgent(), rerunPrompt,
+                    com.changhong.onlinecode.dto.enums.TriggerSource.USER_ACTION);
         }
         return executionService.execute(id, rerunPrompt);
     }
@@ -152,6 +151,12 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         dto.setTitle(task.getTitle());
         dto.setDescription(task.getDescription());
         dto.setFileScope(task.getFileScope());
+        dto.setArea(task.getArea());
+        dto.setDependsOn(task.getDependsOn());
+        dto.setExecutionPlanId(task.getExecutionPlanId());
+        dto.setPlanTaskKey(task.getPlanTaskKey());
+        dto.setAssignedAgent(task.getAssignedAgent());
+        dto.setLoopId(task.getLoopId());
         dto.setFailureSummary(task.getFailureSummary());
         dto.setCreatedDate(task.getCreatedDate());
         dto.setLastEditedDate(task.getLastEditedDate());

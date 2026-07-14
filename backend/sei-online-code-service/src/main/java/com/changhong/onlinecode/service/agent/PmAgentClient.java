@@ -29,8 +29,12 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -96,9 +100,14 @@ public class PmAgentClient {
                 context == null ? null : context.getId(),
                 context == null ? null : context.getWorkspaceMemoryId());
 
-        String output = executeAgent(agent, requirement.getProjectId(), prompt, PLAN_TIMEOUT_SECONDS);
+        String output = executeAgent(agent, requirement.getProjectId(), prompt, PLAN_TIMEOUT_SECONDS, run);
         if (output == null) {
-            markRunFailed(run, "pm-agent 调用失败或无输出");
+            settleFailedOrCancelled(run, "pm-agent 调用失败、取消或无输出");
+            return null;
+        }
+
+        if (isCancellationRequested(run)) {
+            markRunCancelled(run);
             return null;
         }
 
@@ -131,9 +140,14 @@ public class PmAgentClient {
         Run run = createRun(requirement.getId(), plan.getLoopId(), RunType.PM_ACCEPTANCE, prompt,
                 plan.getMemoryContextId(), plan.getWorkspaceMemoryId());
 
-        String output = executeAgent(agent, requirement.getProjectId(), prompt, ACCEPT_TIMEOUT_SECONDS);
+        String output = executeAgent(agent, requirement.getProjectId(), prompt, ACCEPT_TIMEOUT_SECONDS, run);
         if (output == null) {
-            markRunFailed(run, "pm-agent 验收调用失败或无输出");
+            settleFailedOrCancelled(run, "pm-agent 验收调用失败、取消或无输出");
+            return null;
+        }
+
+        if (isCancellationRequested(run)) {
+            markRunCancelled(run);
             return null;
         }
 
@@ -141,7 +155,7 @@ public class PmAgentClient {
         return parseAcceptanceJson(output);
     }
 
-    private String executeAgent(Agent agent, String projectId, String prompt, long timeoutSeconds) {
+    private String executeAgent(Agent agent, String projectId, String prompt, long timeoutSeconds, Run run) {
         CliRunner runner = cliRunnerRegistry.resolve(agent.getCliTool());
         WorkspaceResolveResult workspace = workspaceManager.resolve(projectId);
         String cwd = workspace == null ? null : workspace.getPath();
@@ -151,12 +165,13 @@ public class PmAgentClient {
                 agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
 
         CompletableFuture<String> future = runner.execute(
-                projectId, null, null, prompt, cwd, agent.getModel(), agent.getMcpConfig());
+                projectId, null, run.getId(), prompt, cwd, agent.getModel(), agent.getMcpConfig());
         try {
             return future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOGGER.warn("pm-agent execution failed or timed out", e);
             future.cancel(true);
+            cliRunnerRegistry.cancel(run.getId());
             return null;
         }
     }
@@ -177,17 +192,50 @@ public class PmAgentClient {
     }
 
     private void markRunSucceeded(Run run) {
-        run.setState(RunState.SUCCEEDED);
-        run.setFinishedDate(new Date());
-        runDao.save(run);
+        Run current = currentRun(run);
+        if (current.getState() == RunState.RUNNING && !Boolean.TRUE.equals(current.getCancelRequested())) {
+            current.setState(RunState.SUCCEEDED);
+            current.setFinishedDate(new Date());
+            runDao.save(current);
+        }
     }
 
     private void markRunFailed(Run run, String reason) {
-        run.setState(RunState.FAILED);
-        run.setFailureSummary("PM agent 调用失败");
-        run.setFailureReason(reason);
-        run.setFinishedDate(new Date());
-        runDao.save(run);
+        Run current = currentRun(run);
+        if (current.getState() != RunState.RUNNING) {
+            return;
+        }
+        current.setState(RunState.FAILED);
+        current.setFailureSummary("PM agent 调用失败");
+        current.setFailureReason(reason);
+        current.setFinishedDate(new Date());
+        runDao.save(current);
+    }
+
+    private void settleFailedOrCancelled(Run run, String reason) {
+        if (isCancellationRequested(run)) {
+            markRunCancelled(run);
+        } else {
+            markRunFailed(run, reason);
+        }
+    }
+
+    private boolean isCancellationRequested(Run run) {
+        Run current = currentRun(run);
+        return Boolean.TRUE.equals(current.getCancelRequested()) || current.getState() == RunState.CANCELLED;
+    }
+
+    private void markRunCancelled(Run run) {
+        Run current = currentRun(run);
+        current.setCancelRequested(Boolean.TRUE);
+        current.setState(RunState.CANCELLED);
+        current.setFinishedDate(new Date());
+        runDao.save(current);
+    }
+
+    private Run currentRun(Run run) {
+        Run current = runDao.findOne(run.getId());
+        return current == null ? run : current;
     }
 
     private String buildPlanningPrompt(Requirement requirement,
@@ -255,6 +303,8 @@ public class PmAgentClient {
                                          RequirementDesignContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append("You are pm-agent. Review the requirement, execution plan, development results, validation reports, and decide whether to accept or request remediation.\n\n");
+        sb.append("Treat the latest plan-level VALIDATION_RESULT (metadata scope=plan) as the primary acceptance evidence. "
+                + "Development self-reports are auxiliary and must not override failed plan validation.\n\n");
         sb.append("## PRD\n").append(Objects.toString(requirement.getPrdContent(), "")).append("\n\n");
         sb.append("## Execution Plan\n").append(Objects.toString(plan.getPlanJson(), "")).append("\n\n");
 
@@ -328,15 +378,20 @@ public class PmAgentClient {
                 String area = taskNode.path("area").asText(null);
                 List<String> dependsOn = readStringList(taskNode.path("dependsOn"));
                 List<String> fileScope = readStringList(taskNode.path("fileScope"));
+                List<String> acceptanceCriteria = readStringList(taskNode.path("acceptanceCriteria"));
 
                 if (taskKey == null || title == null || agent == null || area == null) {
                     LOGGER.warn("pm-agent task missing required fields: {}", taskNode);
                     return null;
                 }
                 tasks.add(new RequirementAutomationService.PlanTask(
-                        taskKey, title, description, agent, area, dependsOn, fileScope));
+                        taskKey, title, description, agent, area, dependsOn, fileScope, acceptanceCriteria));
             }
 
+            if (!isValidTaskGraph(tasks)) {
+                LOGGER.warn("pm-agent plan contains invalid agent assignment or DAG: requirementId={}", requirementId);
+                return null;
+            }
             return new PmPlanResult(goal, tasks, risks, validationCommands);
         } catch (Exception e) {
             LOGGER.warn("pm-agent plan JSON parse failed: requirementId={}, loopId={}", requirementId, loopId, e);
@@ -362,13 +417,19 @@ public class PmAgentClient {
                     String area = taskNode.path("area").asText(null);
                     List<String> dependsOn = readStringList(taskNode.path("dependsOn"));
                     List<String> fileScope = readStringList(taskNode.path("fileScope"));
+                    List<String> acceptanceCriteria = readStringList(taskNode.path("acceptanceCriteria"));
                     if (taskKey == null || title == null || agent == null || area == null) {
                         LOGGER.warn("pm-agent remediation task missing required fields: {}", taskNode);
-                        continue;
+                        return null;
                     }
                     remediationTasks.add(new RequirementAutomationService.PlanTask(
-                            taskKey, title, description, agent, area, dependsOn, fileScope));
+                            taskKey, title, description, agent, area, dependsOn, fileScope, acceptanceCriteria));
                 }
+            }
+
+            if (!isValidTaskGraph(remediationTasks)) {
+                LOGGER.warn("pm-agent remediation contains invalid agent assignment or DAG");
+                return null;
             }
 
             return new PmAcceptanceResult(accepted, summary, findings, remediationTasks);
@@ -376,6 +437,46 @@ public class PmAgentClient {
             LOGGER.warn("pm-agent acceptance JSON parse failed", e);
             return null;
         }
+    }
+
+    private boolean isValidTaskGraph(List<RequirementAutomationService.PlanTask> tasks) {
+        Map<String, RequirementAutomationService.PlanTask> byKey = new HashMap<>();
+        for (RequirementAutomationService.PlanTask task : tasks) {
+            boolean validAssignment = ("frontend".equals(task.area())
+                    && "frontend-dev-agent".equals(task.agent()))
+                    || ("backend".equals(task.area())
+                    && "backend-dev-agent".equals(task.agent()));
+            if (!validAssignment || task.taskKey().isBlank() || task.title() == null
+                    || task.title().isBlank() || byKey.putIfAbsent(task.taskKey(), task) != null) {
+                return false;
+            }
+        }
+        for (RequirementAutomationService.PlanTask task : tasks) {
+            if (task.dependsOn().stream().anyMatch(key -> !byKey.containsKey(key)
+                    || key.equals(task.taskKey()))) {
+                return false;
+            }
+        }
+        Set<String> visiting = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        for (String taskKey : byKey.keySet()) {
+            if (hasCycle(taskKey, byKey, visiting, visited)) return false;
+        }
+        return true;
+    }
+
+    private boolean hasCycle(String taskKey,
+                             Map<String, RequirementAutomationService.PlanTask> tasks,
+                             Set<String> visiting,
+                             Set<String> visited) {
+        if (visited.contains(taskKey)) return false;
+        if (!visiting.add(taskKey)) return true;
+        for (String dependency : tasks.get(taskKey).dependsOn()) {
+            if (hasCycle(dependency, tasks, visiting, visited)) return true;
+        }
+        visiting.remove(taskKey);
+        visited.add(taskKey);
+        return false;
     }
 
     private List<String> readStringList(JsonNode node) {

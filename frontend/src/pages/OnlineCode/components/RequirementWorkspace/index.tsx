@@ -93,6 +93,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     delivery,
     loading,
     error,
+    sendingComment,
     activeLoopId,
     planVersion,
     actions,
@@ -167,7 +168,8 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     );
   }
 
-  const autoStopEnabled = codingTasks.some((t: { status?: string }) => t.status === 'RUNNING');
+  const autoStopEnabled = ['PLANNING', 'DEVELOPING', 'VALIDATING', 'ACCEPTING']
+    .includes(requirement.automationStatus);
 
   const rightColumn = (
     <>
@@ -184,7 +186,6 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
         delivery={delivery}
         comments={comments}
         onRunLog={handleRunLogOpen}
-        onRun={actions.runTask}
         onRerun={actions.rerunTask}
         onStop={actions.stopAutomation}
         onRetryMr={actions.retryMr}
@@ -222,7 +223,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
               activeLoopId={activeLoopId}
               requirement={requirement}
               onSend={actions.sendComment}
-              sending={false}
+              sending={sendingComment}
               onJumpPlan={handleJumpPlan}
               onHighlightTask={handleHighlightTask}
             />

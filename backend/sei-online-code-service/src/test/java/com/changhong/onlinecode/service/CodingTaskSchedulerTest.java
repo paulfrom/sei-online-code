@@ -10,6 +10,7 @@ import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.validation.ValidationCommandExecutor;
+import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -99,7 +100,7 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
-    void schedule_respectsLaneConcurrency() {
+    void schedule_laneContentionLeavesTaskPending() {
         Requirement req = requirement("req-1", "loop-1");
         when(requirementDao.findOne("req-1")).thenReturn(req);
 
@@ -112,13 +113,12 @@ class CodingTaskSchedulerTest {
         scheduler.schedule("req-1");
 
         verify(executionService, never()).executePlanTask(eq("task-b"), anyString(), anyString());
-        ArgumentCaptor<CodingTask> captor = ArgumentCaptor.forClass(CodingTask.class);
-        verify(codingTaskDao, times(1)).save(captor.capture());
-        assertEquals(CodingTaskStatus.BLOCKED, captor.getValue().getStatus());
+        verify(codingTaskDao, never()).save(pending);
+        assertEquals(CodingTaskStatus.PENDING, pending.getStatus());
     }
 
     @Test
-    void schedule_blocksTaskOnFileScopeParentChildConflict() {
+    void schedule_fileScopeContentionLeavesTaskPending() {
         Requirement req = requirement("req-1", "loop-1");
         when(requirementDao.findOne("req-1")).thenReturn(req);
 
@@ -133,9 +133,8 @@ class CodingTaskSchedulerTest {
         scheduler.schedule("req-1");
 
         verify(executionService, never()).executePlanTask(eq("task-b"), anyString(), anyString());
-        ArgumentCaptor<CodingTask> captor = ArgumentCaptor.forClass(CodingTask.class);
-        verify(codingTaskDao, times(1)).save(captor.capture());
-        assertEquals(CodingTaskStatus.BLOCKED, captor.getValue().getStatus());
+        verify(codingTaskDao, never()).save(pending);
+        assertEquals(CodingTaskStatus.PENDING, pending.getStatus());
     }
 
     @Test
@@ -181,6 +180,32 @@ class CodingTaskSchedulerTest {
 
         assertEquals(CodingTaskStatus.STALE, staleTask.getStatus());
         verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void developmentFinished_loopChangesDuringValidation_marksTaskStale() {
+        List<CodingTaskStatus> savedStatuses = new ArrayList<>();
+        when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
+            CodingTask saved = invocation.getArgument(0);
+            savedStatuses.add(saved.getStatus());
+            return saved;
+        });
+        Requirement original = requirement("req-1", "loop-1");
+        Requirement current = requirement("req-1", "loop-2");
+        when(requirementDao.findOne("req-1")).thenReturn(original, current, current);
+        CodingTask task = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.RUNNING);
+        task.setExecutionPlanId("plan-1");
+        when(codingTaskDao.findOne("task-a")).thenReturn(task);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
+        ValidationLoopService validation = mock(ValidationLoopService.class);
+        when(validation.validateTask(task))
+                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
+        scheduler.setValidationLoopService(validation);
+
+        scheduler.onDevelopmentRunFinished("task-a", true, null);
+
+        assertEquals(CodingTaskStatus.STALE, task.getStatus());
+        assertTrue(!savedStatuses.contains(CodingTaskStatus.SUCCEEDED));
     }
 
     @Test

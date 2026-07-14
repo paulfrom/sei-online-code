@@ -46,4 +46,14 @@ public class RunService extends BaseEntityService<Run> {
     public List<Run> findByCodingTaskId(String codingTaskId) {
         return dao.findByCodingTaskId(codingTaskId);
     }
+
+    /**
+     * 按需求取全部运行记录，包括未绑定编码任务的运行。
+     *
+     * @param requirementId 需求 id
+     * @return Run 列表
+     */
+    public List<Run> findByRequirementId(String requirementId) {
+        return dao.findByRequirementIdOrderByCreatedDateDesc(requirementId);
+    }
 }

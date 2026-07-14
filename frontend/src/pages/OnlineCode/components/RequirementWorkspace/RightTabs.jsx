@@ -43,7 +43,7 @@ const useStyles = createStyles(({ token, css }) => ({
  * @param {{
  *   plan?: any, tasks: any[], runs: any[], delivery: any,
  *   comments: any[], onRunLog?: (run: any) => void,
- *   onRun?: (t: any) => Promise<void>, onRerun?: (t: any, p: string) => Promise<void>,
+ *   onRerun?: (t: any, p: string) => Promise<void>,
  *   onStop: () => Promise<void>, onRetryMr?: () => Promise<void>,
  *   autoStopEnabled: boolean, highlightTaskKey?: string | null,
  *   onHighlightTaskConsumed?: () => void,
@@ -59,7 +59,6 @@ const RightTabs = forwardRef(
       delivery,
       comments,
       onRunLog,
-      onRun,
       onRerun,
       onStop,
       onRetryMr,
@@ -72,6 +71,7 @@ const RightTabs = forwardRef(
     const { styles } = useStyles();
     const [activeTab, setActiveTab] = useState('plan');
     const [pendingTaskKey, setPendingTaskKey] = useState(null);
+    const [taskFilterId, setTaskFilterId] = useState(null);
 
     useImperativeHandle(ref, () => ({
       switchTo: (tab, taskKey) => {
@@ -104,14 +104,14 @@ const RightTabs = forwardRef(
 
     const jumpToRun = (task) => {
       setActiveTab('run');
-      if (onRunLog) onRunLog(task);
+      setTaskFilterId(task && task.id ? task.id : null);
     };
 
     const tabItems = [
       {
         key: 'plan',
         label: '执行计划',
-        children: <ExecutionPlanTab plan={plan} tasks={tasks} onJumpTask={jumpToTask} />,
+        children: <ExecutionPlanTab plan={plan} tasks={tasks} comments={comments} onJumpTask={jumpToTask} />,
       },
       {
         key: 'task',
@@ -119,7 +119,7 @@ const RightTabs = forwardRef(
         children: (
           <TaskTab
             tasks={tasks}
-            onRun={onRun}
+            comments={comments}
             onRerun={onRerun}
             onViewRun={jumpToRun}
             onStop={onStop}
@@ -132,7 +132,14 @@ const RightTabs = forwardRef(
       {
         key: 'run',
         label: '运行',
-        children: <RunTab runs={runs} onOpenLog={onRunLog} />,
+        children: (
+          <RunTab
+            runs={runs}
+            taskFilterId={taskFilterId}
+            onClearTaskFilter={() => setTaskFilterId(null)}
+            onOpenLog={onRunLog}
+          />
+        ),
       },
       {
         key: 'delivery',

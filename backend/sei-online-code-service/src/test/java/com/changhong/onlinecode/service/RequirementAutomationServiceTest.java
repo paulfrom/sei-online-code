@@ -15,11 +15,16 @@ import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
+import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -117,7 +122,7 @@ class RequirementAutomationServiceTest {
         List<RequirementAutomationService.PlanTask> planTasks = List.of(
                 new RequirementAutomationService.PlanTask(
                         "BE-001", "后端接口", "实现登录接口", "backend-dev-agent", "backend",
-                        List.of(), List.of("backend/")),
+                        List.of(), List.of("backend/"), List.of("接口测试通过")),
                 new RequirementAutomationService.PlanTask(
                         "FE-001", "前端页面", "实现登录页", "frontend-dev-agent", "frontend",
                         List.of("BE-001"), List.of("frontend/"))
@@ -148,6 +153,9 @@ class RequirementAutomationServiceTest {
         assertEquals("backend-dev-agent", be.getAssignedAgent());
         assertEquals(CodingTaskStatus.PENDING, be.getStatus());
         assertEquals(requirement.getActiveLoopId(), be.getLoopId());
+        ArgumentCaptor<ExecutionPlan> planCaptor = ArgumentCaptor.forClass(ExecutionPlan.class);
+        verify(executionPlanDao, times(2)).save(planCaptor.capture());
+        assertTrue(planCaptor.getValue().getPlanJson().contains("接口测试通过"));
     }
 
     @Test
@@ -213,6 +221,134 @@ class RequirementAutomationServiceTest {
         verify(requirementCommentService).append(eq("req-1"), eq("loop-1"),
                 eq(RequirementCommentAuthorType.PM_AGENT), eq("pm-agent"),
                 eq(RequirementCommentType.ACCEPTANCE), any(), any());
+    }
+
+    @Test
+    void startInitialLoop_withEventPublisher_dispatchesPlanningAsynchronously() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-async");
+        requirement.setProjectId("proj-1");
+        requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        when(requirementDao.findOne("req-async")).thenReturn(requirement);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        service.setEventPublisher(publisher);
+
+        service.startInitialLoop("req-async");
+
+        assertNotNull(requirement.getActiveLoopId());
+        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+        verify(publisher).publishEvent(any(RequirementAutomationLoopEvent.class));
+        verify(pmAgentClient, never()).generatePlan(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executePreparedLoop_loopWasReplaced_ignoresPmPlanResult() {
+        Requirement initial = new Requirement();
+        initial.setId("req-stale-plan");
+        initial.setProjectId("proj-1");
+        initial.setActiveLoopId("loop-old");
+        initial.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        Requirement current = new Requirement();
+        current.setId("req-stale-plan");
+        current.setProjectId("proj-1");
+        current.setActiveLoopId("loop-new");
+        current.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        when(requirementDao.findOne("req-stale-plan")).thenReturn(initial, current);
+        when(requirementCommentService.findByRequirementId("req-stale-plan")).thenReturn(List.of());
+        PmAgentClient.PmPlanResult result = new PmAgentClient.PmPlanResult(
+                "goal", List.of(new RequirementAutomationService.PlanTask(
+                "BE-1", "title", "desc", "backend-dev-agent", "backend", List.of(), List.of("backend/"))),
+                List.of(), List.of());
+        when(pmAgentClient.generatePlan(any(), any(), any(), any(), any(), any())).thenReturn(result);
+
+        service.executePreparedLoop("req-stale-plan", "loop-old", ExecutionPlanType.INITIAL, "summary");
+
+        verify(executionPlanDao, never()).save(any(ExecutionPlan.class));
+        verify(codingTaskDao, never()).save(any(CodingTask.class));
+    }
+
+    @Test
+    void onPlanTasksSettled_loopChangesDuringPlanValidation_doesNotRunAcceptance() {
+        Requirement original = new Requirement();
+        original.setId("req-1");
+        original.setProjectId("proj-1");
+        original.setActiveLoopId("loop-1");
+        original.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        Requirement current = new Requirement();
+        current.setId("req-1");
+        current.setProjectId("proj-1");
+        current.setActiveLoopId("loop-2");
+        current.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        when(requirementDao.findOne("req-1")).thenReturn(original, current);
+
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setId("plan-1");
+        plan.setRequirementId("req-1");
+        plan.setLoopId("loop-1");
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        plan.setPlanJson(buildPlanJson());
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc("req-1", "loop-1"))
+                .thenReturn(plan);
+        CodingTask task = new CodingTask();
+        task.setRequirementId("req-1");
+        task.setExecutionPlanId("plan-1");
+        task.setStatus(CodingTaskStatus.SUCCEEDED);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
+
+        ValidationLoopService validation = mock(ValidationLoopService.class);
+        when(validation.validatePlan(original, plan))
+                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
+        service.setValidationLoopService(validation);
+
+        service.onPlanTasksSettled("req-1");
+
+        verify(pmAgentClient, never()).reviewAcceptance(any(), any(), any(), any(), any());
+        verify(requirementDeliveryService, never()).deliver(any(), any());
+    }
+
+    @Test
+    void stopAutomation_interruptsPlanCancelsRunsAndInvalidatesLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-stop");
+        requirement.setActiveLoopId("loop-old");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        when(requirementDao.findOne("req-stop")).thenReturn(requirement);
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setLoopId("loop-old");
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc("req-stop", "loop-old"))
+                .thenReturn(plan);
+        Run run = new Run();
+        run.setId("run-stop");
+        run.setState(RunState.RUNNING);
+        when(runDao.findByRequirementIdAndState("req-stop", RunState.RUNNING)).thenReturn(List.of(run));
+        CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
+        service.setCliRunnerRegistry(registry);
+
+        Requirement stopped = service.stopAutomation("req-stop");
+
+        assertEquals(RequirementAutomationStatus.INTERRUPTED, stopped.getAutomationStatus());
+        assertTrue(!"loop-old".equals(stopped.getActiveLoopId()));
+        assertEquals(ExecutionPlanStatus.INTERRUPTED, plan.getStatus());
+        assertTrue(Boolean.TRUE.equals(run.getCancelRequested()));
+        verify(registry).cancel("run-stop");
+        verify(requirementCommentService).append(eq("req-stop"), eq(stopped.getActiveLoopId()),
+                eq(RequirementCommentAuthorType.SYSTEM), eq("system"),
+                eq(RequirementCommentType.INTERRUPTION), any(), any());
+    }
+
+    @Test
+    void humanComment_invalidatesRequirementContextBeforeReplanning() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-comment");
+        requirement.setActiveLoopId("loop-old");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        when(requirementDao.findOne("req-comment")).thenReturn(requirement);
+        when(runDao.findByRequirementIdAndState("req-comment", RunState.RUNNING)).thenReturn(List.of());
+
+        service.handleHumanComment("req-comment", "请调整接口", null);
+
+        verify(requirementDesignContextService).invalidate("req-comment");
     }
 
     @Test
