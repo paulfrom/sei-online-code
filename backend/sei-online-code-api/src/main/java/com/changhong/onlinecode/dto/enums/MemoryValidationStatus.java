@@ -5,8 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * 文档记忆校验状态。用于 PRD/概述设计/详细设计。契约 WORKSPACE-MEMORY-IMPLEMENTATION-PLAN §9.4、§15.4、§19。
  *
- * <p>{@link #NOT_RUN} 新生成尚未校验；{@link #PASSED} 校验通过；
- * {@link #WARNING} 有提示但允许确认；{@link #FAILED} 阻止确认。</p>
+ * <p>{@link #NOT_RUN} 异步审阅尚未执行；{@link #PASSED} 暂无差异提醒；
+ * {@link #WARNING} 有差异提醒。{@link #FAILED} 仅为历史数据兼容保留，不作为确认门禁。</p>
  *
  * @author sei-online-code
  */
@@ -22,6 +22,6 @@ public enum MemoryValidationStatus {
     /** 有提示项，允许确认。 */
     WARNING,
 
-    /** 校验失败，阻止确认。 */
+    /** 历史校验失败状态，仅为数据兼容保留，不阻止确认。 */
     FAILED
 }

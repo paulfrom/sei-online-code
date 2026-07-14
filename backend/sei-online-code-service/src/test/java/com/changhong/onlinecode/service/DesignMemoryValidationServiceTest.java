@@ -28,15 +28,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * DesignMemoryValidationService 单元测试。
  *
- * <p>WHY：校验服务决定设计文档能否进入 REVIEW，必须验证三类核心语义：
- * 1) 结构化 forbidden choice 命中即 FAILED；2) 声称复用不存在的模块给出 WARNING；
- * 3) 影响点必须命中真实 RealityClaim.source；以及 PASSED/WARNING/FAILED 三态流转。
+ * <p>WHY：该服务保留结构化差异检测能力，生产流程已改由 agent 异步审阅且不参与门禁。
+ * 这里继续验证 forbidden choice、模块复用和 RealityClaim.source 等既有检测规则，避免历史能力回退。
  * 旧实现用占位启发（只识 Vue/antd、只判 JSON 空否、只判斜杠、summary 前 40 字符匹配），
  * 这些用例正是为锁死结构化比对不被回退。</p>
  *
@@ -164,69 +165,64 @@ class DesignMemoryValidationServiceTest {
     }
 
     @Test
-    void confirmPrd_revalidatesHistoricalFailedStatus() {
+    void confirmPrd_staleContextTriggersNewPrdGeneration() {
         RequirementDao dao = mock(RequirementDao.class);
         RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
-        DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
-        RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), validationService,
-                mock(RequirementCommentService.class), mapper);
-
-        Requirement requirement = reviewRequirementWithHistoricalFailure();
-        RequirementDesignContext context = new RequirementDesignContext();
-        context.setId("ctx1");
-        context.setContextStatus(RequirementDesignContextStatus.STALE);
-        DesignMemoryValidationService.ValidationResult current = new DesignMemoryValidationService.ValidationResult();
-        current.setStatus(MemoryValidationStatus.PASSED);
-        when(dao.findOne("req1")).thenReturn(requirement);
-        when(contextDao.findOne("ctx1")).thenReturn(context);
-        when(validationService.validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context))
-                .thenReturn(current);
-
-        OperateResultWithData<Requirement> result = requirementService.confirmPrd("req1");
-
-        assertFalse(result.successful());
-        assertTrue(result.getMessage().contains("STALE"));
-        assertEquals(MemoryValidationStatus.PASSED, requirement.getMemoryValidationStatus(),
-                "确认时应覆盖历史 FAILED，而不是在重校验前直接拦截");
-        org.mockito.Mockito.verify(validationService)
-                .validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context);
-    }
-
-    @Test
-    void confirmPrd_appendsCommentAndContinuesAfterFailedMemoryValidation() {
-        RequirementDao dao = mock(RequirementDao.class);
-        RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
-        DesignMemoryValidationService validationService = mock(DesignMemoryValidationService.class);
         RequirementCommentService commentService = mock(RequirementCommentService.class);
-        RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), validationService, commentService, mapper);
+        RequirementService requirementService = spy(new RequirementService(dao, mock(RequirementAgentService.class),
+                contextDao, mock(RequirementDesignContextService.class), commentService));
 
         Requirement requirement = reviewRequirementWithHistoricalFailure();
         RequirementDesignContext context = new RequirementDesignContext();
         context.setId("ctx1");
         context.setContextStatus(RequirementDesignContextStatus.STALE);
-        DesignMemoryValidationService.ValidationResult current = new DesignMemoryValidationService.ValidationResult();
-        current.setStatus(MemoryValidationStatus.FAILED);
-        current.getFindings().add(new DesignMemoryValidationService.ValidationFinding(
-                "HIGH", "遗漏 high severity 冲突：必须使用统一鉴权组件", "显式处理 conflict-7"));
+        Requirement regenerating = reviewRequirementWithHistoricalFailure();
+        regenerating.setStatus(RequirementStatus.PRD_GENERATING);
+        regenerating.setPrdVersion(2);
         when(dao.findOne("req1")).thenReturn(requirement);
         when(contextDao.findOne("ctx1")).thenReturn(context);
-        when(validationService.validate(DesignMemoryValidationService.DocumentType.PRD, "# PRD", context))
-                .thenReturn(current);
+        doReturn(OperateResultWithData.operationSuccessWithData(regenerating))
+                .when(requirementService).regeneratePrd(
+                        org.mockito.ArgumentMatchers.eq("req1"),
+                        org.mockito.ArgumentMatchers.contains("重新生成 PRD"));
 
         OperateResultWithData<Requirement> result = requirementService.confirmPrd("req1");
 
-        assertFalse(result.successful());
-        assertTrue(result.getMessage().contains("STALE"), "记忆冲突后应继续执行设计上下文校验");
+        assertTrue(result.successful());
+        assertEquals(RequirementStatus.PRD_GENERATING, result.getData().getStatus());
+        verify(requirementService).regeneratePrd(
+                org.mockito.ArgumentMatchers.eq("req1"),
+                org.mockito.ArgumentMatchers.contains("重新生成 PRD"));
         verify(commentService).append(
                 org.mockito.ArgumentMatchers.eq("req1"),
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.eq(com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType.SYSTEM),
-                org.mockito.ArgumentMatchers.eq("记忆校验"),
+                org.mockito.ArgumentMatchers.eq("设计上下文"),
                 org.mockito.ArgumentMatchers.eq(com.changhong.onlinecode.dto.enums.RequirementCommentType.VALIDATION_RESULT),
-                org.mockito.ArgumentMatchers.contains("遗漏 high severity 冲突：必须使用统一鉴权组件"),
-                org.mockito.ArgumentMatchers.contains("\"status\":\"FAILED\""));
+                org.mockito.ArgumentMatchers.contains("已自动触发 PRD v2 重新生成"),
+                org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void confirmGuard_ignoresHistoricalFailedMemoryReview() {
+        RequirementDao dao = mock(RequirementDao.class);
+        RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
+        RequirementCommentService commentService = mock(RequirementCommentService.class);
+        RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
+                contextDao, mock(RequirementDesignContextService.class), commentService);
+
+        Requirement requirement = reviewRequirementWithHistoricalFailure();
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        context.setContextStatus(RequirementDesignContextStatus.READY);
+        when(contextDao.findOne("ctx1")).thenReturn(context);
+
+        OperateResultWithData<Void> result = requirementService.validateDesignContextForConfirm("ctx1", "req1");
+
+        assertTrue(result.successful());
+        assertEquals(MemoryValidationStatus.FAILED, requirement.getMemoryValidationStatus(),
+                "历史审阅状态只保留展示，不参与确认门禁");
+        org.mockito.Mockito.verifyNoInteractions(commentService);
     }
 
     @Test

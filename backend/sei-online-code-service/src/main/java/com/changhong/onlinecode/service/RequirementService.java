@@ -21,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 /**
  * Requirement 服务。
@@ -31,29 +30,27 @@ import java.util.stream.Collectors;
 @Service
 public class RequirementService extends BaseEntityService<Requirement> {
 
+    private static final String STALE_CONTEXT_MESSAGE = "设计上下文已过期（STALE），请重新生成 PRD";
+    private static final String STALE_CONTEXT_REGENERATION_PROMPT =
+            "设计上下文已过期，请基于最新需求与 WorkspaceMemory 重新生成 PRD，替换旧版本。";
+
     private final RequirementDao dao;
     private final RequirementAgentService requirementAgentService;
     private final RequirementDesignContextDao requirementDesignContextDao;
     private final RequirementDesignContextService requirementDesignContextService;
-    private final DesignMemoryValidationService designMemoryValidationService;
     private final RequirementCommentService requirementCommentService;
-    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private RequirementAutomationService requirementAutomationService;
 
     public RequirementService(RequirementDao dao,
                               RequirementAgentService requirementAgentService,
                               RequirementDesignContextDao requirementDesignContextDao,
                               RequirementDesignContextService requirementDesignContextService,
-                              DesignMemoryValidationService designMemoryValidationService,
-                              RequirementCommentService requirementCommentService,
-                              com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+                              RequirementCommentService requirementCommentService) {
         this.dao = dao;
         this.requirementAgentService = requirementAgentService;
         this.requirementDesignContextDao = requirementDesignContextDao;
         this.requirementDesignContextService = requirementDesignContextService;
-        this.designMemoryValidationService = designMemoryValidationService;
         this.requirementCommentService = requirementCommentService;
-        this.objectMapper = objectMapper;
     }
 
     @Autowired
@@ -166,8 +163,12 @@ public class RequirementService extends BaseEntityService<Requirement> {
             return OperateResultWithData.operationFailure("仅 PRD_REVIEW 状态可编辑: " + requirement.getStatus());
         }
         requirement.setPrdContent(prdContent);
-        revalidateAfterEdit(requirement, DesignMemoryValidationService.DocumentType.PRD, prdContent);
-        return super.save(requirement);
+        RequirementDesignContext context = prepareMemoryReview(requirement);
+        OperateResultWithData<Requirement> result = super.save(requirement);
+        if (result.successful() && context != null) {
+            TransactionUtil.afterCommit(() -> requirementAgentService.reviewMemory(id, prdContent, context));
+        }
+        return result;
     }
 
     /**
@@ -185,13 +186,11 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (requirement.getStatus() != RequirementStatus.PRD_REVIEW) {
             return OperateResultWithData.operationFailure("仅 PRD_REVIEW 状态可确认: " + requirement.getStatus());
         }
-        DesignMemoryValidationService.ValidationResult memoryValidation = revalidateAfterEdit(
-                requirement, DesignMemoryValidationService.DocumentType.PRD, requirement.getPrdContent());
-        if (memoryValidation != null && memoryValidation.getStatus() == MemoryValidationStatus.FAILED) {
-            appendMemoryValidationComment(requirement, memoryValidation);
-        }
         OperateResultWithData<Void> validation = validateDesignContextForConfirm(requirement.getDesignContextId(), id);
         if (validation.notSuccessful()) {
+            if (STALE_CONTEXT_MESSAGE.equals(validation.getMessage())) {
+                return regenerateStalePrd(id);
+            }
             return OperateResultWithData.operationFailure(validation.getMessage());
         }
         requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
@@ -203,13 +202,8 @@ public class RequirementService extends BaseEntityService<Requirement> {
         return result;
     }
 
-    /**
-     * 手动编辑后重新校验文档，并写入 Requirement 的 memory_validation_status/result。
-     */
-    private DesignMemoryValidationService.ValidationResult revalidateAfterEdit(
-            Requirement requirement,
-            DesignMemoryValidationService.DocumentType type,
-            String content) {
+    /** 手动编辑后重置审阅状态，并返回异步 agent 使用的上下文快照。 */
+    private RequirementDesignContext prepareMemoryReview(Requirement requirement) {
         RequirementDesignContext context = null;
         if (requirement.getDesignContextId() != null && !requirement.getDesignContextId().isBlank()) {
             context = requirementDesignContextDao.findOne(requirement.getDesignContextId());
@@ -223,56 +217,40 @@ public class RequirementService extends BaseEntityService<Requirement> {
             requirement.setMemoryValidationResultJson(null);
             return null;
         }
-        DesignMemoryValidationService.ValidationResult result = designMemoryValidationService.validate(type, content, context);
-        requirement.setMemoryValidationStatus(result.getStatus());
-        requirement.setMemoryValidationResultJson(toJson(result));
+        requirement.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
+        requirement.setMemoryValidationResultJson(null);
+        return context;
+    }
+
+    /**
+     * STALE 上下文阻断当前确认，并立即启动新版本 PRD 生成。
+     */
+    private OperateResultWithData<Requirement> regenerateStalePrd(String requirementId) {
+        OperateResultWithData<Requirement> result = regeneratePrd(
+                requirementId, STALE_CONTEXT_REGENERATION_PROMPT);
+        if (result.successful() && result.getData() != null) {
+            Requirement requirement = result.getData();
+            requirementCommentService.append(
+                    requirementId,
+                    requirement.getActiveLoopId(),
+                    RequirementCommentAuthorType.SYSTEM,
+                    "设计上下文",
+                    RequirementCommentType.VALIDATION_RESULT,
+                    "设计上下文已过期（STALE）；已自动触发 PRD v"
+                            + requirement.getPrdVersion() + " 重新生成。",
+                    null);
+        }
         return result;
     }
 
-    private String memoryValidationFailureMessage(DesignMemoryValidationService.ValidationResult result) {
-        String details = result.getFindings().stream()
-                .filter(finding -> "HIGH".equals(finding.getSeverity()))
-                .map(finding -> finding.getMessage()
-                        + (finding.getSuggestedAction() == null || finding.getSuggestedAction().isBlank()
-                        ? "" : "（建议：" + finding.getSuggestedAction() + "）"))
-                .collect(Collectors.joining("；"));
-        return details.isBlank()
-                ? "记忆校验未通过（FAILED），请根据校验结果修改 PRD 后重试"
-                : "记忆校验未通过（FAILED）：" + details;
-    }
-
     /**
-     * 记录记忆校验冲突，但不阻断确认流程。
-     */
-    private void appendMemoryValidationComment(
-            Requirement requirement,
-            DesignMemoryValidationService.ValidationResult result) {
-        requirementCommentService.append(
-                requirement.getId(),
-                requirement.getActiveLoopId(),
-                RequirementCommentAuthorType.SYSTEM,
-                "记忆校验",
-                RequirementCommentType.VALIDATION_RESULT,
-                memoryValidationFailureMessage(result) + "；已记录该冲突，流程继续执行。",
-                requirement.getMemoryValidationResultJson());
-    }
-
-    private String toJson(DesignMemoryValidationService.ValidationResult result) {
-        try {
-            return objectMapper.writeValueAsString(result);
-        } catch (Exception e) {
-            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
-        }
-    }
-
-    /**
-     * 确认前校验：design_context_id 存在、validation 未 FAILED、context 未 STALE。
+     * 确认前只检查设计上下文本身可用；异步记忆审阅结果不参与门禁。
      *
      * @param designContextId 设计上下文 id
      * @param requirementId   需求 id（用于回退查询）
      * @return 校验结果
      */
-    private OperateResultWithData<Void> validateDesignContextForConfirm(String designContextId, String requirementId) {
+    OperateResultWithData<Void> validateDesignContextForConfirm(String designContextId, String requirementId) {
         if (designContextId == null || designContextId.isBlank()) {
             return OperateResultWithData.operationFailure("未关联设计上下文，请重新生成 PRD");
         }
@@ -288,7 +266,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
             return OperateResultWithData.operationFailure("设计上下文状态为 FAILED，请重新生成 PRD");
         }
         if (context.getContextStatus() == RequirementDesignContextStatus.STALE) {
-            return OperateResultWithData.operationFailure("设计上下文已过期（STALE），请重新生成 PRD");
+            return OperateResultWithData.operationFailure(STALE_CONTEXT_MESSAGE);
         }
         return OperateResultWithData.operationSuccess();
     }

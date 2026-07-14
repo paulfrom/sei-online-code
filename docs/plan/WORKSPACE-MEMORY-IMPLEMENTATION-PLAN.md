@@ -972,13 +972,13 @@ DesignMemoryValidationService
 【设计依据 DesignBasis】
 ```
 
-### 10.9 `DesignMemoryValidationService`
+### 10.9 异步 agent 记忆审阅
 
 职责：
 
-- 生成后校验 PRD、概览设计、详细设计。
-- 编辑后重新校验。
-- 输出 `PASSED / WARNING / FAILED`。
+- 生成或编辑 PRD、概览设计、详细设计后异步审阅。
+- 对照项目记忆提出设计提醒和后续沉淀建议。
+- 输出 `PASSED / WARNING`；失败时保持 `NOT_RUN`，不影响业务流程。
 
 校验结果：
 
@@ -1318,27 +1318,30 @@ OverviewDesign.design_context_id = 实际使用的 context id
 
 ```text
 DetailedDesign.design_context_id = 实际使用的 context id
-执行 DesignMemoryValidationService
-保存 memory_validation_status
-保存 memory_validation_result_json
+生成或编辑完成后提交异步 agent 记忆审阅
+先保存 memory_validation_status = NOT_RUN
+agent 完成后保存 PASSED/WARNING 和 memory_validation_result_json
 ```
 
-### 15.4 确认拦截
+### 15.4 异步记忆审阅
 
-PRD、概览设计、详细设计确认接口统一检查：
+PRD、概览设计、详细设计生成或编辑后异步调用 agent：
 
 ```text
-design_context_id 存在
-memory_validation_status != FAILED
-context 不是 STALE
+读取实际使用的 design_context_id 与项目记忆
+比较设计中的新增信息、差异、遗漏和待沉淀决策
+将差异作为用户和后续 agent 的设计提醒
+将沉淀建议写入 memory_validation_result_json / 评论
 ```
 
 第一版规则：
 
-- `FAILED` 阻止确认。
-- `WARNING` 允许确认但前端提示。
+- 记忆审阅的目标是促进项目持续更新和知识沉淀，不是保证设计与既有记忆一致。
+- 差异项不是必过校验项，不阻止确认、生成或后续自动化流程。
+- `WARNING` 表示存在设计提醒或后续记忆沉淀建议。
+- agent 审阅失败保持 `NOT_RUN` 并允许流程继续；`FAILED` 仅兼容历史数据。
 - `STALE context` 禁止确认。
-- 手动编辑后必须重新校验。
+- 手动编辑后重置为 `NOT_RUN` 并重新提交异步审阅。
 
 ## 16. CodingTask 后记忆回写
 
@@ -1710,9 +1713,9 @@ frontend pnpm build。
 6. OverviewDesignAgentService 注入 design context。
 7. DetailedDesignAgentService 注入 design context。
 8. CodingTaskExecutionService 注入 design context。
-9. 实现 DesignMemoryValidationService。
-10. 生成后保存 memory_validation_status 和 result。
-11. confirmPrd / confirmOverview / confirmDetailedDesign 增加拦截。
+9. 实现 agent 异步记忆审阅。
+10. 生成后先保存 NOT_RUN，审阅完成后保存 PASSED/WARNING 和 result。
+11. confirmPrd / confirmOverview / confirmDetailedDesign 不以记忆审阅结果作为门禁。
 12. 前端需求工作区状态条展示 context 和 validation。
 ```
 
@@ -1722,11 +1725,11 @@ frontend pnpm build。
 PRD 生成前会生成 RequirementDesignContext。
 PRD / 概览 / 详细设计记录 design_context_id。
 Prompt 中包含 design context。
-生成后执行校验。
-FAILED 阻止确认。
-WARNING 允许确认。
+生成后异步执行 agent 记忆审阅。
+差异项仅提醒用户和后续 agent，并提供项目记忆沉淀建议。
+NOT_RUN / WARNING / 历史 FAILED 均不阻止确认。
 STALE context 阻止确认。
-手动编辑后重新校验。
+手动编辑后重新提交异步审阅。
 ```
 
 测试：
@@ -1852,7 +1855,8 @@ V24__memory_foundation.sql
 注意：
 
 - 上线前清理历史 PRD、概览设计和详细设计数据，不提供历史文档 bypass。
-- 新生成文档的 `memory_validation_status` 初始为 `NOT_RUN`，生成后必须完成校验。
+- 新生成文档的 `memory_validation_status` 初始为 `NOT_RUN`，随后提交异步 agent 审阅；
+  审阅是否完成不构成确认或后续流程的前置条件。
 - 数据库唯一约束的具体 DDL 必须结合实际数据库能力实现并由并发测试验证，不能只依赖普通 `(project_id, status)` 唯一索引，否则会错误限制多个 `ARCHIVED` 版本。
 
 ## 22. 关键兼容策略
@@ -1964,8 +1968,8 @@ git diff --check
 - [ ] 详细设计 prompt 注入 design context。
 - [ ] CodingTask prompt 注入 design context。
 - [ ] 三类文档记录 `design_context_id`。
-- [ ] 生成后校验。
-- [ ] FAILED 阻止确认。
+- [ ] 生成或编辑后异步提交 agent 记忆审阅。
+- [ ] 差异提醒和沉淀建议不阻止确认。
 - [ ] STALE context 阻止确认。
 - [ ] 前端状态条展示。
 - [ ] 后端和前端构建通过。

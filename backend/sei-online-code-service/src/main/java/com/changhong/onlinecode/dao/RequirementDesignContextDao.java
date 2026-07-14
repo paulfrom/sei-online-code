@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dao;
 
 import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import org.springframework.data.jpa.repository.Modifying;
@@ -26,6 +27,16 @@ public interface RequirementDesignContextDao extends BaseEntityDao<RequirementDe
      * @return 当前上下文；不存在返回 null
      */
     RequirementDesignContext findByRequirementIdAndStatus(String requirementId, MemoryRecordStatus status);
+
+    /**
+     * 查询指定状态的当前设计上下文，供补偿任务发现需要重生成 PRD 的需求。
+     *
+     * @param contextStatus 上下文状态
+     * @param status        记录状态
+     * @return 匹配的设计上下文
+     */
+    List<RequirementDesignContext> findByContextStatusAndStatus(
+            RequirementDesignContextStatus contextStatus, MemoryRecordStatus status);
 
     /**
      * 查询需求全部历史版本，按版本倒序。

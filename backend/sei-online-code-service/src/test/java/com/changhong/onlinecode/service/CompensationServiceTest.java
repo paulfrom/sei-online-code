@@ -3,17 +3,24 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
+import com.changhong.onlinecode.dto.enums.FailureCode;
+import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +41,7 @@ import static org.mockito.Mockito.when;
 class CompensationServiceTest {
 
     private RequirementDao requirementDao;
+    private RequirementDesignContextDao requirementDesignContextDao;
     private ExecutionPlanDao executionPlanDao;
     private CodingTaskDao codingTaskDao;
     private RunDao runDao;
@@ -42,12 +50,14 @@ class CompensationServiceTest {
     private RequirementDeliveryService deliveryService;
     private FailureInfoSupport failureInfoSupport;
     private CompensationLogService compensationLogService;
+    private RequirementCommentService requirementCommentService;
     private PlatformTransactionManager transactionManager;
     private CompensationService service;
 
     @BeforeEach
     void setUp() {
         requirementDao = mock(RequirementDao.class);
+        requirementDesignContextDao = mock(RequirementDesignContextDao.class);
         executionPlanDao = mock(ExecutionPlanDao.class);
         codingTaskDao = mock(CodingTaskDao.class);
         runDao = mock(RunDao.class);
@@ -56,11 +66,13 @@ class CompensationServiceTest {
         deliveryService = mock(RequirementDeliveryService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         compensationLogService = mock(CompensationLogService.class);
+        requirementCommentService = mock(RequirementCommentService.class);
         transactionManager = mock(PlatformTransactionManager.class);
-        service = new CompensationService(requirementDao, executionPlanDao, codingTaskDao, runDao,
+        service = new CompensationService(requirementDao, requirementDesignContextDao,
+                executionPlanDao, codingTaskDao, runDao,
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
-                transactionManager);
+                requirementCommentService, transactionManager);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -82,9 +94,25 @@ class CompensationServiceTest {
 
         verify(failureInfoSupport).markRetrying(eq(requirement),
                 eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
-        verify(automationService).executePreparedLoop("req-1", "loop-1", ExecutionPlanType.INITIAL,
+        verify(automationService).retryPreparedLoop("req-1", "loop-1", ExecutionPlanType.INITIAL,
                 "补偿恢复：重新生成当前 loop 的 PM 执行计划。");
         assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+    }
+
+    @Test
+    void planningWithoutPersistedLoop_restartsInitialLoop() {
+        Requirement requirement = requirement("req-no-loop", RequirementAutomationStatus.PLANNING);
+        requirement.setActiveLoopId(null);
+        requirement.setLastEditedDate(null);
+        when(requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED)).thenReturn(List.of(requirement));
+        when(runDao.findByRequirementIdAndState("req-no-loop", RunState.RUNNING)).thenReturn(List.of());
+        when(executionPlanDao.findTopByRequirementIdOrderByVersionDesc("req-no-loop")).thenReturn(null);
+        when(failureInfoSupport.canRetry(eq(requirement), any(Date.class))).thenReturn(true);
+
+        service.compensateRequirementLoops(new Date());
+
+        verify(automationService).startInitialLoop("req-no-loop");
+        verify(automationService, never()).retryPreparedLoop(any(), any(), any(), any());
     }
 
     @Test
@@ -105,6 +133,38 @@ class CompensationServiceTest {
         verify(requirementAgentService).spawnPrd(eq("req-prd"), any(), eq(requirement.getGenerationToken()));
         verify(failureInfoSupport).markRetrying(eq(requirement),
                 eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
+    }
+
+    @Test
+    void stalePrdContext_generatesNextPrdVersionWithoutConsumingFailureRetry() {
+        Date now = new Date();
+        Requirement requirement = new Requirement();
+        requirement.setId("req-stale");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdVersion(1);
+        requirement.setDesignContextId("ctx-stale");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx-stale");
+        context.setRequirementId("req-stale");
+        context.setStatus(MemoryRecordStatus.CURRENT);
+        context.setContextStatus(RequirementDesignContextStatus.STALE);
+        when(requirementDesignContextDao.findByContextStatusAndStatus(
+                RequirementDesignContextStatus.STALE, MemoryRecordStatus.CURRENT)).thenReturn(List.of(context));
+        when(requirementDao.findOne("req-stale")).thenReturn(requirement);
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of());
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of());
+        when(requirementDao.updateStatusIfMatch("req-stale", RequirementStatus.PRD_REVIEW,
+                RequirementStatus.PRD_GENERATING)).thenReturn(1);
+
+        service.compensatePrdGeneration(now);
+
+        assertEquals(RequirementStatus.PRD_GENERATING, requirement.getStatus());
+        assertEquals(2, requirement.getPrdVersion());
+        verify(requirementAgentService).spawnPrd(eq("req-stale"), any(), eq(requirement.getGenerationToken()));
+        verify(failureInfoSupport, never()).markRetrying(eq(requirement),
+                eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
+        verify(requirementCommentService).append(eq("req-stale"), any(), any(), eq("设计上下文"), any(),
+                org.mockito.ArgumentMatchers.contains("PRD v2 重新生成"), any());
     }
 
     @Test
@@ -149,13 +209,37 @@ class CompensationServiceTest {
     }
 
     @Test
+    void timedOutPlanningRun_marksRequirementFailedForRetry() {
+        Date now = new Date();
+        Run run = new Run();
+        run.setId("run-plan");
+        run.setRequirementId("req-plan");
+        run.setLoopId("loop-1");
+        run.setRunType(RunType.PM_PLANNING);
+        run.setState(RunState.RUNNING);
+        run.setStartedDate(new Date(now.getTime() - 31 * 60_000L));
+        Requirement requirement = requirement("req-plan", RequirementAutomationStatus.PLANNING);
+        when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
+        when(runDao.updateStateIfMatch("run-plan", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
+        when(requirementDao.findOne("req-plan")).thenReturn(requirement);
+
+        service.timeoutRuns(now);
+
+        assertEquals(RequirementAutomationStatus.FAILED, requirement.getAutomationStatus());
+        verify(failureInfoSupport).markRequirementFailure(eq(requirement), eq(FailureCode.AGENT_TIMEOUT),
+                eq(FailureStage.PLAN), eq("PM 执行计划生成超时"), any(),
+                eq(TriggerSource.SCHEDULED_COMPENSATION), eq(now));
+        verify(requirementDao).save(requirement);
+    }
+
+    @Test
     void waitingHuman_isNeverAdvancedAutomatically() {
         Requirement requirement = requirement("req-3", RequirementAutomationStatus.WAITING_HUMAN);
         when(requirementDao.findByStatus(RequirementStatus.PRD_CONFIRMED)).thenReturn(List.of(requirement));
 
         service.compensateRequirementLoops(new Date());
 
-        verify(automationService, never()).executePreparedLoop(any(), any(), any(), any());
+        verify(automationService, never()).retryPreparedLoop(any(), any(), any(), any());
         verify(automationService, never()).resumeDevelopmentLoop(any(), any());
         verify(deliveryService, never()).retry(any());
     }

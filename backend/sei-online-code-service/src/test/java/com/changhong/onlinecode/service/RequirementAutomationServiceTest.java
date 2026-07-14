@@ -25,7 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -273,6 +276,16 @@ class RequirementAutomationServiceTest {
         assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
         verify(eventPublisher).publishEvent(any(RequirementAutomationLoopEvent.class));
         verify(pmAgentClient, never()).generatePlan(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void startInitialLoop_usesNewTransactionAfterPrdCommit() throws NoSuchMethodException {
+        Method method = RequirementAutomationService.class.getMethod("startInitialLoop", String.class);
+
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        assertNotNull(transactional);
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation());
     }
 
     @Test

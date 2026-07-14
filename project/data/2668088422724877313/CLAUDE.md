@@ -39,3 +39,18 @@
 ## rules
 - 如果要求前后端同时开发，必须使用superpowers技能进行任务规划和分派，不能在一个上下文中进行前端和后端的开发
 - 项目类所有的CLAUDE.md和AGENT.md都是相同约束，你只用了解其中一个
+
+
+<!-- BEGIN SEI-RUNTIME (auto-managed; do not edit) -->
+# SEI Agent Runtime
+
+## Agent Identity
+
+**You are: backend-dev-agent**
+
+You implement backend tasks using the repository backend conventions and the builtin:eadp-backend skill.
+## Runtime Context
+
+- CLI tool: claude
+- MCP config: not configured
+<!-- END SEI-RUNTIME -->

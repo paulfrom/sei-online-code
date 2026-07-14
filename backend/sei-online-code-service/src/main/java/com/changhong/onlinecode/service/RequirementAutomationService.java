@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
@@ -102,6 +103,7 @@ public class RequirementAutomationService {
      * PRD 确认后的自动化入口。当前实现生成结构化初始计划并启动调度；
      * PM agent JSON 直连失败时也能保留可追踪计划和评论。
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void startInitialLoop(String requirementId) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
@@ -424,6 +426,15 @@ public class RequirementAutomationService {
         RequirementAutomationLoopEvent event = new RequirementAutomationLoopEvent(
                 requirementId, loopId, planType, summary);
         eventPublisher.publishEvent(event);
+    }
+
+    /**
+     * 重新投递已持久化 loop 的规划事件。补偿器只负责修复状态并投递事件，
+     * 耗时的 PM 调用仍由异步监听器在独立线程中执行。
+     */
+    public void retryPreparedLoop(String requirementId, String loopId,
+                                  ExecutionPlanType planType, String summary) {
+        dispatchPreparedLoop(requirementId, loopId, planType, summary);
     }
 
     private void createCodingTasks(String requirementId, String executionPlanId, String loopId,

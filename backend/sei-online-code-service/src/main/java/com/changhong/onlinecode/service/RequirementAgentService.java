@@ -9,6 +9,8 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
@@ -17,6 +19,7 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
@@ -45,7 +49,8 @@ import java.util.regex.Pattern;
 public class RequirementAgentService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAgentService.class);
-    private static final String AGENT_NAME = "prd-agent";
+    private static final String PRD_AGENT_NAME = "prd-agent";
+    private static final String MEMORY_REVIEW_AGENT_NAME = "memory-review-agent";
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
 
     private final RequirementDao requirementDao;
@@ -58,7 +63,7 @@ public class RequirementAgentService {
     private final FailureInfoSupport failureInfoSupport;
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignContextPromptAssembler designContextPromptAssembler;
-    private final DesignMemoryValidationService designMemoryValidationService;
+    private final RequirementCommentService requirementCommentService;
     private final ObjectMapper objectMapper;
 
     public RequirementAgentService(RequirementDao requirementDao,
@@ -71,7 +76,7 @@ public class RequirementAgentService {
                                    FailureInfoSupport failureInfoSupport,
                                    RequirementDesignContextService requirementDesignContextService,
                                    DesignContextPromptAssembler designContextPromptAssembler,
-                                   DesignMemoryValidationService designMemoryValidationService,
+                                   RequirementCommentService requirementCommentService,
                                    ObjectMapper objectMapper) {
         this.requirementDao = requirementDao;
         this.agentService = agentService;
@@ -83,7 +88,7 @@ public class RequirementAgentService {
         this.failureInfoSupport = failureInfoSupport;
         this.requirementDesignContextService = requirementDesignContextService;
         this.designContextPromptAssembler = designContextPromptAssembler;
-        this.designMemoryValidationService = designMemoryValidationService;
+        this.requirementCommentService = requirementCommentService;
         this.objectMapper = objectMapper;
     }
 
@@ -110,7 +115,7 @@ public class RequirementAgentService {
             return;
         }
 
-        Agent agent = agentService.findByName(AGENT_NAME);
+        Agent agent = agentService.findByName(PRD_AGENT_NAME);
         Project project = projectService.findOne(requirement.getProjectId());
         RequirementDesignContext context = requirementDesignContextService.prepare(requirementId);
         String fullPrompt = buildPrdPrompt(project, requirement, prompt, context);
@@ -141,14 +146,13 @@ public class RequirementAgentService {
                     latest.setPrdContent(content);
                     latest.setStatus(RequirementStatus.PRD_REVIEW);
                     latest.setDesignContextId(context.getId());
-                    DesignMemoryValidationService.ValidationResult validation = designMemoryValidationService.validate(
-                            DesignMemoryValidationService.DocumentType.PRD, content, context);
-                    latest.setMemoryValidationStatus(validation.getStatus());
-                    latest.setMemoryValidationResultJson(toJson(validation));
+                    latest.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
+                    latest.setMemoryValidationResultJson(null);
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
-                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}，校验 {}",
-                            requirementId, latest.getPrdVersion(), validation.getStatus());
+                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
+                            requirementId, latest.getPrdVersion());
+                    reviewMemory(requirementId, content, context);
                 })
                 .exceptionally(e -> {
                     LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
@@ -164,6 +168,114 @@ public class RequirementAgentService {
                     requirementDao.save(latest);
                     return null;
                 });
+    }
+
+    /**
+     * 由 agent 异步审阅 PRD 与项目记忆之间的差异。
+     *
+     * <p>审阅用于提醒后续设计并形成可沉淀的记忆更新建议，不是确认门禁。任何发现项都只会
+     * 形成 {@link MemoryValidationStatus#WARNING}；agent 失败也不会改变需求流程状态。</p>
+     */
+    @Async
+    public void reviewMemory(String requirementId, String content, RequirementDesignContext context) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null || context == null || !Objects.equals(content, requirement.getPrdContent())) {
+            LOGGER.info("memory-review-agent: requirement {} 内容或上下文已变化，跳过过期审阅", requirementId);
+            return;
+        }
+
+        Agent agent = agentService.findByName(MEMORY_REVIEW_AGENT_NAME);
+        Path workdir = materializeSkills(agent);
+        CliRunner runner = cliRunnerRegistry.resolve(agent == null ? null : agent.getCliTool());
+        CompletableFuture<String> future = runner.execute(
+                requirementId + "-memory-review-" + UUID.randomUUID(),
+                buildMemoryReviewPrompt(content, context), workdir.toString(),
+                agent == null ? null : agent.getModel(),
+                agent == null ? null : agent.getMcpConfig());
+
+        future.thenApply(this::parseMemoryReview)
+                .thenAccept(result -> persistMemoryReview(requirementId, content, result))
+                .exceptionally(e -> {
+                    LOGGER.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
+                            requirementId, e);
+                    return null;
+                });
+    }
+
+    private String buildMemoryReviewPrompt(String content, RequirementDesignContext context) {
+        return "你正在进行项目记忆审阅。目标是帮助项目持续更新和沉淀，而不是证明设计与既有记忆一致。"
+                + "\n请对照项目记忆指出值得用户和后续 agent 在设计时考虑的差异、遗漏或新决策，并给出沉淀建议。"
+                + "\n差异不是必须修复项，不得据此否决、阻断或要求重试 PRD。"
+                + "\n只输出 JSON：{\"findings\":[{\"severity\":\"INFO|WARNING\","
+                + "\"message\":\"差异或新增信息\",\"suggestedAction\":\"设计提醒或后续记忆沉淀建议\"}]}。"
+                + "\n没有值得提醒的差异时输出 {\"findings\":[]}。"
+                + "\n\n项目记忆与设计上下文：\n" + designContextPromptAssembler.assemble(context)
+                + "\n\n待审阅 PRD：\n" + content;
+    }
+
+    private DesignMemoryValidationService.ValidationResult parseMemoryReview(String raw) {
+        try {
+            JsonNode root = objectMapper.readTree(extractJsonObject(raw));
+            DesignMemoryValidationService.ValidationResult result =
+                    new DesignMemoryValidationService.ValidationResult();
+            JsonNode findings = root.path("findings");
+            if (findings.isArray()) {
+                int count = 0;
+                for (JsonNode finding : findings) {
+                    if (count++ >= 20) {
+                        break;
+                    }
+                    String message = finding.path("message").asText("").trim();
+                    if (message.isEmpty()) {
+                        continue;
+                    }
+                    String severity = "INFO".equalsIgnoreCase(finding.path("severity").asText())
+                            ? "INFO" : "WARNING";
+                    result.getFindings().add(new DesignMemoryValidationService.ValidationFinding(
+                            severity, message, finding.path("suggestedAction").asText("").trim()));
+                }
+            }
+            result.setStatus(result.getFindings().isEmpty()
+                    ? MemoryValidationStatus.PASSED : MemoryValidationStatus.WARNING);
+            return result;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("记忆审阅 agent 未返回合法 JSON", e);
+        }
+    }
+
+    private void persistMemoryReview(String requirementId, String reviewedContent,
+                                     DesignMemoryValidationService.ValidationResult result) {
+        Requirement latest = requirementDao.findOne(requirementId);
+        if (latest == null || !Objects.equals(reviewedContent, latest.getPrdContent())) {
+            LOGGER.info("memory-review-agent: requirement {} 已有更新，丢弃过期审阅结果", requirementId);
+            return;
+        }
+        String resultJson = toJson(result);
+        latest.setMemoryValidationStatus(result.getStatus());
+        latest.setMemoryValidationResultJson(resultJson);
+        requirementDao.save(latest);
+        if (!result.getFindings().isEmpty()) {
+            String summary = result.getFindings().stream()
+                    .map(DesignMemoryValidationService.ValidationFinding::getMessage)
+                    .collect(java.util.stream.Collectors.joining("；"));
+            requirementCommentService.append(
+                    requirementId, latest.getActiveLoopId(), RequirementCommentAuthorType.SYSTEM,
+                    "记忆审阅 agent", RequirementCommentType.VALIDATION_RESULT,
+                    "以下差异仅用于提醒设计并支持后续项目记忆沉淀，不是必须校验项：" + summary,
+                    resultJson);
+        }
+    }
+
+    private static String extractJsonObject(String raw) {
+        if (raw == null) {
+            throw new IllegalArgumentException("记忆审阅 agent 输出为空");
+        }
+        int start = raw.indexOf('{');
+        int end = raw.lastIndexOf('}');
+        if (start < 0 || end < start) {
+            throw new IllegalArgumentException("记忆审阅 agent 输出不包含 JSON 对象");
+        }
+        return raw.substring(start, end + 1);
     }
 
     private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint,
@@ -235,8 +347,7 @@ public class RequirementAgentService {
         try {
             return objectMapper.writeValueAsString(result);
         } catch (Exception e) {
-            LOGGER.warn("PRD 校验结果序列化失败", e);
-            return "{\"status\":\"FAILED\",\"findings\":[{\"severity\":\"HIGH\",\"message\":\"校验结果序列化失败\"}]}";
+            throw new IllegalStateException("记忆审阅结果序列化失败", e);
         }
     }
 

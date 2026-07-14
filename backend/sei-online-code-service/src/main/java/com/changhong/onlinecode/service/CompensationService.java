@@ -3,19 +3,26 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
+import com.changhong.onlinecode.dto.enums.RequirementCommentType;
+import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.utils.TransactionUtil;
 import org.slf4j.Logger;
@@ -45,6 +52,7 @@ public class CompensationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(CompensationService.class);
 
     private final RequirementDao requirementDao;
+    private final RequirementDesignContextDao requirementDesignContextDao;
     private final ExecutionPlanDao executionPlanDao;
     private final CodingTaskDao codingTaskDao;
     private final RunDao runDao;
@@ -53,6 +61,7 @@ public class CompensationService {
     private final RequirementDeliveryService deliveryService;
     private final FailureInfoSupport failureInfoSupport;
     private final CompensationLogService compensationLogService;
+    private final RequirementCommentService requirementCommentService;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${onlinecode.compensation.loop-stale-minutes:30}")
@@ -62,6 +71,7 @@ public class CompensationService {
     private long runTimeoutMinutes = 30;
 
     public CompensationService(RequirementDao requirementDao,
+                               RequirementDesignContextDao requirementDesignContextDao,
                                ExecutionPlanDao executionPlanDao,
                                CodingTaskDao codingTaskDao,
                                RunDao runDao,
@@ -70,8 +80,10 @@ public class CompensationService {
                                RequirementDeliveryService deliveryService,
                                FailureInfoSupport failureInfoSupport,
                                CompensationLogService compensationLogService,
+                               RequirementCommentService requirementCommentService,
                                PlatformTransactionManager transactionManager) {
         this.requirementDao = requirementDao;
+        this.requirementDesignContextDao = requirementDesignContextDao;
         this.executionPlanDao = executionPlanDao;
         this.codingTaskDao = codingTaskDao;
         this.runDao = runDao;
@@ -80,6 +92,7 @@ public class CompensationService {
         this.deliveryService = deliveryService;
         this.failureInfoSupport = failureInfoSupport;
         this.compensationLogService = compensationLogService;
+        this.requirementCommentService = requirementCommentService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -126,14 +139,34 @@ public class CompensationService {
                         TriggerSource.SCHEDULED_COMPENSATION, now);
                 codingTaskDao.save(task);
             }
+            failTimedOutPlanningRequirement(run, now);
             compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN", true,
                     "超时 Run 已收口", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
         }
     }
 
+    private void failTimedOutPlanningRequirement(Run run, Date now) {
+        if (run.getRunType() != RunType.PM_PLANNING || run.getRequirementId() == null) {
+            return;
+        }
+        Requirement requirement = requirementDao.findOne(run.getRequirementId());
+        if (requirement == null
+                || requirement.getStatus() != RequirementStatus.PRD_CONFIRMED
+                || requirement.getAutomationStatus() != RequirementAutomationStatus.PLANNING
+                || !Objects.equals(requirement.getActiveLoopId(), run.getLoopId())) {
+            return;
+        }
+        requirement.setAutomationStatus(RequirementAutomationStatus.FAILED);
+        failureInfoSupport.markRequirementFailure(requirement, FailureCode.AGENT_TIMEOUT,
+                FailureStage.PLAN, "PM 执行计划生成超时", run.getFailureReason(),
+                TriggerSource.SCHEDULED_COMPENSATION, now);
+        requirementDao.save(requirement);
+    }
+
     /** Keeps the pre-loop PRD generation recovery that existed before the loop migration. */
     @Transactional(rollbackFor = Exception.class)
     public void compensatePrdGeneration(Date now) {
+        compensateStalePrdContexts(now);
         List<Requirement> candidates = new java.util.ArrayList<>(requirementDao.findByStatus(RequirementStatus.FAILED));
         requirementDao.findByStatus(RequirementStatus.PRD_GENERATING).stream()
                 .filter(requirement -> isStale(requirement.getLastEditedDate(), now))
@@ -158,6 +191,46 @@ public class CompensationService {
             String generationToken = requirement.getGenerationToken();
             TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(
                     requirement.getId(), prompt, generationToken));
+        }
+    }
+
+    /**
+     * 为仍停留在 PRD_REVIEW、但当前设计上下文已 STALE 的需求生成新版本 PRD。
+     */
+    private void compensateStalePrdContexts(Date now) {
+        List<RequirementDesignContext> staleContexts = requirementDesignContextDao.findByContextStatusAndStatus(
+                RequirementDesignContextStatus.STALE, MemoryRecordStatus.CURRENT);
+        if (staleContexts == null) {
+            return;
+        }
+        for (RequirementDesignContext context : staleContexts) {
+            Requirement requirement = requirementDao.findOne(context.getRequirementId());
+            if (requirement == null
+                    || requirement.getStatus() != RequirementStatus.PRD_REVIEW
+                    || !Objects.equals(requirement.getDesignContextId(), context.getId())) {
+                continue;
+            }
+            if (requirementDao.updateStatusIfMatch(requirement.getId(), RequirementStatus.PRD_REVIEW,
+                    RequirementStatus.PRD_GENERATING) == 0) {
+                continue;
+            }
+            requirement.setStatus(RequirementStatus.PRD_GENERATING);
+            requirement.setPrdVersion(Objects.requireNonNullElse(requirement.getPrdVersion(), 0) + 1);
+            requirement.setLastRetryAt(now);
+            requirement.setGenerationToken(GenerationTokenSupport.newToken());
+            requirementDao.save(requirement);
+            compensationLogService.record("REQUIREMENT", requirement.getId(), "REGENERATE_STALE_PRD", true,
+                    "设计上下文 STALE，生成新版本 PRD", null, TriggerSource.SCHEDULED_COMPENSATION);
+            requirementCommentService.append(
+                    requirement.getId(), requirement.getActiveLoopId(), RequirementCommentAuthorType.SYSTEM,
+                    "设计上下文", RequirementCommentType.VALIDATION_RESULT,
+                    "补偿器检测到设计上下文已过期（STALE）；已自动触发 PRD v"
+                            + requirement.getPrdVersion() + " 重新生成。", null);
+            String generationToken = requirement.getGenerationToken();
+            TransactionUtil.afterCommit(() -> requirementAgentService.spawnPrd(
+                    requirement.getId(),
+                    "补偿恢复：设计上下文已过期，请基于最新需求与 WorkspaceMemory 重新生成 PRD。",
+                    generationToken));
         }
     }
 
@@ -207,17 +280,13 @@ public class CompensationService {
                 "恢复 PM 执行计划生成", null, TriggerSource.SCHEDULED_COMPENSATION);
 
         String loopId = requirement.getActiveLoopId();
-        TransactionUtil.afterCommit(() -> {
-            automationService.executePreparedLoop(requirement.getId(), loopId, planType,
-                    "补偿恢复：重新生成当前 loop 的 PM 执行计划。");
-            Requirement recovered = requirementDao.findOne(requirement.getId());
-            if (recovered != null && recovered.getAutomationStatus() == RequirementAutomationStatus.FAILED) {
-                failureInfoSupport.markRequirementFailure(recovered, FailureCode.AGENT_EXECUTION_FAILED,
-                        FailureStage.PLAN, "PM 执行计划补偿失败", "详见 FAILURE 评论",
-                        TriggerSource.SCHEDULED_COMPENSATION, now);
-                requirementDao.save(recovered);
-            }
-        });
+        if (loopId == null || loopId.isBlank()) {
+            TransactionUtil.afterCommit(() -> automationService.startInitialLoop(requirement.getId()));
+            return;
+        }
+        TransactionUtil.afterCommit(() -> automationService.retryPreparedLoop(
+                requirement.getId(), loopId, planType,
+                "补偿恢复：重新生成当前 loop 的 PM 执行计划。"));
     }
 
     private void recoverDevelopment(Requirement requirement, Date now) {

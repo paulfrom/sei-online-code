@@ -5,10 +5,12 @@ import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementDesignContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +37,7 @@ class RequirementAgentServiceTest {
     private SkillMaterializer skillMaterializer;
     private BuiltInSkillRegistry builtInSkillRegistry;
     private FailureInfoSupport failureInfoSupport;
+    private RequirementCommentService requirementCommentService;
     private RequirementAgentService service;
 
     @BeforeEach
@@ -49,10 +52,11 @@ class RequirementAgentServiceTest {
         skillMaterializer = mock(SkillMaterializer.class);
         builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
+        requirementCommentService = mock(RequirementCommentService.class);
         service = new RequirementAgentService(requirementDao, agentService, skillService, projectService,
                 cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
                 mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
-                mock(DesignMemoryValidationService.class), new com.fasterxml.jackson.databind.ObjectMapper());
+                requirementCommentService, new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test
@@ -110,5 +114,55 @@ class RequirementAgentServiceTest {
         service.spawnPrd("req1", null, "token-1");
 
         verify(requirementDao, never()).save(any(Requirement.class));
+    }
+
+    @Test
+    void reviewMemory_agentDifferencesPersistAsNonBlockingWarning() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
+        when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
+        when(runner.execute(org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
+                anyString(), anyString(), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture("""
+                        {"findings":[{"severity":"HIGH","message":"新增缓存策略尚未沉淀",
+                        "suggestedAction":"交付后更新项目记忆"}]}
+                        """));
+
+        service.reviewMemory("req1", "# PRD", context);
+
+        assertEquals(MemoryValidationStatus.WARNING, requirement.getMemoryValidationStatus());
+        verify(requirementDao).save(requirement);
+        verify(requirementCommentService).append(eq("req1"), any(), any(), eq("记忆审阅 agent"), any(),
+                org.mockito.ArgumentMatchers.contains("不是必须校验项"),
+                org.mockito.ArgumentMatchers.contains("\"status\":\"WARNING\""));
+    }
+
+    @Test
+    void reviewMemory_newerPrdDiscardsLateAgentResult() {
+        Requirement reviewed = new Requirement();
+        reviewed.setId("req1");
+        reviewed.setPrdContent("old");
+        Requirement latest = new Requirement();
+        latest.setId("req1");
+        latest.setPrdContent("new");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        CompletableFuture<String> response = new CompletableFuture<>();
+        when(requirementDao.findOne("req1")).thenReturn(reviewed, latest);
+        when(agentService.findByName("memory-review-agent")).thenReturn(new Agent());
+        when(runner.execute(org.mockito.ArgumentMatchers.startsWith("req1-memory-review-"),
+                anyString(), anyString(), any(), any())).thenReturn(response);
+
+        service.reviewMemory("req1", "old", context);
+        response.complete("{\"findings\":[{\"message\":\"迟到差异\"}]}");
+
+        verify(requirementDao, never()).save(any(Requirement.class));
+        verify(requirementCommentService, never()).append(anyString(), any(), any(), anyString(), any(),
+                anyString(), any());
     }
 }
