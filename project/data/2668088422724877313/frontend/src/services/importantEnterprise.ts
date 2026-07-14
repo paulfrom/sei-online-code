@@ -28,20 +28,37 @@ const { SERVER_PATH } = constants;
  * 依赖锚点：`@/utils` 具名导出 `constants` 且含 `SERVER_PATH`（constants.ts:41/70），与参考实现
  * services/api.ts 同构；@ead/suid-utils-react 导出 request/AxiosPromise/ResponseResult。
  *
+ * 契约锚点（schema 级已逐列核实，本会话核对 on-disk 迁移脚本
+ * backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql）：
+ *   important_enterprises 表的列、nullability 与本服务 ./types/importantEnterprise 的字段逐列对应——
+ *   id/name/category/unified_social_credit_code/asset_manager_id 均为业务列；
+ *   审计列 creator_id/creator_name/created_date/last_editor_id/last_editor_name/last_edited_date
+ *   对应 creatorId/creatorName/createdDate/lastEditorId/lastEditorName/lastEditedDate（created_date/
+ *   last_edited_date NOT NULL → 必填；其余审计列 NULL → 可选）；is_deleted TINYINT(1) NOT NULL DEFAULT 0
+ *   → 必填 boolean；deleted_at TIMESTAMP NULL → 可选；DB CHECK category IN ('IMPORTANT_SUBSIDIARY',
+ *   'HOLDING_COMPANY') 与 EnterpriseCategory 联合类型逐字一致。生成列 active_name/active_uscc 不对外暴露。
+ *   上述为 schema 级契约；运行期响应信封（sei-core PageResult 的 rows/records/total/page 映射、
+ *   assetManager 解析）仍待 BE-005/006 落地 + 私有 registry 可达联调复核。
+ *
  * 待验证：node_modules 缺失（私有 registry @ead 不可达），上述类型符号无法本机 tsc/build 校验；
  * 信封形状已由仓内运行期读点（models/global.ts、pages/Login/index.tsx）佐证，待依赖可达后联调复核。
  */
 
 /**
  * 后端服务代码 = bootstrap.yaml 的 sei.application.code（已逐行核实
- * backend/2668088422724877313-service/src/main/resources/bootstrap.yaml：
+ * backend/2668088422724877313-service/src/main/resources/bootstrap.yaml:6,17：
  *   sei.application.code: 2668088422724877313
  *   spring.application.name: ${SPRING_APPLICATION_NAME:${sei.application.code}}
  *     —— 默认回退为 sei.application.code，未设 SPRING_APPLICATION_NAME 时同为 2668088422724877313）。
- * 网关按 spring.application.name 路由，故 `${SERVER_PATH}/${SERVICE_CODE}` 命中本服务，
- * 与 constants 中 `SEI_*_SERVER_PATH = ${SERVER_PATH}/sei-basic` 同构。
- * 闭合 test-agent 上轮遗留的契约风险：服务名段即 application.code，网关无需额外补 context-path；
- * 端点 `/api/v1/important-enterprises` 按 PRD 6.2 / BE-006 计划契约，待后端 Controller 落地后联调复核。
+ * 网关路径段 = spring.application.name 属【推断，非已核实】：佐证为 constants.ts:43-44
+ *   `SEI_BASIC_SERVER_PATH = ${SERVER_PATH}/sei-basic`，其路径段 sei-basic 即 basic 服务的
+ *   spring.application.name；本服务 name=2668088422724877313，故路径段推断同为该 code。
+ *   该推断未经网关路由配置/运行期联调核实（前端无既存调用本服务的先例可对照）——
+ *   test-agent 上轮所提「确认网关补 service-code 段」契约风险并未真正闭合，仅由该推断支撑，
+ *   待 BE-006 Controller 落地后联调复核；若网关实际以别名暴露，仅需改本常量一处。
+ * 端点 `/api/v1/important-enterprises` 按 PRD 6.2 / BE-006 计划契约。
+ * 注：constants.ts 仅有 sei-basic/sei-auth 两个 `SEI_*_SERVER_PATH` 常量，未为本服务提供；
+ *   新增 constants 条目属 FE-001 文件范围外，故在此内联 SERVICE_CODE，未夹带范围外改动。
  */
 const SERVICE_CODE = '2668088422724877313';
 
@@ -151,11 +168,42 @@ async function unwrap<T>(response: AxiosPromise): Promise<T> {
     //   0) axios 形态：后端校验文案埋在 e.response.data.message，而顶层 e.message 仅 "Request failed with status code N"
     //      —— AxiosError 继承 Error 会先命中下方法则(1)抛出该无意义文案，故须在此法则之前抽取后端文案
     //      （PRD 6.3.2/7.3：提交时须显示后端校验错误信息，而非 axios 通用状态码提示）；
+    //   0.5) axios 形态但无 data.message：若有 HTTP status，本地化为「请求失败（HTTP N）」，
+    //        避免向中文用户抛出 axios 内置英文 "Request failed with status code N"（PRD 7.3 即时反馈）；
+    //   0.6) 网络层失败（无 .response，axios code 为超时/断网类）：本地化为中文，与 0.5 同动机——
+    //        否则 ECONNABORTED/ERR_NETWORK 会以英文 "timeout of Nms exceeded"/"Network Error"
+    //        命中法则(1) 直接抛出（PRD 7.3 即时反馈，中文用户友好）；
     //   1) Error 实例原样抛；2) 非空字符串为文案；3) 带 message 属性的对象取其 message；其余兜底通用文案。
     if (e && typeof e === 'object') {
-      const respMsg = (e as { response?: { data?: { message?: unknown } } }).response?.data?.message;
+      const axiosErr = e as {
+        response?: { status?: number; data?: { message?: unknown } };
+        code?: string;
+      };
+      const respMsg = axiosErr.response?.data?.message;
       if (typeof respMsg === 'string' && respMsg) {
-        throw new Error(respMsg);
+        // { cause: e } 保留原始 AxiosError 堆栈/config 供排查：.message 不变（消费方行为零影响），
+        // 仅在 devtools/Sentry 读 .cause 时可见原始网络错误，避免定位时只见文案、丢失请求上下文。
+        throw new Error(respMsg, { cause: e });
+      }
+      // 仅在确有 HTTP 响应（含 status）时介入；无 .response 的网络层失败（断网/超时）由下方 0.6 接管。
+      const status = axiosErr.response?.status;
+      if (typeof status === 'number') {
+        throw new Error(`请求失败（HTTP ${status}），请稍后重试`, { cause: e });
+      }
+      // axios 在无 HTTP 响应时填 code（浏览器断网=ERR_NETWORK、超时=ECONNABORTED；Node 侧 ECONNREFUSED/ENETUNREACH/ETIMEDOUT）。
+      const code = axiosErr.code;
+      if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+        throw new Error('请求超时，请稍后重试', { cause: e });
+      }
+      if (code === 'ERR_NETWORK' || code === 'ECONNREFUSED' || code === 'ENETUNREACH') {
+        throw new Error('网络连接失败，请检查网络后重试', { cause: e });
+      }
+      // 其余 axios 传输层错误（如 ECONNRESET/EHOSTUNREACH/EAI_AGAIN 等：无 .response、code 未被上方逐一命中）
+      // 同属网络层，统一本地化为中文通用文案，避免其英文 message 经下方 `instanceof Error` 原样抛给中文用户——
+      // 这才真正兑现法则「其余兜底通用文案」对 axios 形态的承诺：否则带 code 的 axios 错误会先命中下方
+      // throw e、绕过通用兜底漏出英文（与 0.5/0.6 同动机，PRD 7.3 即时反馈）。
+      if (code) {
+        throw new Error('网络异常，请稍后重试', { cause: e });
       }
     }
     if (e instanceof Error) throw e;
@@ -165,7 +213,7 @@ async function unwrap<T>(response: AxiosPromise): Promise<T> {
         : e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string'
           ? (e as { message: string }).message
           : '';
-    throw new Error(extracted || '网络异常，请稍后重试');
+    throw new Error(extracted || '网络异常，请稍后重试', { cause: e });
   })) as ResponseResult;
   if (!res?.success) {
     throw new BusinessError(res);
@@ -424,8 +472,9 @@ export async function getImportantEnterpriseDetail(
     ),
     '未找到该重要企业',
   );
-  // 返回类型承诺 assetManager 必填；缺即前置为明确错误，使运行期必填与类型声明一致，避免 FE-004 读取 .name 时崩溃。
-  if (!record.assetManager?.id) {
+  // 返回类型承诺 assetManager 必填且含 id+name；缺任一即前置为明确错误，使运行期必填与类型声明一致、
+  // 与 PRD 6.2.4「包含资产管理人基础信息（至少包括用户 ID、姓名）」对齐，避免 FE-004 读取 .name 时渲染空值。
+  if (!record.assetManager?.id || !record.assetManager?.name) {
     throw new Error('企业详情数据异常：缺少资产管理人信息');
   }
   return record;
