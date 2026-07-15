@@ -24,6 +24,9 @@ import org.springframework.stereotype.Service;
 import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -45,6 +48,7 @@ public class AgentExecutionService {
     private final SkillService skillService;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final SkillMaterializer skillMaterializer;
+    private final ConcurrentMap<String, String> activeAgentRuns = new ConcurrentHashMap<>();
 
     public CompletableFuture<AgentExecutionResult> executeAsync(String agentName, AgentExecutionRequest request) {
         return CompletableFuture.supplyAsync(() -> execute(agentName, request));
@@ -52,6 +56,10 @@ public class AgentExecutionService {
 
     public AgentWorkspace workspace(String projectId) {
         return cliRunnerRegistry.workspace(projectId);
+    }
+
+    public AgentWorkspace workspace(String projectId, String runId) {
+        return cliRunnerRegistry.workspace(projectId, runId);
     }
 
     public void cancel(String runId) {
@@ -63,16 +71,25 @@ public class AgentExecutionService {
         if (agent == null) {
             return AgentExecutionResult.failed(null, agentName + " 不存在，无法执行。");
         }
-        AgentWorkspace workspace;
-        try {
-            workspace = cliRunnerRegistry.workspace(request.getProjectId());
-        } catch (Exception e) {
-            return AgentExecutionResult.failed(null, e.getMessage());
-        }
-
         Run run = resolveRun(agent, request);
         if (run == null) {
             return AgentExecutionResult.failed(request.getRunId(), "Run 不存在: " + request.getRunId());
+        }
+        String workspaceKey = workspaceKey(request, run);
+        AgentWorkspace workspace;
+        try {
+            workspace = cliRunnerRegistry.workspace(request.getProjectId(), workspaceKey);
+        } catch (Exception e) {
+            return AgentExecutionResult.failed(run.getId(), e.getMessage());
+        }
+        String slotKey = workspaceSlotKey(request.getProjectId(), workspaceKey);
+        String activeRunId = activeAgentRuns.putIfAbsent(slotKey, run.getId());
+        if (activeRunId != null && !Objects.equals(activeRunId, run.getId())) {
+            String reason = "同一工作区已有运行中任务: projectId="
+                    + request.getProjectId() + ", workspaceKey=" + workspaceKey
+                    + ", activeRunId=" + activeRunId;
+            log.info("agent execution rejected because slot is busy: {}", reason);
+            return AgentExecutionResult.failed(run.getId(), reason, reason);
         }
         try {
             materializeSkills(agent, workspace);
@@ -90,11 +107,14 @@ public class AgentExecutionService {
                 return new AgentExecutionResult(run.getId(), result.getOutput(), true, null);
             }
             String reason = result == null ? "Agent 执行无结果" : result.getFailureReason();
-            return AgentExecutionResult.failed(run.getId(), reason == null ? "Agent 执行失败" : reason);
+            return AgentExecutionResult.failed(run.getId(), result == null ? null : result.getOutput(),
+                    reason == null ? "Agent 执行失败" : reason);
         } catch (Exception e) {
             log.warn("agent execution failed: agentName={}, runId={}", agentName, run.getId(), e);
             cliRunnerRegistry.cancel(run.getId());
             return AgentExecutionResult.failed(run.getId(), e.getMessage());
+        } finally {
+            activeAgentRuns.remove(slotKey, run.getId());
         }
     }
 
@@ -149,6 +169,23 @@ public class AgentExecutionService {
 
     private long timeoutSeconds(AgentExecutionRequest request) {
         return request.getTimeoutSeconds() <= 0 ? 1_800L : request.getTimeoutSeconds();
+    }
+
+    private String workspaceSlotKey(String projectId, String workspaceKey) {
+        return Objects.toString(projectId, "") + "::" + Objects.toString(workspaceKey, "");
+    }
+
+    private String workspaceKey(AgentExecutionRequest request, Run run) {
+        if (request.getRequirementId() != null && !request.getRequirementId().isBlank()) {
+            return "requirement-" + request.getRequirementId();
+        }
+        if (request.getCodingTaskId() != null && !request.getCodingTaskId().isBlank()) {
+            return "coding-task-" + request.getCodingTaskId();
+        }
+        if (request.getTaskId() != null && !request.getTaskId().isBlank()) {
+            return "task-" + request.getTaskId();
+        }
+        return "run-" + run.getId();
     }
 
     private RunTerminalReason terminalReason(RunState state) {

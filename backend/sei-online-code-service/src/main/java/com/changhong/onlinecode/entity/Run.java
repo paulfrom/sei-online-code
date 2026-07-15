@@ -88,8 +88,8 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "user_prompt", columnDefinition = "TEXT")
     private String userPrompt;
 
-    @Column(name = "failure_summary", columnDefinition = "TEXT")
-    private String failureSummary;
+    @Column(name = "summary", columnDefinition = "TEXT")
+    private String summary;
 
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
@@ -159,5 +159,17 @@ public class Run extends BaseAuditableEntity {
     public String getDisplay() {
         String id = codingTaskId != null ? codingTaskId : taskId;
         return (id != null ? id : runNo != null ? "run#" + runNo : getId()) + " [" + state + "]";
+    }
+
+    /**
+     * Backward-compatible accessor for callers that still use the old run failure-summary name.
+     */
+    @Transient
+    public String getFailureSummary() {
+        return summary;
+    }
+
+    public void setFailureSummary(String failureSummary) {
+        this.summary = failureSummary;
     }
 }

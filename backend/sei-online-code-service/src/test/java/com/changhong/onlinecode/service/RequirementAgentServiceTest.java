@@ -8,6 +8,7 @@ import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -149,6 +151,31 @@ class RequirementAgentServiceTest {
         verify(requirementDao, never()).save(any(Requirement.class));
         verify(requirementCommentService, never()).append(anyString(), any(), any(), anyString(), any(),
                 anyString(), any());
+    }
+
+    @Test
+    void reviewMemory_iterationIdStaysWithinVarchar36Bound() {
+        // WHY: oc_run.iteration_id is varchar(36). A composite "reqId-memory-review-{uuid}" (~70 chars)
+        // overflowed the column and aborted the run insert. iteration_id is a stable iteration grouping
+        // key; for a requirement-scoped review it must be the requirement id (<=36), matching the other
+        // requirement-scoped agent runs.
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("p1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
+        when(agentExecutionService.executeAsync(eq("memory-review-agent"), any())).thenReturn(new CompletableFuture<>());
+
+        service.reviewMemory("req1", "# PRD", context);
+
+        ArgumentCaptor<AgentExecutionRequest> captor = ArgumentCaptor.forClass(AgentExecutionRequest.class);
+        verify(agentExecutionService).executeAsync(eq("memory-review-agent"), captor.capture());
+        String iterationId = captor.getValue().getIterationId();
+        assertTrue(iterationId.length() <= 36, "iteration_id must fit varchar(36): " + iterationId);
+        assertEquals("req1", iterationId);
     }
 
     private static AgentExecutionResult agentResult(String output) {

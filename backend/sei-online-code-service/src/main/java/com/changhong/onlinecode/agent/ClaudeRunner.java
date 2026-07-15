@@ -87,6 +87,7 @@ public class ClaudeRunner implements CliRunner {
                                       String cwd, String model, String mcpConfig) {
         Path mcpConfigFile = null;
         StringBuilder output = new StringBuilder();
+        StringBuilder errorOutput = new StringBuilder();
         try {
             mcpConfigFile = writeMcpConfigFile(mcpConfig);
             List<String> args = buildArgs(prompt, model, mcpConfigFile, cwd);
@@ -101,7 +102,7 @@ public class ClaudeRunner implements CliRunner {
             }
 
             // stderr 独立线程读取，避免与 stdout 相互阻塞（参考 claude.go 的双 goroutine）。
-            Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream());
+            Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream(), errorOutput);
             stderrPump.start();
 
             try (BufferedReader reader = new BufferedReader(
@@ -124,7 +125,8 @@ public class ClaudeRunner implements CliRunner {
                 return successResult(envelope.result(), usage);
             }
             // 非零退出码但 stdout 中存在可解析 usage 时，仍尽力保存。
-            return failedResult("claude exited with code " + code, usage);
+            return failedResult("claude exited with code " + code,
+                    firstNonBlank(envelope.result(), errorOutput.toString(), stdout), usage);
         } catch (IOException e) {
             log.warn("claude spawn failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
@@ -157,7 +159,12 @@ public class ClaudeRunner implements CliRunner {
     }
 
     private CliRunResult failedResult(String reason, AgentUsage usage) {
+        return failedResult(reason, null, usage);
+    }
+
+    private CliRunResult failedResult(String reason, String output, AgentUsage usage) {
         CliRunResult result = new CliRunResult();
+        result.setOutput(output);
         result.setUsage(usage);
         result.setProcessSucceeded(false);
         result.setFailureReason(reason);
@@ -304,12 +311,16 @@ public class ClaudeRunner implements CliRunner {
         return file;
     }
 
-    private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr) {
+    private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr,
+                              StringBuilder sink) {
         return new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    synchronized (sink) {
+                        sink.append(line).append('\n');
+                    }
                     emit(iterationId, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
@@ -327,5 +338,14 @@ public class ClaudeRunner implements CliRunner {
     }
 
     private record Envelope(String result, AgentUsage usage) {
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

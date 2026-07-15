@@ -38,7 +38,7 @@ Use `pnpm`, not `yarn`. The app expects Node.js `>=18`.
 - Preserve i18n coverage when adding labels or messages; update both locale files when needed.
 
 ## Verification
-There is no established frontend test suite in this module today. For every UI change, run `pnpm lint`, verify the affected page locally, and check both Chinese and English copy when text changes are involved.
+There is no established frontend test suite in this module today. For planned work, acceptance must be represented as explicit `test-agent` tasks in the PM plan. Do not trigger `test-agent` implicitly after every frontend coding task. PM decides each acceptance task's scope and dependencies based on the requirement and risk.
 
 ## Commits and PRs
 Use `<type>: <description>` commit messages such as `feat: add online code toolbar`. PRs should summarize the affected pages, include screenshots or short recordings for UI changes, and note any backend dependency or route/config update.

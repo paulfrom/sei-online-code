@@ -34,5 +34,8 @@ Use the wrapper only. The project targets Java 21. Local startup also depends on
 ## Testing
 Backend tests run on JUnit Platform. Place tests in `src/test/java` and name them `*Test.java`. Add or update tests for service logic, converters, DAO behavior, and validation changes. Prefer focused tests near the changed package.
 
+## Acceptance Rhythm
+For planned work, acceptance must be represented as explicit `test-agent` tasks in the PM plan. Do not trigger `test-agent` implicitly after every backend coding task. PM decides each acceptance task's scope and dependencies based on the requirement and risk.
+
 ## Commits and PRs
 Use commit messages in the format `feat: description`, `fix: description`, `refactor: description`, and so on. Keep PRs scoped, describe impacted modules, mention schema or config changes, and include sample requests or screenshots when the API behavior affects the UI.

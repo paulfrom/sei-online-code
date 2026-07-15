@@ -35,8 +35,7 @@ import java.util.stream.Collectors;
  * CodingTask 调度器。
  *
  * <p>按 DAG 依赖、fileScope 冲突、前后端 lane 并发限制执行任务。
- * 开发成功后进入任务级验证，验证通过/失败分别进入 {@link CodingTaskStatus#SUCCEEDED} /
- * {@link CodingTaskStatus#VALIDATION_FAILED}，任何终态变化后重新调度。</p>
+ * 验收必须作为 PM 计划中的显式 {@code test-agent} 任务运行，不在每个开发任务后隐式触发。</p>
  */
 @Service
 @Slf4j
@@ -169,8 +168,12 @@ public class CodingTaskScheduler {
             }
 
             // 启动任务
-            String prompt = buildPrompt(task);
-            executionService.executePlanTask(task.getId(), task.getAssignedAgent(), prompt);
+            if (isValidationTask(task)) {
+                executeValidationTask(task);
+            } else {
+                String prompt = buildPrompt(task);
+                executionService.executePlanTask(task.getId(), task.getAssignedAgent(), prompt);
+            }
             occupiedAreas.add(task.getArea());
             occupiedScopes.add(candidateScope);
         }
@@ -209,8 +212,9 @@ public class CodingTaskScheduler {
         }
         if (!success) {
             task.setStatus(CodingTaskStatus.FAILED);
-            task.setFailureSummary("开发执行失败");
-            task.setFailureDetail(failureReason);
+            String failure = firstNonBlank(failureReason, "开发执行失败");
+            task.setFailureSummary(failure);
+            task.setFailureDetail(failure);
             task.setLastFailedAt(new Date());
             codingTaskDao.save(task);
             appendDevResult(task, false, failureReason);
@@ -218,10 +222,17 @@ public class CodingTaskScheduler {
             return;
         }
         appendDevResult(task, true, null);
-        task.setStatus(CodingTaskStatus.VALIDATING);
+        task.setStatus(CodingTaskStatus.SUCCEEDED);
+        task.setFailureSummary(null);
+        task.setFailureDetail(null);
         codingTaskDao.save(task);
+        schedule(task.getRequirementId());
+    }
 
+    private void executeValidationTask(CodingTask task) {
         if (validationLoopService != null) {
+            task.setStatus(CodingTaskStatus.VALIDATING);
+            codingTaskDao.save(task);
             ValidationLoopService.ValidationOutcome outcome = validationLoopService.validateTask(task);
             if (!isCurrentLoop(task)) {
                 task.setStatus(CodingTaskStatus.STALE);
@@ -245,7 +256,7 @@ public class CodingTaskScheduler {
         }
 
         task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
-        task.setFailureSummary("任务级验证失败");
+        task.setFailureSummary("验收任务失败");
         task.setFailureDetail("ValidationLoopService 未注入，无法通过 test-agent 执行验证");
         task.setLastFailedAt(new Date());
         appendValidationUnavailable(task);
@@ -303,6 +314,10 @@ public class CodingTaskScheduler {
                 toJson(metadata));
     }
 
+    private boolean isValidationTask(CodingTask task) {
+        return "test-agent".equals(task.getAssignedAgent());
+    }
+
     private String toJson(Object value) {
         try {
             return JsonUtils.mapper().writeValueAsString(value);
@@ -327,6 +342,15 @@ public class CodingTaskScheduler {
     private boolean isCurrentLoop(CodingTask task) {
         Requirement current = requirementDao.findOne(task.getRequirementId());
         return current != null && Objects.equals(task.getLoopId(), current.getActiveLoopId());
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

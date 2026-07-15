@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.RequirementDto;
@@ -15,7 +16,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,7 +30,7 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class RequirementService extends BaseEntityService<Requirement> {
 
     private static final String STALE_CONTEXT_MESSAGE = "设计上下文已过期（STALE），请重新生成 PRD";
@@ -42,6 +43,9 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private final RequirementDesignContextService requirementDesignContextService;
     private final RequirementCommentService requirementCommentService;
     private final RequirementAutomationService requirementAutomationService;
+
+    @Autowired(required = false)
+    private WorkspaceManager workspaceManager;
 
     @Override
     protected BaseEntityDao<Requirement> getDao() {
@@ -183,6 +187,37 @@ public class RequirementService extends BaseEntityService<Requirement> {
         OperateResultWithData<Requirement> result = super.save(requirement);
         if (result.successful() && requirementAutomationService != null) {
             TransactionUtil.afterCommit(() -> requirementAutomationService.startInitialLoop(id));
+        }
+        return result;
+    }
+
+    /**
+     * 用户确认需求完成后清理该需求的隔离工作区。
+     *
+     * <p>RequirementStatus 没有“完成”阶段，因此完成语义落在用户确认动作上：
+     * 记录验收信息，保持 PRD 状态不变，自动化状态标记为 COMPLETED，并在事务提交后删除
+     * {@code .sei/workspaces/requirement-<id>}。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OperateResultWithData<Requirement> confirmCompletion(String id) {
+        Requirement requirement = dao.findOne(id);
+        if (Objects.isNull(requirement)) {
+            return OperateResultWithData.operationFailure("需求不存在: " + id);
+        }
+        if (requirement.getAutomationStatus() != RequirementAutomationStatus.COMPLETED) {
+            return OperateResultWithData.operationFailure("需求尚未交付完成，不能确认完成: "
+                    + requirement.getAutomationStatus());
+        }
+        if (requirement.getAcceptedAt() == null) {
+            requirement.setAcceptedAt(new Date());
+        }
+        if (requirement.getAcceptedByAgent() == null || requirement.getAcceptedByAgent().isBlank()) {
+            requirement.setAcceptedByAgent("user");
+        }
+        OperateResultWithData<Requirement> result = super.save(requirement);
+        if (result.successful() && workspaceManager != null) {
+            TransactionUtil.afterCommit(() ->
+                    workspaceManager.deleteRequirementWorkspace(requirement.getProjectId(), requirement.getId()));
         }
         return result;
     }

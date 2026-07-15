@@ -67,7 +67,11 @@ public class RunDto extends BaseEntityDto {
     @Schema(description = "用户提示词")
     private String userPrompt;
 
-    @Schema(description = "失败摘要")
+    @Schema(description = "运行摘要；保存本次 CLI 输出或失败结果")
+    private String summary;
+
+    @Deprecated
+    @Schema(description = "兼容旧字段：运行摘要", deprecated = true)
     private String failureSummary;
 
     @Schema(description = "失败原因")

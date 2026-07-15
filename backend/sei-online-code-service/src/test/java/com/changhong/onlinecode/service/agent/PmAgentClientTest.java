@@ -58,6 +58,40 @@ class PmAgentClientTest {
     }
 
     @Test
+    void generatePlan_cliFailureDoesNotParseOutputAsJsonAndStoresRealFailure() {
+        RunDao runDao = mock(RunDao.class);
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        Run run = new Run();
+        run.setId("run-failed");
+        run.setState(RunState.RUNNING);
+        savedRun.set(run);
+        when(runDao.findOne("run-failed")).thenAnswer(invocation -> savedRun.get());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run saved = invocation.getArgument(0);
+            savedRun.set(saved);
+            return saved;
+        });
+        when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult(
+                "run-failed", "API Error: Unable to connect to API (ECONNRESET)",
+                false, "claude exited with code 1"));
+
+        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
+        Requirement requirement = new Requirement();
+        requirement.setId("requirement-1");
+        requirement.setProjectId("project-1");
+
+        PmAgentClient.PmPlanResult result = client.generatePlan(requirement, "loop-1",
+                ExecutionPlanType.INITIAL, null, List.of(), null);
+
+        assertNull(result);
+        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals("API Error: Unable to connect to API (ECONNRESET)", savedRun.get().getSummary());
+        assertEquals("API Error: Unable to connect to API (ECONNRESET)", savedRun.get().getFailureReason());
+    }
+
+    @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
 
@@ -92,6 +126,22 @@ class PmAgentClientTest {
 
         assertNotNull(result);
         assertEquals(List.of("接口测试通过"), result.tasks().get(0).acceptanceCriteria());
+    }
+
+    @Test
+    void parsePlan_acceptsExplicitTestAgentValidationTask() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient.PmPlanResult result = parsePlan(client, """
+                {"goal":"g","tasks":[
+                {"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
+                "area":"backend","dependsOn":[],"fileScope":["backend/"]},
+                {"taskKey":"VAL-1","title":"验收","agent":"test-agent",
+                "area":"full-stack","dependsOn":["BE-1"],"fileScope":[]}]}
+                """);
+
+        assertNotNull(result);
+        assertEquals("test-agent", result.tasks().get(1).agent());
+        assertEquals(List.of("BE-1"), result.tasks().get(1).dependsOn());
     }
 
     private PmAgentClient.PmPlanResult parsePlan(PmAgentClient client, String json) throws Exception {

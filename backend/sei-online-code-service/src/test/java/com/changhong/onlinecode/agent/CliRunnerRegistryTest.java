@@ -1,6 +1,5 @@
 package com.changhong.onlinecode.agent;
 
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,8 +74,10 @@ class CliRunnerRegistryTest {
     @Test
     void execute_usesResolvedProjectWorkspace(@TempDir Path workspace) {
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
-        when(workspaceManager.resolve("project-1")).thenReturn(
-                new WorkspaceResolveResult(workspace.toString(), true, null));
+        when(workspaceManager.resolveIsolatedWorkspace("project-1", null))
+                .thenReturn(workspace.toAbsolutePath().normalize());
+        when(workspaceManager.isManagedWorkspacePath(workspace.toAbsolutePath().normalize(),
+                workspace.toAbsolutePath().normalize())).thenReturn(true);
         AtomicReference<String> actualCwd = new AtomicReference<>();
         CliRunner runner = capturingRunner(actualCwd);
         CliRunnerRegistry boundRegistry = new CliRunnerRegistry(List.of(runner), workspaceManager, null);
@@ -94,9 +95,7 @@ class CliRunnerRegistryTest {
         Path original = java.nio.file.Files.createDirectory(root.resolve("original"));
         Path changed = java.nio.file.Files.createDirectory(root.resolve("changed"));
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
-        when(workspaceManager.resolve("project-1")).thenReturn(
-                new WorkspaceResolveResult(original.toString(), true, null),
-                new WorkspaceResolveResult(changed.toString(), true, null));
+        when(workspaceManager.resolveIsolatedWorkspace("project-1", null)).thenReturn(original, changed);
         AtomicReference<String> actualCwd = new AtomicReference<>();
         CliRunnerRegistry boundRegistry = new CliRunnerRegistry(
                 List.of(capturingRunner(actualCwd)), workspaceManager, null);
