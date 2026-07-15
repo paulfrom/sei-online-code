@@ -63,6 +63,16 @@ export interface AssetManagerInfo {
  * 语义与「总条数」相反，故分页器总条数取 records；getImportantEnterpriseDetail：
  * assetManager 必填守卫）。待 BE-005/006 落地后做真实端点联调复核——静态契约已对齐，
  * 缺的仅是运行期往返验证（非映射逻辑缺失）。
+ *
+ * 列普查独立复核（2026-07-15，sed/grep CREATE TABLE 实测，非沿用既往结论）：
+ * V1 表共 17 物理列 = 4 可写业务列（name/category/unified_social_credit_code/
+ * asset_manager_id）+ 13 不可变列（id、7 审计列 created_date/last_edited_date/
+ * creator_id/last_editor_id/creator_name/last_editor_name/creator_account/
+ * last_editor_account、deleted_at/is_deleted、2 STORED 生成列 active_name/active_uscc）。
+ * 本类型暴露 13 个列背字段 + 派生 assetManager（join，非列），刻意隐藏 4 列
+ * （2 登录账号敏感 + 2 生成列仅供唯一性校验）；服务层 FORBIDDEN_MUTABLE_KEYS_SET
+ * 恰为这 13 不可变列（逐列 13/13 命中）。类型暴露集与 sanitizer 禁写集对同一 17 列
+ * schema 的可写/不可写划分收敛同源、无漂移——本条为独立验证结论，非新增功能缺口。
  */
 export interface ImportantEnterprise {
   /** 主键 */

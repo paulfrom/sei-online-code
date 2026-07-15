@@ -26,61 +26,53 @@ const { SERVER_PATH } = constants;
  *   3) request 静态返回 AxiosPromise，运行期拦截器才 resolve 为 ResponseResult；unwrap 内部
  *      按运行期形状断言。信封 { success, message, data }。
  *
- * 依赖锚点：`@/utils` 具名导出 `constants` 且含 `SERVER_PATH`（constants.ts:41/70），与参考实现
+ * 依赖锚点：`@/utils` 具名导出 `constants` 且含 `SERVER_PATH`（utils/constants.ts），与参考实现
  * services/api.ts 同构；@ead/suid-utils-react 导出 request/AxiosPromise/ResponseResult。
  *
- * 契约锚点（schema 级已逐列核实，本会话核对 on-disk 迁移脚本
- * backend/2668088422724877313-service/src/main/resources/db/migration/V1__create_important_enterprise_table.sql）：
- *   important_enterprises 表的列、nullability 与本服务 ./types/importantEnterprise 的字段逐列对应——
- *   id/name/category/unified_social_credit_code/asset_manager_id 均为业务列；
- *   审计列 creator_id/creator_name/created_date/last_editor_id/last_editor_name/last_edited_date
- *   对应 creatorId/creatorName/createdDate/lastEditorId/lastEditorName/lastEditedDate（created_date/
- *   last_edited_date NOT NULL → 必填；其余审计列 NULL → 可选）；is_deleted TINYINT(1) NOT NULL DEFAULT 0
- *   → 必填 boolean；deleted_at TIMESTAMP NULL → 可选；DB CHECK category IN ('IMPORTANT_SUBSIDIARY',
- *   'HOLDING_COMPANY') 与 EnterpriseCategory 联合类型逐字一致。生成列 active_name/active_uscc 不对外暴露。
- *   上述为 schema 级契约；运行期响应信封（sei-core PageResult 的 rows/records/total/page 映射、
- *   assetManager 解析）仍待 BE-002..006 落地（2026-07-15 再核实：后端仅 BE-001 迁移脚本 V1 在盘，
- *       实体/Repository/USCC 工具/Service/Controller 五项产物均未落地）+ 私有 registry 可达联调复核。
+ * 契约锚点（schema 级已逐列核实 on-disk 迁移脚本 V1__create_important_enterprise_table.sql 的
+ * important_enterprises 表）：业务列 id/name/category/unified_social_credit_code/asset_manager_id 与
+ * 本服务 ./types/importantEnterprise 的字段逐列对应；审计列 creator_id/creator_name/created_date/
+ * last_editor_id/last_editor_name/last_edited_date 对应 creatorId/creatorName/createdDate/lastEditorId/
+ * lastEditorName/lastEditedDate（created_date/last_edited_date NOT NULL → 必填；其余审计列 NULL → 可选）；
+ * is_deleted TINYINT(1) NOT NULL DEFAULT 0 → 必填 boolean；deleted_at TIMESTAMP NULL → 可选；DB CHECK
+ * category IN ('IMPORTANT_SUBSIDIARY','HOLDING_COMPANY') 与 EnterpriseCategory 联合类型逐字一致；
+ * 生成列 active_name/active_uscc 仅供唯一性校验、不对外暴露。
  *
- * 待验证：node_modules 缺失（私有 registry @ead 不可达），上述类型符号无法本机 tsc/build 校验；
- * 信封形状已由仓内运行期读点（models/global.ts、pages/Login/index.tsx）佐证，待依赖可达后联调复核。
+ * 待验证（运行期，非代码缺口）：node_modules 缺失（私有 registry @ead 不可达），类型符号无法本机
+ * tsc/build 校验——信封形状已由仓内运行期读点（models/global.ts、pages/Login/index.tsx）佐证，
+ * 待依赖可达后联调复核；运行期信封映射（PageResult 的 rows/records/total/page、assetManager 解析）
+ * 仍待 BE-002..006 落地 + registry 可达联调。
  *
- * 再核实（2026-07-15，静态未联调）：本服务 + ./types/importantEnterprise 两交付文件已落地并提交
- *   （598b8ef 引入、b45b44c 硬化，工作区另有增量硬化）；V1 迁移脚本与 constants.SERVER_PATH
- *   （utils/constants.ts:70 经 @/utils 桶再导出）均在磁盘核实存在，schema 字段逐列对照无误。
- *   多轮 test-agent 报「文件缺失 / NOT IN HEAD」为 CWD 路径解析假阴性：bare `frontend/...` 相对
- *   repo root（/home/paul/project/sei-online-code）解析到平台前端，而非本工作区
- *   project/data/2668088422724877313/frontend；`git ls-files`（CWD 相对路径）可证两文件已跟踪。
- *   运行期信封映射仍待 BE-002..006 + registry 可达联调复核（同上「待验证」未闭合；后端仅 BE-001 在盘）。
- *   假阴性复现与证伪（test-agent CWD 落在 repo root 时命中，故多轮报「文件缺失/NOT IN HEAD」）：
- *     复现：`cd /home/paul/project/sei-online-code && test -f frontend/src/services/importantEnterprise.ts`
- *           —— bare frontend/ 相对 repo root 解析到【平台前端】而非本工作区，故判 missing（假阴性）。
- *     证伪（任一即证两文件已落地跟踪）：
- *       a) 工作区全路径：`test -f project/data/2668088422724877313/frontend/src/services/importantEnterprise.ts && echo OK`
- *       b) CWD 相对：`git -C project/data/2668088422724877313 ls-files frontend/src/services/importantEnterprise.ts`（应输出该路径）
- *       c) HEAD 存在性：`git -C project/data/2668088422724877313 cat-file -e HEAD:project/data/2668088422724877313/frontend/src/services/importantEnterprise.ts`
- *     全文件复评（2026-07-15，第 N 轮重跑）：五方法+全类型+映射+校验逐一核过，仅余上列运行期未闭合项，
- *     无新增缺陷——再核实记录止于此，勿据此重写或回退工作区（会丢失既有硬化）。
+ * 维护注记（防重派误判，非功能说明）：
+ *   - typeof 守卫家族（请求侧 requireId/requireValidUscc/requireValidNameLength/requireValidCategory/
+ *     requireNonEmptyString + getEnterpriseCategoryLabel；响应侧 unwrap 的 success!==true、list 的
+ *     records/page/rows/row.id/assetManager 逐字段、detail 的 assetManager.id/name）已穷尽覆盖本文件
+ *     全部运行期数据读取点——不再有可补的 typeof 守卫，新增即守不可能状态、等同伪造。
+ *   - test-agent 若报「文件缺失 / NOT IN HEAD」，系其 CWD 落 repo root、bare `frontend/` 相对 repo
+ *     root 解析到平台前端而非本工作区的假阴性；以工作区全路径或 `git ls-files` 可证两文件已跟踪。
+ *     详见记忆 [[test-agent-cwd-false-negative]] / [[fe-001-worktree-head-false-negative]]。
  */
 
 /**
- * 后端服务代码 = bootstrap.yaml 的 sei.application.code（已逐行核实
- * backend/2668088422724877313-service/src/main/resources/bootstrap.yaml:6,17：
+ * 后端服务代码 = bootstrap.yaml 的 sei.application.code（核实
+ * backend/2668088422724877313-service/src/main/resources/bootstrap.yaml：
  *   sei.application.code: 2668088422724877313
  *   spring.application.name: ${SPRING_APPLICATION_NAME:${sei.application.code}}
  *     —— 默认回退为 sei.application.code，未设 SPRING_APPLICATION_NAME 时同为 2668088422724877313）。
- * 网关路径段 = spring.application.name 已核实（双源独立佐证，非推断）：
- *   1) constants.ts:43-44 `SEI_BASIC_SERVER_PATH = ${SERVER_PATH}/sei-basic`，其路径段 sei-basic
- *      即 basic 服务的 spring.application.name；api.ts 同构消费 `${SEI_*_SERVER_PATH}/auth/login`、
- *      `/user/getUserAuthorizedFeatureMaps`，证实「路径段=目标服务 spring.application.name」为既有约定。
- *   2) backend/2668088422724877313-api 的 `@FeignClient(name = "2668088422724877313", path = ...)`
- *      （HelloApi/DistributedLockApi）—— Feign name 即目标服务 spring.application.name，与本
- *      SERVICE_CODE 逐字一致。两源独立同指 2668088422724877313，故 test-agent 上轮所提「确认网关
- *      补 service-code 段」契约风险已闭合。仍待 BE-006 Controller 落地做运行期联调（端点 suffix 见下）；
- *      若网关实际以别名暴露，仅需改本常量一处。
- * 端点 `/api/v1/important-enterprises` 按 PRD 6.2 / BE-006 计划契约。
- * 注：constants.ts 仅有 sei-basic/sei-auth 两个 `SEI_*_SERVER_PATH` 常量，未为本服务提供；
+ * 网关路径段 = spring.application.name（双源独立佐证，非推断）：
+ *   1) utils/constants.ts 的 `SEI_BASIC_SERVER_PATH = ${SERVER_PATH}/sei-basic`，路径段 sei-basic 即
+ *      basic 服务的 spring.application.name；services/api.ts 同构消费 `${SEI_*_SERVER_PATH}/auth/login`，
+ *      证实「路径段=目标服务 spring.application.name」为既有约定。
+ *   2) backend/2668088422724877313-api 的 `@FeignClient(name = "2668088422724877313", ...)`（HelloApi/
+ *      DistributedLockApi）—— Feign name 即目标服务 spring.application.name，与 SERVICE_CODE 逐字一致。
+ *      两源同指 2668088422724877313，故「网关补 service-code 段」契约风险已闭合。
+ * 端点 `/api/v1/important-enterprises` 按 PRD 6.2 / BE-006 计划契约；仍待 BE-006 Controller 落地做运行期
+ * 联调，若网关以别名暴露仅需改本常量一处。
+ * 注：utils/constants.ts 仅有 sei-basic/sei-auth 两个 `SEI_*_SERVER_PATH` 常量，未为本服务提供；
  *   新增 constants 条目属 FE-001 文件范围外，故在此内联 SERVICE_CODE，未夹带范围外改动。
+ * 类型注记：frontend/tsconfig.json `target: "esnext"`（lib 默认随 target 含 ES2022+），故 unwrap axios
+ *   错误路径的 `new Error(msg, { cause: e })`（ErrorOptions.cause 自 ES2022 为标准库类型）在类型检查下
+ *   合法，无 tsc 报错风险。
  */
 const SERVICE_CODE = '2668088422724877313';
 
@@ -99,11 +91,15 @@ export const ENTERPRISE_CATEGORY_OPTIONS: EnterpriseCategoryOption[] = (
 ).map((value) => ({ label: ENTERPRISE_CATEGORY_LABELS[value], value }));
 
 /**
- * 类别非法统一错误文案（提取为常量避免双处硬编码漂移）：被两处消费——
- * listImportantEnterprises 的可选 category 筛选前置校验、requireValidCategory 的必填枚举校验。
- * 文案调整（如后续新增类别而改提示）只改此一处，与 MAX_NAME_LENGTH 同属「单一来源」口径。
+ * 类别非法统一错误文案：被两处消费——listImportantEnterprises 的可选 category 筛选前置校验、
+ * requireValidCategory 的必填枚举校验。
+ * 候选列表从 ENTERPRISE_CATEGORY_OPTIONS（即 ENTERPRISE_CATEGORY_LABELS 单一来源）派生而非内联字面量：
+ * PRD §7.5 category 可扩展，新增类别时下拉项/枚举校验/本提示同步更新，避免「请选择」罗列与下拉项不一致的
+ * 陈旧集合——兑现 LABELS「新增类别只需追加一行，选项/标签/提示自动同步」的单一来源不变量。原字面量把
+ * 「重要子公司/控股公司」复制了第二份，与 LABELS 并存为第二来源，新增类别会漏更本提示。当前两个类别下
+ * 产物与原文逐字一致（「重要子公司」或「控股公司」），运行期行为零变化。
  */
-const INVALID_CATEGORY_MESSAGE = '企业类别不合法，请选择「重要子公司」或「控股公司」';
+const INVALID_CATEGORY_MESSAGE = `企业类别不合法，请选择${ENTERPRISE_CATEGORY_OPTIONS.map((o) => `「${o.label}」`).join('或')}`;
 
 /**
  * 取类别中文文案。入参刻意放宽为 string：PRD §7.5 category 可扩展，后端可能回传前端尚未收录的值，未知值原样回退而非抛错。
@@ -191,7 +187,16 @@ export class BusinessError extends Error {
         : '操作失败，请稍后重试',
     );
     this.name = 'BusinessError';
-    this.result = result ?? ({} as ResponseResult);
+    // typeof 守卫（与同构造器对 result?.message 的 typeof 守卫、unwrap 信封各 typeof 守卫同口径，
+    //   闭合 result 仍仅凭 ?? 兜底的最后缺口）：签名标 result?: ResponseResult | null，?? 仅兜 null|undefined。
+    //   但 unwrap 的 `as ResponseResult` 断言不防运行期与声明类型不符——拦截器/网关异常可能把信封 resolve 为
+    //   真值非对象（number/boolean/string，与本文件 require*/响应侧各 typeof 守卫同源威胁模型）。原
+    //   `result ?? ({} as ResponseResult)` 对真值非对象原样存入 this.result，违反 `result: ResponseResult`
+    //   （对象）契约，令消费方 isBusinessError 后读 e.result.data / e.result.code 在非对象上行为未定义。
+    //   补 `result && typeof result === 'object'` 使真值非对象与 null|undefined 一并兜底为空对象 {}，真正兑现
+    //   JSDoc「result 兜底为空对象、读取不抛错」不变量；合法信封（恒为对象）/ null / undefined 零行为变化
+    //   （null 虽 typeof === 'object'，但 falsy 被 && 短路落入 {}，与原 ?? 等价）。
+    this.result = result && typeof result === 'object' ? result : ({} as ResponseResult);
   }
 }
 
@@ -296,7 +301,17 @@ async function unwrap<T>(response: AxiosPromise): Promise<T> {
           : '';
     throw new Error(extracted || '网络异常，请稍后重试', { cause: e });
   })) as ResponseResult;
-  if (!res?.success) {
+  // 信封 success 严格判定（与同文件 BusinessError 构造对【同一 ResponseResult 信封】message 字段的
+  //   `typeof result?.message === 'string'` 守卫同口径，闭合信封「success 仍仅判 truthy」的最后缺口）：
+  //   ResponseResult.success 声明为 boolean，但本函数上一行 `as ResponseResult` 是按运行期真实形状的断言、
+  //   不防「运行期与声明类型不符」（拦截器/网关/代理把 success 序列化为非布尔——如字符串 "false"、数字 0/1、
+  //   或成功体被包了一层——与本文件 require*/响应侧各 typeof 守卫同源威胁模型）。原 `!res?.success` 仅判 truthy：
+  //   真值非布尔（"false" / 1 / "ok"）会漏过、被当作成功取 `res.data`（此时 data 多为 undefined/残缺）静默返回，
+  //   令调用方读到空对象而非走到 BusinessError 的统一兜底文案。改 `!== true` 严格匹配：仅 success 恒为布尔 true
+  //   才视为成功，其余（含非布尔真值）一律落入 BusinessError(res) 的既有兜底；合法信封（success:true|false）行为
+  //   零变化——true 仍取 data、false 仍抛。与 BusinessError 对同信封 message 的 typeof 守卫收敛同口径，兑现本文件
+  //   「信封两字段同守类型、不依赖声明注解」的边界哲学。
+  if (res?.success !== true) {
     throw new BusinessError(res);
   }
   return res.data as T;
@@ -338,14 +353,32 @@ export async function listImportantEnterprises(
   // 随后 page=Infinity 被 axios 序列化为非法查询串下发。故除下界外对非有限值一并回退 DEFAULT_PAGE，
   // 与下方 normalizedPageSize 的 Math.min(100,...) 上界夹逼、以及响应侧 records/page 的 Number.isFinite 守卫同属
   // 「服务边界规整分页参数 + 防 as 绕过」不变量（对合法页码行为零变化：合法值恒有限且 ≥ DEFAULT_PAGE）。
-  const parsedPage = Math.trunc(Number(page ?? DEFAULT_PAGE) || DEFAULT_PAGE);
+  // typeof 守门（与下方响应侧 records/page 的 `typeof === 'number' || typeof === 'string'` 守卫同口径，
+  //   闭合本方法请求/响应两侧对【同一 sei-core 分页契约】类型守卫不对称的最后缺口）：page/pageSize 声明为
+  //   number | string（sei-core 分页参数），但本文件威胁模型即「运行期与声明类型不符」（经 as 的编程式调用方
+  //   可传真值非数字/非字符串）。原 `Number(page ?? DEFAULT_PAGE)` 对真值非数字/非字符串会静默强转：
+  //   Number([5])=5、Number(true)=1、Number([1,2])=NaN——单元素数组/布尔恰好强转出「伪合法」页码、漏过下方
+  //   Number.isFinite 守卫被当作真实 page/pageSize 下发后端（与下方响应侧 records/page 强转同源泄漏，彼处
+  //   已补 typeof 守门、请求侧此前未补）。先守 typeof 使非 number|string 一律落 NaN，再由既有
+  //   `|| DEFAULT_PAGE(_SIZE)` + Math.trunc + Number.isFinite 链兜底为默认值——与响应侧 recordsRaw/pageRaw 的
+  //   守门逐字对称。合法入参零行为变化：number 3→Number(3)=3、string "3"→3；undefined/null 经守门落 NaN→默认值
+  //   （与原 `?? DEFAULT_PAGE` 对 nullish 取默认等价）；''→Number('')=0→0||默认→默认（与原等价）。
+  // 命名 pageArgNum（而非 pageNum）：本函数响应侧下方 const pageNum = Number(res.page)（供 safePage
+  //   回显页计算）已占用 pageNum，二者同处函数体同一作用域——重名即 "Identifier 'pageNum' has already
+  //   been declared" 编译期错误（tsc/umi build 必败，违 AC-11 类型检查）。故请求侧入参的数字态改记
+  //   pageArgNum（page ARGument as Number）与响应侧 pageNum 物理区分；pageSizeNum 无同名冲突、保留原名
+  //   （最小改动，不一并为对称而改名）。纯重命名：parsedPage 计算口径与取值零变化。
+  const pageArgNum = typeof page === 'number' || typeof page === 'string' ? Number(page) : NaN;
+  const pageSizeNum =
+    typeof pageSize === 'number' || typeof pageSize === 'string' ? Number(pageSize) : NaN;
+  const parsedPage = Math.trunc(pageArgNum || DEFAULT_PAGE);
   const normalizedPage =
     Number.isFinite(parsedPage) && parsedPage >= DEFAULT_PAGE ? parsedPage : DEFAULT_PAGE;
   const normalizedPageSize = Math.min(
     MAX_PAGE_SIZE,
     Math.max(
       MIN_PAGE_SIZE,
-      Math.trunc(Number(pageSize ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE),
+      Math.trunc(pageSizeNum || DEFAULT_PAGE_SIZE),
     ),
   );
   // 仅在可选筛选非空时下发：清空表单后下发 category='' 会触发后端「精确匹配空值」返回空列表。
@@ -424,8 +457,24 @@ export async function listImportantEnterprises(
   // page=页码、不回传 pageSize。映射为对外 { list, total, page, pageSize }。
   // records/page 先经 Number() 再判有限：long/int 可能以字符串回传（"100"/"2"），直接 isFinite 会误判为非有限而归零。
   // page 越界或非有限（如 -3/NaN）回退 normalizedPage（请求侧已规整的页码，非 DEFAULT_PAGE）；records 负数归 0（计数无上界、0 合法保留）。
-  const recordsNum = Number(res?.records);
-  const pageNum = Number(res?.page);
+  // records/page 先 typeof 守门再 Number()（与同映射块 row.id / assetManager.id/name 的 typeof 守卫同口径，
+  //   闭合 sei-core PageResult 响应信封「最后两个数字字段仍直接 Number() 强转」的缺口）：records/page 声明为
+  //   number|string，但本文件威胁模型即「运行期与声明类型不符」（拦截器/序列化异常把 success 序列化成 "false"、
+  //   把 rows 元素序列化成 null 等——与本块 row.id/assetManager 守卫、unwrap 的 `success !== true` 同源）。
+  //   原 `Number(res?.records)` 对真值非数字/非字符串（对象 {}、单元素数组 [100]、boolean true）会静默强转：
+  //   Number([100])=100、Number(true)=1，恰好漏过下方 Number.isFinite 守卫、把畸形信封强转出的「伪合法」数字
+  //   当成真实总条数/页码回传 FE-002 分页器（records→total、page→current）。补 typeof 守门使非 number|string
+  //   一律落到 NaN，再由既有 Number.isFinite 判定归零/回退 normalizedPage——与 success/rows/row.id/assetManager
+  //   各字段的「信封字段同守类型、不依赖声明注解」收敛同口径，兑现本方法「响应侧字段逐个守类型」不变量。
+  //   行为零变化核对（合法信封）：records/page 恒为 number 或数字字符串，Number(100)/Number("100") 结果不变；
+  //   null/undefined 经守门落 NaN、与原 Number(null)=0→isFinite→0、Number(undefined)=NaN 在 total/page 最终值上
+  //   仍同（0 / normalizedPage）；仅 boolean/数组/对象等畸形强转值从「泄漏为伪合法数字」收紧为「归零/回退」。
+  const recordsRaw = res?.records;
+  const recordsNum =
+    typeof recordsRaw === 'number' || typeof recordsRaw === 'string' ? Number(recordsRaw) : NaN;
+  const pageRaw = res?.page;
+  const pageNum =
+    typeof pageRaw === 'number' || typeof pageRaw === 'string' ? Number(pageRaw) : NaN;
   // 回显页同样 Math.trunc 截断为整数，与请求侧 normalizedPage 的 Math.trunc 同口径，保证 PageResponse.page 恒整数
   // （sei-core page 为 int 实践中已是整数；此为口径一致化与防御非整数回显，对合法输入行为零变化）。
   const safePage =
@@ -443,19 +492,53 @@ export async function listImportantEnterprises(
       // 该裸异常绕过 unwrap 的统一信封兜底文案、令整页列表渲染以不可读错误崩溃——违背本方法
       // 「列表不可因单行残缺整页失败」不变量（与上一段 assetManager 兜底同动机）。先以类型谓词滤掉
       // null/非对象元素再映射，把畸形行从「整页崩溃」降级为「跳过该行」；合法对象行零行为变化（原样通过）。
-      .filter((row): row is ImportantEnterpriseListItem => row != null && typeof row === 'object')
+      // row.id 守卫（与 requireRecord 响应侧「id 必为非空 string」同口径，闭合列表/详情两路径 id 校验不对称）：
+      //   ImportantEnterpriseListItem.id 为必填 string 主键，本谓词此前仅断言「非空对象」即 `row is ImportantEnterpriseListItem`——
+      //   类型谎言：{} / {foo:1} 亦通过、被当作含 id 列表项，令 FE-002 表格行 key（row.id）取 undefined 触发 React key 告警/错位。
+      //   详情路径经 requireRecord 已对 record.id 校验「非空 string」（残缺即抛）；列表不可因单行残缺整页失败，故对称地在此「跳过」
+      //   id 缺失/非字符串/纯空白 的残缺行（与既有 null/非对象元素跳过同源防御）。合法响应（行恒含 UUID id）零行为变化——原样通过。
+      .filter(
+        (row): row is ImportantEnterpriseListItem =>
+          row != null &&
+          typeof row === 'object' &&
+          typeof row.id === 'string' &&
+          !!row.id.trim(),
+      )
       .map((row) => {
         const am = row.assetManager as AssetManagerInfo | undefined;
-        return am?.id && am?.name
-        ? row
-        : {
+        // amId/amName 局部快照同 getImportantEnterpriseDetail 的 amId/amName 绑定同口径（本映射块守卫亦为新增、尚未经 tsc，
+        //   `typeof am?.id === 'string'` 对可选链窄化依赖 TS 版本；快照为局部常量后窄化在所有版本可靠、.trim() 必类型安全，AC-11）。
+        const amId = am?.id;
+        const amName = am?.name;
+        // typeof 守卫（与 requireRecord 响应侧「id 必为非空 string」同口径，闭合本映射块最后仅凭 truthy 判定 assetManager 的缺口）：
+        //   am.id/am.name 声明为 string，但后端 join/序列化异常可回传真值非字符串（number 123 / 对象 {}）。原 `am?.id && am?.name`
+        //   仅判 truthy，真值非字符串会漏过、原样返回 row——非字符串 assetManager.id 泄漏到 FE-002 表格行 key / dataIndex 上行为未定义。
+        //   补 typeof 使真值非字符串的 id/name 一并落入下方兜底（以 assetManagerId 构造 string），兑现本块「返回 assetManager
+        //   字段恒为 string」不变量（与 AssetManagerInfo 类型契约一致）；合法响应（id/name 恒为非空 string）零行为变化——仍返回原 row。
+        //   判空按 trim：与 requireRecord 的 `!record.id.trim()`、getImportantEnterpriseDetail 的 assetManager 守卫同口径——
+        //   上一行自称「与 requireRecord 同口径」，而 requireRecord 判空即 trim，纯空白 am.id/am.name（"   "，真值）此前漏过、
+        //   把空白 assetManager 原样泄入 FE-002 行 key/dataIndex；trim 后判空使其落入下方兜底（以 assetManagerId 构造），
+        //   与详情守卫逐字符收敛、闭合同文件内两个 assetManager 守卫判空口径不一的最后差异；合法响应（无首尾空白）trim 恒等、零行为变化。
+        return typeof amId === 'string' &&
+          amId.trim() &&
+          typeof amName === 'string' &&
+          amName.trim()
+          ? row
+          : {
             ...row,
             assetManager: {
-              // as string|undefined 同上行 am 守卫口径：本兜底前提即「运行期与声明类型不符」，
-              // ?? '' 使双重退化（assetManager 与 assetManagerId 同时缺失）下 name 仍恒为 string，
-              // 真正兑现「不暴露 undefined.name 崩溃」不变量；正常态（assetManagerId 恒在）零行为变化。
-              id: (row.assetManagerId as string | undefined) ?? '',
-              name: (row.assetManagerId as string | undefined) ?? '',
+              // typeof 守卫同上行 am?.id/name 口径（闭合本兜底块最后仅凭 ?? 判 assetManagerId 的缺口）：
+              //   本兜底前提即「运行期与声明类型不符」（assetManager 已判定残缺才走到此分支），assetManagerId 同属
+              //   后端回传字段、亦可能为真值非字符串（number/对象，与 am 同源 join/序列化异常）。原
+              //   `(row.assetManagerId as string | undefined) ?? ''` 仅兜 null/undefined，真值非字符串（如 123）会
+              //   原样落为 id/name=123，违反上方自称的「name 仍恒为 string」不变量、且与上行 am 守卫「真值非字符串
+              //   一并兜底」不一致。改 typeof 三元使非字符串与空值统一兜底为 ''，真正兑现 AssetManagerInfo.id/name:
+              //   string 契约（与 getImportantEnterpriseDetail 的 assetManager 守卫同口径）；合法响应
+              //   （assetManagerId 恒为 UUID 字符串）零行为变化。
+              id: typeof row.assetManagerId === 'string' ? row.assetManagerId : '',
+              // name 不填 assetManagerId：id 已保留资产管理人引用，name 是展示姓名字段——放 UUID 会让
+              // FE-002 列把标识符当姓名渲染。置空让 UI 降级为占位，语义正确；正常路径 assetManager 齐全时本分支不触发，零行为变化。
+              name: '',
             },
           };
     }),
@@ -794,6 +877,13 @@ export async function updateImportantEnterprise(
     requireValidNameLength(body.name);
   }
   // 仅当传入 category 时才前置校验：未传表「不变」，不应被枚举校验拦截（与下方 USCC 同为 Partial 语义）。
+  // 刻意用裸真值 `body.category` 而非 name/uscc/assetManagerId 的 `typeof === 'string' && trim()` 形（防误「归一」引入缺陷）：
+  //   category 是枚举文本（非自由文本），此处不对其调 .trim()——而是直传 requireValidCategory，
+  //   后者自身已带 typeof 守卫（非字符串即抛 INVALID_CATEGORY_MESSAGE），故本调用点无「非字符串落到 .trim() 抛 TypeError」之险、
+  //   无需再补 typeof。若机械对齐为 `typeof body.category === 'string' && body.category.trim()`，会把纯空白 category（'   '）
+  //   从「requireValidCategory 立即抛」降级为「跳过校验、表『不变』」并流入 canonicalize(partial)；而 canonicalize 的 category
+  //   分支判据是严格 `next.category === ''`（非 trim 感知），空白串不命中剔除、会被原样下发后端——这是当前裸真值 + 立即抛
+  //   所正确拦截的泄漏。enum 语义下空白 category 本就不合法，提前抛优于静默下发。合法枚举值（dropdown 恒产）零行为变化。
   if (body.category) {
     requireValidCategory(body.category);
   }
@@ -871,7 +961,33 @@ export async function getImportantEnterpriseDetail(
   );
   // 返回类型承诺 assetManager 必填且含 id+name；缺任一即前置为明确错误，使运行期必填与类型声明一致、
   // 与 PRD 6.2.4「包含资产管理人基础信息（至少包括用户 ID、姓名）」对齐，避免 FE-004 读取 .name 时渲染空值。
-  if (!record.assetManager?.id || !record.assetManager?.name) {
+  // typeof 守卫（与同函数 requireRecord 对【响应】侧 record.id 的 typeof 守卫同口径，闭合上一提交硬化
+  //   requireRecord 后遗留的同函数内「assetManager.id/name 仍仅判 truthy」缺口）：签名声明
+  //   assetManager.id / assetManager.name 为必填 string，但后端 success=true 却回传运行期与声明类型不符的
+  //   data 时（join/序列化异常——与 requireRecord 同源威胁模型），真值非字符串（number 123 / boolean true /
+  //   对象 {}）此前会漏过 `!record.assetManager?.id` 的 truthy 判定、违反 AssetManagerInfo.id/name: string
+  //   契约，令 FE-004 详情读取 .name 在非字符串上行为未定义。补 typeof 子句使 assetManager 字段与
+  //   requireRecord 对 record.id 的「必为非空 string」保证收敛一致；合法后端（id 恒为 UUID、name 恒为非空
+  //   用户姓名字符串）零行为变化——既有的 assetManager 缺失 / id|name 为 null|undefined|'' 三类必拒分支仍由
+  //   `!amId.trim()` / `!amName.trim()` 兜住（amId/amName 为下方绑定的 am?.id/am?.name 快照）：判空按 trim
+  //   与同函数 requireRecord 的 `!record.id.trim()` 收敛同口径——纯空白 id/name（"   "）与 null|undefined|'' 同属
+  //   「残缺 data」一并拒（避免 FE-004 渲染纯空白姓名），typeof 子句仅额外拦真值非字符串
+  //   （与 requireRecord「仅额外拦真值非字符串」同口径）。
+  // 绑定 am/amId/amName 一次：原对 record.assetManager?. 连续求值四次，绑别名消除重复可选链属性访问；
+  //   另将 am?.id/am?.name 快照为 amId/amName 局部常量——本守卫为新增、尚未经 tsc（私有 npm 源不可达、
+  //   node_modules 缺失，TEST_AGENT 末次核实），`typeof am?.id === 'string'` 对【可选链】的窄化依赖 TS 版本
+  //   （4.x 早期不稳）；快照为局部常量后 `typeof amId !== 'string'` 的窄化在所有 TS 版本可靠、amId.trim() 必类型安全，
+  //   与已提交 requireRecord「null 检查后 record.id.trim()」同口径，兑现 AC-11 类型检查于新增代码亦成立。
+  //   行为恒等——am/amId/amName 即各字段快照，取值与 typeof 短路序完全一致（非字符串即抛、.trim() 永不落到非字符串上），合法后端零行为变化。
+  const am = record.assetManager;
+  const amId = am?.id;
+  const amName = am?.name;
+  if (
+    typeof amId !== 'string' ||
+    !amId.trim() ||
+    typeof amName !== 'string' ||
+    !amName.trim()
+  ) {
     throw new Error('企业详情数据异常：缺少资产管理人信息');
   }
   return record;

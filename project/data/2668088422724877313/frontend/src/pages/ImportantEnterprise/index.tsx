@@ -22,6 +22,7 @@ import {
 } from '@ead/suid-icons';
 import { constants } from '@/utils';
 import {
+  AUDIT_TIME_FIELDS,
   createImportantEnterprise,
   deleteImportantEnterprise,
   ENTERPRISE_CATEGORY_OPTIONS,
@@ -103,13 +104,13 @@ const ImportantEnterprise: React.FC = () => {
     },
     {
       title: '创建时间',
-      dataIndex: 'createdAt',
+      dataIndex: AUDIT_TIME_FIELDS.createdDate,
       width: 170,
       render: formatDateTime,
     },
     {
       title: '更新时间',
-      dataIndex: 'updatedAt',
+      dataIndex: AUDIT_TIME_FIELDS.lastEditedDate,
       width: 170,
       render: formatDateTime,
     },
