@@ -85,7 +85,8 @@ public class AgentExecutionService {
                             agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
                     prompt, agent.getMcpConfig());
             CliRunResult result = future.get(timeoutSeconds(request), TimeUnit.SECONDS);
-            if (result != null && Boolean.TRUE.equals(result.isProcessSucceeded())) {
+            log.info("cli run result {}", result);
+            if (result != null && result.isProcessSucceeded()) {
                 return new AgentExecutionResult(run.getId(), result.getOutput(), true, null);
             }
             String reason = result == null ? "Agent 执行无结果" : result.getFailureReason();

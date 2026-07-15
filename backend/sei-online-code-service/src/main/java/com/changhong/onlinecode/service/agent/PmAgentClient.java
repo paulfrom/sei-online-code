@@ -15,6 +15,7 @@ import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -38,6 +39,7 @@ import java.util.Set;
  */
 @Component
 @AllArgsConstructor
+@Slf4j
 public class PmAgentClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PmAgentClient.class);
@@ -66,10 +68,12 @@ public class PmAgentClient {
                                      List<RequirementComment> previousComments,
                                      ExecutionPlan previousPlan) {
         String prompt = buildPlanningPrompt(requirement, planType, context, previousComments, previousPlan);
+        log.info("pm agent prompt: {}", prompt);
         AgentExecutionResult execution = executeAgent(requirement.getProjectId(), requirement.getId(), loopId, prompt,
                 context == null ? null : context.getId(),
                 context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
 
+        log.info("pm execution result: {}", execution);
         if (execution.runId() == null || execution.output() == null) {
             settleFailedOrCancelled(execution.runId(), "pm-agent 调用失败、取消或无输出");
             return null;

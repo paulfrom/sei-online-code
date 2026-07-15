@@ -270,10 +270,10 @@ public class CompensationService {
     }
 
     private void recoverPlanning(Requirement requirement, Date now) {
-        if (hasActiveRun(requirement) || (requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
-                && !isStale(requirement.getLastEditedDate(), now))) {
-            return;
-        }
+//        if (hasActiveRun(requirement) || (requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
+//                && !isStale(requirement.getLastEditedDate(), now))) {
+//            return;
+//        }
         ExecutionPlan current = currentPlan(requirement);
         if (current != null && (current.getStatus() == ExecutionPlanStatus.READY
                 || current.getStatus() == ExecutionPlanStatus.DEVELOPING)) {
