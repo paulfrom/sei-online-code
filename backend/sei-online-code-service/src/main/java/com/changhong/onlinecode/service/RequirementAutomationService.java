@@ -103,6 +103,14 @@ public class RequirementAutomationService {
             TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
                     ExecutionPlanType.CHANGE_REQUEST,
                     "已完成需求收到人类评论，启动 CHANGE_REQUEST loop。"));
+        } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.FAILED) {
+            if (failureInfoSupport != null) {
+                failureInfoSupport.clearRequirementFailure(requirement);
+            }
+            String loopId = prepareLoop(requirement);
+            TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
+                    ExecutionPlanType.CHANGE_REQUEST,
+                    "失败需求收到人类评论，重置失败状态并启动 CHANGE_REQUEST loop。"));
         }
         return comment;
     }

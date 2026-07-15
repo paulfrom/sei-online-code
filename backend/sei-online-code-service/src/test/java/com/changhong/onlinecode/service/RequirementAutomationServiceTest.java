@@ -399,6 +399,43 @@ class RequirementAutomationServiceTest {
     }
 
     @Test
+    void humanComment_failedRequirementStartsNewLoopAndResetsFailure() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-failed-comment");
+        requirement.setActiveLoopId("loop-failed");
+        requirement.setAutomationStatus(RequirementAutomationStatus.FAILED);
+        requirement.setRetryCount(3);
+        requirement.setNextRetryAt(new java.util.Date(System.currentTimeMillis() + 60_000L));
+        when(requirementDao.findOne("req-failed-comment")).thenReturn(requirement);
+        doAnswer(inv -> {
+            Requirement failedRequirement = inv.getArgument(0);
+            failedRequirement.setRetryCount(0);
+            failedRequirement.setNextRetryAt(null);
+            return null;
+        }).when(failureInfoSupport).clearRequirementFailure(any(Requirement.class));
+
+        service.handleHumanComment("req-failed-comment", "修复失败原因后重新规划", null);
+
+        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+        assertTrue(!"loop-failed".equals(requirement.getActiveLoopId()));
+        assertEquals(0, requirement.getRetryCount());
+        assertNull(requirement.getNextRetryAt());
+        verify(failureInfoSupport).clearRequirementFailure(requirement);
+        verify(requirementDesignContextService).invalidate("req-failed-comment");
+        verify(requirementCommentService).append(eq("req-failed-comment"), eq("loop-failed"),
+                eq(RequirementCommentAuthorType.HUMAN), eq("human"),
+                eq(RequirementCommentType.HUMAN_FEEDBACK), eq("修复失败原因后重新规划"), eq(null));
+
+        ArgumentCaptor<RequirementAutomationLoopEvent> eventCaptor =
+                ArgumentCaptor.forClass(RequirementAutomationLoopEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        RequirementAutomationLoopEvent event = eventCaptor.getValue();
+        assertEquals("req-failed-comment", event.requirementId());
+        assertEquals(requirement.getActiveLoopId(), event.loopId());
+        assertEquals(ExecutionPlanType.CHANGE_REQUEST, event.planType());
+    }
+
+    @Test
     void onPlanTasksSettled_remediationWithinLimit_createsNewPlanAndTasks() {
         Requirement requirement = new Requirement();
         requirement.setId("req-1");

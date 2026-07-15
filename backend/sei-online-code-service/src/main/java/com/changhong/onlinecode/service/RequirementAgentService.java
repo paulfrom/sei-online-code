@@ -27,7 +27,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.Date;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -146,9 +145,7 @@ public class RequirementAgentService {
             return;
         }
 
-        String iterationId = requirementId + "-memory-review-" + UUID.randomUUID();
         AgentExecutionRequest request = buildRequest(requirement, buildMemoryReviewPrompt(content, context), context);
-        request.setIterationId(iterationId);
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(MEMORY_REVIEW_AGENT_NAME, request);
 
         future.thenApply(result -> resultOutput(result, this::parseMemoryReview))
