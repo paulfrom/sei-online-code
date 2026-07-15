@@ -74,6 +74,11 @@ public class PmAgentClient {
                 context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
 
         log.info("pm execution result: {}", execution);
+        if (!execution.succeeded()) {
+            settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
+                    execution.failureReason(), "pm-agent 调用失败"));
+            return null;
+        }
         if (execution.runId() == null || execution.output() == null) {
             settleFailedOrCancelled(execution.runId(), "pm-agent 调用失败、取消或无输出");
             return null;
@@ -107,6 +112,11 @@ public class PmAgentClient {
         AgentExecutionResult execution = executeAgent(requirement.getProjectId(), requirement.getId(),
                 plan.getLoopId(), prompt, plan.getMemoryContextId(), plan.getWorkspaceMemoryId(),
                 ACCEPT_TIMEOUT_SECONDS);
+        if (!execution.succeeded()) {
+            settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
+                    execution.failureReason(), "pm-agent 验收调用失败"));
+            return null;
+        }
         if (execution.runId() == null || execution.output() == null) {
             settleFailedOrCancelled(execution.runId(), "pm-agent 验收调用失败、取消或无输出");
             return null;
@@ -158,7 +168,7 @@ public class PmAgentClient {
         }
         current.setState(RunState.FAILED);
         current.setTerminalReason(RunTerminalReason.FAILED);
-        current.setFailureSummary("PM agent 调用失败");
+        current.setSummary(reason);
         current.setFailureReason(reason);
         current.setFinishedDate(new Date());
         runDao.save(current);
@@ -225,6 +235,10 @@ public class PmAgentClient {
         sb.append("planType: ").append(planType.name()).append("\n");
         sb.append("memoryContextId: ").append(context == null ? "n/a" : context.getId()).append("\n");
         sb.append("workspaceMemoryId: ").append(context == null ? "n/a" : context.getWorkspaceMemoryId()).append("\n");
+        sb.append("\nPlanning guidance:\n");
+        sb.append("- Include acceptance / validation as explicit tasks assigned to test-agent.\n");
+        sb.append("- Do not assume test-agent runs automatically after each coding task.\n");
+        sb.append("- Decide validation task scope, count, and dependencies from the requirement, implementation risk, and frontend/backend coupling.\n");
 
         sb.append("\nReturn **only** valid JSON with this exact structure:\n");
         sb.append("{\n");
@@ -234,8 +248,8 @@ public class PmAgentClient {
         sb.append("      \"taskKey\": \"FE-001\",\n");
         sb.append("      \"title\": \"string\",\n");
         sb.append("      \"description\": \"string\",\n");
-        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\",\n");
-        sb.append("      \"area\": \"frontend\" or \"backend\",\n");
+        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\" or \"test-agent\",\n");
+        sb.append("      \"area\": \"frontend\" or \"backend\" or \"full-stack\" or \"validation\",\n");
         sb.append("      \"dependsOn\": [],\n");
         sb.append("      \"fileScope\": [\"frontend/src/...\"],\n");
         sb.append("      \"acceptanceCriteria\": [\"string\"]\n");
@@ -244,7 +258,7 @@ public class PmAgentClient {
         sb.append("  \"risks\": [\"string\"],\n");
         sb.append("  \"validation\": {\n");
         sb.append("    \"mode\": \"test-agent\",\n");
-        sb.append("    \"guidance\": \"test-agent must inspect the workspace and choose the correct test/build/package validation\"\n");
+        sb.append("    \"guidance\": \"Validation is executed only by explicit test-agent tasks in tasks[].\"\n");
         sb.append("  }\n");
         sb.append("}\n");
         return sb.toString();
@@ -257,8 +271,8 @@ public class PmAgentClient {
                                          RequirementDesignContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append("You are pm-agent. Review the requirement, execution plan, development results, validation reports, and decide whether to accept or request remediation.\n\n");
-        sb.append("Treat the latest plan-level VALIDATION_RESULT (metadata scope=plan) as the primary acceptance evidence. "
-                + "Development self-reports are auxiliary and must not override failed plan validation.\n\n");
+        sb.append("Treat VALIDATION_RESULT comments from planned test-agent tasks as primary acceptance evidence. "
+                + "Development self-reports are auxiliary and must not override failed validation evidence.\n\n");
         sb.append("## PRD\n").append(Objects.toString(requirement.getPrdContent(), "")).append("\n\n");
         sb.append("## Execution Plan\n").append(Objects.toString(plan.getPlanJson(), "")).append("\n\n");
 
@@ -299,8 +313,8 @@ public class PmAgentClient {
         sb.append("      \"taskKey\": \"FE-001\",\n");
         sb.append("      \"title\": \"string\",\n");
         sb.append("      \"description\": \"string\",\n");
-        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\",\n");
-        sb.append("      \"area\": \"frontend\" or \"backend\",\n");
+        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\" or \"test-agent\",\n");
+        sb.append("      \"area\": \"frontend\" or \"backend\" or \"full-stack\" or \"validation\",\n");
         sb.append("      \"dependsOn\": [],\n");
         sb.append("      \"fileScope\": [\"frontend/src/...\"],\n");
         sb.append("      \"acceptanceCriteria\": [\"string\"]\n");
@@ -399,7 +413,10 @@ public class PmAgentClient {
             boolean validAssignment = ("frontend".equals(task.area())
                     && "frontend-dev-agent".equals(task.agent()))
                     || ("backend".equals(task.area())
-                    && "backend-dev-agent".equals(task.agent()));
+                    && "backend-dev-agent".equals(task.agent()))
+                    || ("test-agent".equals(task.agent())
+                    && ("frontend".equals(task.area()) || "backend".equals(task.area())
+                    || "full-stack".equals(task.area()) || "validation".equals(task.area())));
             if (!validAssignment || task.taskKey().isBlank() || task.title() == null
                     || task.title().isBlank() || byKey.putIfAbsent(task.taskKey(), task) != null) {
                 return false;
@@ -478,6 +495,15 @@ public class PmAgentClient {
             }
         }
         return commands;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

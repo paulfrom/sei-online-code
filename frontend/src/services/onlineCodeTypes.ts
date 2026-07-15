@@ -115,6 +115,8 @@ export interface RunDto {
   triggerSource: TriggerSource | string;
   state: RunState;
   userPrompt?: string | null;
+  summary?: string | null;
+  /** @deprecated use summary */
   failureSummary?: string | null;
   failureReason?: string | null;
   terminalReason?: RunTerminalReason | string | null;

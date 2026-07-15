@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -105,16 +106,17 @@ public class CodingTaskExecutionService {
         task.setStatus(CodingTaskStatus.RUNNING);
         codingTaskDao.save(task);
 
-        // 先解析工作区与基准 commit 再一次性 insert，避免二次 save 触发 preSave 的 existsById 校验失败。
-        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId());
         Agent agent = agentService.findByName(task.getAssignedAgent());
         Run run = new Run();
+        run.setId(UUID.randomUUID().toString());
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
         run.setTriggerSource(prompt == null ? TriggerSource.AUTO : TriggerSource.USER_ACTION);
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
+        // 先解析工作区与基准 commit 再一次性 insert，避免二次 save 触发 preSave 的 existsById 校验失败。
+        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId(), requirementWorkspaceKey(task));
         run.setWorktreePath(workspace.pathString());
         run.setBaseCommit(codingTaskChangeCollector.resolveHead(workspace.pathString()));
         if (agent != null) {
@@ -130,17 +132,16 @@ public class CodingTaskExecutionService {
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = agentExecutionService.executeAsync(task.getAssignedAgent(),
-                        buildRequest(run, task, fullPrompt, task.getAssignedAgent()))
-                .thenApply(AgentExecutionResult::output);
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(task.getAssignedAgent(),
+                buildRequest(run, task, fullPrompt, task.getAssignedAgent()));
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
             CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
-            finishRun(trackedRun, task, decision.success(), decision.failureReason(), false);
+            finishRun(trackedRun, task, decision.success(), decision.summary(), decision.failureReason(), false);
         }).exceptionally(e -> {
             log.error("coding-task execute failed taskId={}", id, e);
-            finishRun(trackedRun, task, false, rootMessage(e), false);
+            finishRun(trackedRun, task, false, rootMessage(e), rootMessage(e), false);
             return null;
         });
 
@@ -190,6 +191,7 @@ public class CodingTaskExecutionService {
         codingTaskDao.save(task);
 
         Run run = new Run();
+        run.setId(UUID.randomUUID().toString());
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
         run.setLoopId(task.getLoopId());
@@ -202,7 +204,7 @@ public class CodingTaskExecutionService {
         }
         // 先解析工作区与基准 commit 再一次性 insert，避免 insert 后立即二次 save 触发
         // sei-core preSave 的 existsById 校验（同事务内 persist 尚未 flush，DB 查不到 id）。
-        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId());
+        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId(), requirementWorkspaceKey(task));
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
@@ -217,17 +219,16 @@ public class CodingTaskExecutionService {
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = agentExecutionService.executeAsync(agentName,
-                        buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName))
-                .thenApply(AgentExecutionResult::output);
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName,
+                buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName));
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
             CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
-            finishRun(trackedRun, task, decision.success(), decision.failureReason(), true);
+            finishRun(trackedRun, task, decision.success(), decision.summary(), decision.failureReason(), true);
         }).exceptionally(e -> {
             log.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
-            finishRun(trackedRun, task, false, rootMessage(e), true);
+            finishRun(trackedRun, task, false, rootMessage(e), rootMessage(e), true);
             return null;
         });
 
@@ -237,24 +238,32 @@ public class CodingTaskExecutionService {
         return ResultData.success(dto);
     }
 
-    private CompletionDecision decideCompletion(Run run, String result,
+    private CompletionDecision decideCompletion(Run run, AgentExecutionResult result,
                                                 WorkspaceChangeDetector.Snapshot baseline) {
         if (result == null) {
-            return CompletionDecision.failed("执行返回空结果");
+            return CompletionDecision.failed("执行返回空结果", "执行返回空结果");
         }
-        if (result.contains("FAILED")) {
-            return CompletionDecision.failed("执行返回失败结果");
+        String summary = firstNonBlank(result.output(), result.failureReason());
+        if (!result.succeeded()) {
+            String failure = firstNonBlank(summary, "Agent 执行失败");
+            return CompletionDecision.failed(summary, failure);
+        }
+        if (result.output() == null) {
+            return CompletionDecision.failed(summary, "执行返回空结果");
+        }
+        if (result.output().contains("FAILED")) {
+            return CompletionDecision.failed(summary, summary);
         }
         List<String> changedFiles = workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath());
         if (changedFiles.isEmpty()) {
-            return CompletionDecision.failed("开发代理未在指定工作区产生代码或文档变更");
+            return CompletionDecision.failed(summary, "开发代理未在指定工作区产生代码或文档变更");
         }
         if (log.isDebugEnabled()) {
             log.debug("coding-task: detected workspace changes runId={}, files={}",
                     run.getId(), changedFiles);
-            return CompletionDecision.ok();
+            return CompletionDecision.ok(summary);
         }
-        return CompletionDecision.ok();
+        return CompletionDecision.ok(summary);
     }
 
     private AgentExecutionRequest buildRequest(Run run, CodingTask task, String prompt, String agentName) {
@@ -275,21 +284,37 @@ public class CodingTaskExecutionService {
         return request;
     }
 
-    private record CompletionDecision(boolean success, String failureReason) {
-        static CompletionDecision ok() {
-            return new CompletionDecision(true, null);
+    private String requirementWorkspaceKey(CodingTask task) {
+        if (task.getRequirementId() != null && !task.getRequirementId().isBlank()) {
+            return workspaceManager.requirementWorkspaceKey(task.getRequirementId());
+        }
+        return "coding-task-" + task.getId();
+    }
+
+    private record CompletionDecision(boolean success, String summary, String failureReason) {
+        static CompletionDecision ok(String summary) {
+            return new CompletionDecision(true, summary, null);
         }
 
-        static CompletionDecision failed(String failureReason) {
-            return new CompletionDecision(false, failureReason);
+        static CompletionDecision failed(String summary, String failureReason) {
+            return new CompletionDecision(false, summary, failureReason);
         }
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {
-        finishRun(run, task, success, failureReason, false);
+        finishRun(run, task, success, failureReason, failureReason, false);
+    }
+
+    private void finishRun(Run run, CodingTask task, boolean success, String summary, String failureReason) {
+        finishRun(run, task, success, summary, failureReason, false);
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason,
+                           boolean schedulerManaged) {
+        finishRun(run, task, success, failureReason, failureReason, schedulerManaged);
+    }
+
+    private void finishRun(Run run, CodingTask task, boolean success, String summary, String failureReason,
                            boolean schedulerManaged) {
         Date now = new Date();
         Run persistedRun = runDao.findOne(run.getId());
@@ -323,15 +348,15 @@ public class CodingTaskExecutionService {
         persistedRun.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
         persistedRun.setTerminalReason(success ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
         persistedRun.setFinishedDate(now);
+        persistedRun.setSummary(summary);
         if (success) {
-            persistedRun.setFailureSummary(null);
             persistedRun.setFailureReason(null);
             failureInfoSupport.clearCodingTaskFailure(persistedTask);
         } else {
-            persistedRun.setFailureSummary("编码执行失败");
             persistedRun.setFailureReason(failureReason);
-            failureInfoSupport.markCodingTaskFailure(persistedTask, "编码执行失败",
-                    failureReason, persistedRun.getTriggerSource(), now);
+            String propagatedFailure = firstNonBlank(failureReason, summary, "编码执行失败");
+            failureInfoSupport.markCodingTaskFailure(persistedTask, propagatedFailure,
+                    propagatedFailure, persistedRun.getTriggerSource(), now);
         }
         runDao.save(persistedRun);
 
@@ -459,5 +484,14 @@ public class CodingTaskExecutionService {
             current = current.getCause();
         }
         return current.getMessage();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

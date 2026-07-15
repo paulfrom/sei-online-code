@@ -139,6 +139,65 @@ class WorkspaceManagerTest {
     }
 
     @Test
+    void resolveRequirementWorkspace_createsManagedCopyAndSkipsRegenerableArtifacts(@TempDir Path tempDir)
+            throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+
+        Project project = new Project();
+        project.setId("project-iso");
+        when(projectDao.findOne("project-iso")).thenReturn(project);
+
+        Path projectWorkspace = tempDir.resolve("project-iso");
+        Files.createDirectories(projectWorkspace);
+        Files.writeString(projectWorkspace.resolve("package.json"), "{}");
+        Files.createDirectories(projectWorkspace.resolve("node_modules/pkg"));
+        Files.writeString(projectWorkspace.resolve("node_modules/pkg/index.js"), "cached");
+        Files.createDirectories(projectWorkspace.resolve(".next/cache"));
+        Files.writeString(projectWorkspace.resolve(".next/cache/file"), "cached");
+
+        Path isolated = workspaceManager.resolveRequirementWorkspace("project-iso", "req/1");
+
+        assertTrue(isolated.startsWith(projectWorkspace.resolve(".sei").resolve("workspaces").toAbsolutePath().normalize()));
+        assertTrue(Files.exists(isolated.resolve("package.json")));
+        assertFalse(Files.exists(isolated.resolve("node_modules")));
+        assertFalse(Files.exists(isolated.resolve(".next")));
+    }
+
+    @Test
+    void deleteRequirementWorkspace_removesOnlyRequirementWorkspace(@TempDir Path tempDir) throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+
+        Project project = new Project();
+        project.setId("project-clean");
+        when(projectDao.findOne("project-clean")).thenReturn(project);
+
+        Path projectWorkspace = tempDir.resolve("project-clean");
+        Files.createDirectories(projectWorkspace);
+        Files.writeString(projectWorkspace.resolve("README.md"), "root");
+        Path isolated = workspaceManager.resolveRequirementWorkspace("project-clean", "req-clean");
+        Files.writeString(isolated.resolve("generated.txt"), "done");
+
+        workspaceManager.deleteRequirementWorkspace("project-clean", "req-clean");
+
+        assertTrue(Files.exists(projectWorkspace.resolve("README.md")));
+        assertFalse(Files.exists(isolated));
+    }
+
+    @Test
     void resolve_templateMonoModeGeneratesWorkspace(@TempDir Path tempDir) throws Exception {
         Path templateDir = tempDir.resolve("mono-template");
         Files.createDirectories(templateDir.resolve("backend/src/main/java/aaa_packageNameDir_aaa"));

@@ -13,4 +13,8 @@ public record AgentExecutionResult(String runId, String output, boolean succeede
     public static AgentExecutionResult failed(String runId, String failureReason) {
         return new AgentExecutionResult(runId, null, false, failureReason);
     }
+
+    public static AgentExecutionResult failed(String runId, String output, String failureReason) {
+        return new AgentExecutionResult(runId, output, false, failureReason);
+    }
 }

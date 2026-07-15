@@ -82,6 +82,15 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     }
 
     @Override
+    public ResultData<RequirementDto> confirmCompletion(String id) {
+        OperateResultWithData<Requirement> result = service.confirmCompletion(id);
+        if (result.notSuccessful()) {
+            return ResultData.fail(result.getMessage());
+        }
+        return ResultData.success(service.convertToDto(result.getData()));
+    }
+
+    @Override
     public ResultData<RequirementCommentDto> addComment(String id, CreateRequirementCommentRequest request) {
         try {
             RequirementComment comment = requirementAutomationService.handleHumanComment(

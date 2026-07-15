@@ -58,6 +58,8 @@ public class WorkspaceManager {
             "jpeg", "jpg", "png", "gif", "svg", "ico", "bmp", "webp", "jar", "zip", "gz", "eot",
             "ttf", "woff", "woff2", "pdf", "mp4", "mov", "avi", "class", "so", "dll", "dylib"
     );
+    private static final Set<String> COPY_EXCLUDED_DIRS = Set.of(
+            "node_modules", ".next", ".turbo", ".vite", "dist", "build", "target", ".gradle");
 
     /**
      * 禁止作为工作区根的黑名单（参照 local_directory.go）：系统根 / 盘符根 / 常见系统目录。
@@ -138,6 +140,70 @@ public class WorkspaceManager {
                 OffsetDateTime.now().toString()
         ));
         return new WorkspaceResolveResult(dir, false, source);
+    }
+
+    /**
+     * 解析并准备项目下的隔离工作区。需求级工作区使用 key
+     * {@code requirement-<requirementId>}，由调用方决定 key 的业务粒度。
+     */
+    public Path resolveIsolatedWorkspace(String projectId, String workspaceKey) {
+        WorkspaceResolveResult resolved = resolve(projectId);
+        if (resolved == null || resolved.getPath() == null || resolved.getPath().isBlank()) {
+            throw new IllegalStateException("项目工作区解析失败: " + projectId);
+        }
+        Path projectWorkspace = Path.of(resolved.getPath()).toAbsolutePath().normalize();
+        if (!Files.isDirectory(projectWorkspace)) {
+            throw new IllegalStateException("项目工作区不存在或不是目录: " + projectWorkspace);
+        }
+        if (workspaceKey == null || workspaceKey.isBlank()) {
+            return projectWorkspace;
+        }
+        Path root = isolatedWorkspacesRoot(projectWorkspace);
+        Path target = root.resolve(safeSegment(workspaceKey)).toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalStateException("非法隔离工作区路径: " + target);
+        }
+        if (Files.isDirectory(target)) {
+            return target;
+        }
+        try {
+            Files.createDirectories(root);
+            copyWorkspace(projectWorkspace, target);
+            return target;
+        } catch (IOException e) {
+            throw new IllegalStateException("创建隔离工作区失败: " + target, e);
+        }
+    }
+
+    public Path resolveRequirementWorkspace(String projectId, String requirementId) {
+        return resolveIsolatedWorkspace(projectId, requirementWorkspaceKey(requirementId));
+    }
+
+    public void deleteRequirementWorkspace(String projectId, String requirementId) {
+        WorkspaceResolveResult resolved = resolve(projectId);
+        if (resolved == null || resolved.getPath() == null || resolved.getPath().isBlank()) {
+            return;
+        }
+        Path projectWorkspace = Path.of(resolved.getPath()).toAbsolutePath().normalize();
+        Path root = isolatedWorkspacesRoot(projectWorkspace);
+        Path target = root.resolve(safeSegment(requirementWorkspaceKey(requirementId))).toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalStateException("非法需求工作区路径: " + target);
+        }
+        deleteTree(target);
+    }
+
+    public boolean isManagedWorkspacePath(Path projectWorkspace, Path candidate) {
+        if (projectWorkspace == null || candidate == null) {
+            return false;
+        }
+        Path root = projectWorkspace.toAbsolutePath().normalize();
+        Path actual = candidate.toAbsolutePath().normalize();
+        return actual.equals(root) || actual.startsWith(isolatedWorkspacesRoot(root));
+    }
+
+    public String requirementWorkspaceKey(String requirementId) {
+        return "requirement-" + requirementId;
     }
 
     /**
@@ -563,6 +629,55 @@ public class WorkspaceManager {
             Files.createDirectories(parent);
         }
         Files.writeString(target, content == null ? "" : content, StandardCharsets.UTF_8);
+    }
+
+    private Path isolatedWorkspacesRoot(Path projectWorkspace) {
+        return projectWorkspace.toAbsolutePath().normalize().resolve(".sei").resolve("workspaces");
+    }
+
+    private String safeSegment(String value) {
+        String safe = value == null ? "" : value.trim().replaceAll("[^a-zA-Z0-9._-]", "-");
+        if (safe.isBlank()) {
+            throw new IllegalArgumentException("工作区 key 为空，无法创建隔离工作区");
+        }
+        return safe;
+    }
+
+    private void copyWorkspace(Path sourceRoot, Path targetRoot) throws IOException {
+        Path normalizedSource = sourceRoot.toAbsolutePath().normalize();
+        Path workspacesRoot = isolatedWorkspacesRoot(normalizedSource);
+        try (var stream = Files.walk(normalizedSource)) {
+            for (Path source : stream.filter(path -> shouldCopy(path, normalizedSource, workspacesRoot)).toList()) {
+                Path relative = normalizedSource.relativize(source);
+                Path target = targetRoot.resolve(relative).normalize();
+                if (Files.isDirectory(source)) {
+                    Files.createDirectories(target);
+                } else {
+                    Path parent = target.getParent();
+                    if (parent != null) {
+                        Files.createDirectories(parent);
+                    }
+                    Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                }
+            }
+        }
+    }
+
+    private boolean shouldCopy(Path path, Path sourceRoot, Path workspacesRoot) {
+        Path normalized = path.toAbsolutePath().normalize();
+        if (normalized.equals(sourceRoot)) {
+            return true;
+        }
+        if (normalized.startsWith(workspacesRoot)) {
+            return false;
+        }
+        Path relative = sourceRoot.relativize(normalized);
+        for (Path part : relative) {
+            if (COPY_EXCLUDED_DIRS.contains(part.toString())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void deleteTree(Path dir) {

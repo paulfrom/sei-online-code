@@ -41,6 +41,10 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     @Operation(summary = "确认 PRD", description = "确认后冻结 PRD 并启动 PM 自动化执行循环")
     ResultData<RequirementDto> confirmPrd(@PathVariable("id") String id);
 
+    @PostMapping(path = "{id}/confirmCompletion")
+    @Operation(summary = "确认需求完成", description = "用户确认需求完成后清理该需求工作区")
+    ResultData<RequirementDto> confirmCompletion(@PathVariable("id") String id);
+
     @PostMapping(path = "{id}/comments", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "追加 Requirement 评论", description = "人类评论会中断活跃自动化并触发 PM 重规划；已完成需求会启动 CHANGE_REQUEST loop")
     ResultData<RequirementCommentDto> addComment(@PathVariable("id") String id,

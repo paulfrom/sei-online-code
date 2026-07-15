@@ -163,9 +163,10 @@ class CodingTaskExecutionServiceTest {
                 eq("req-1"), eq("task2"), eq("run2"), eq("wm-1")))
                 .thenReturn(memoryJobSubmitted);
 
-        invokeFinishRun(callbackRun, callbackTask, true, null);
+        invokeFinishRun(callbackRun, callbackTask, true, "cli completed");
 
         assertEquals(RunState.SUCCEEDED, persistedRun.getState());
+        assertEquals("cli completed", persistedRun.getSummary());
         assertEquals(CodingTaskStatus.SUCCEEDED, persistedTask.getStatus());
         assertEquals(null, persistedTask.getFailureSummary());
         assertEquals(0, persistedTask.getRetryCount());
@@ -198,7 +199,11 @@ class CodingTaskExecutionServiceTest {
         invokeFinishRun(callbackRun, callbackTask, false, "build failed");
 
         assertEquals(RunState.FAILED, persistedRun.getState());
+        assertEquals("build failed", persistedRun.getSummary());
+        assertEquals("build failed", persistedRun.getFailureReason());
         assertEquals(CodingTaskStatus.FAILED, persistedTask.getStatus());
+        assertEquals("build failed", persistedTask.getFailureSummary());
+        assertEquals("build failed", persistedTask.getFailureDetail());
         verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -334,7 +339,7 @@ class CodingTaskExecutionServiceTest {
         });
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(executionPlanDao.findOne("plan-trace")).thenReturn(plan);
-        when(agentExecutionService.workspace("project-trace")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace(eq("project-trace"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.collect(any(), any())).thenReturn(
                 new com.changhong.onlinecode.service.memory.CodingTaskChangeResult());
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
@@ -378,23 +383,73 @@ class CodingTaskExecutionServiceTest {
             savedRun.set(run);
             return run;
         });
-        when(runDao.findOne("run-empty")).thenAnswer(invocation -> savedRun.get());
+        when(runDao.findOne(anyString())).thenAnswer(invocation -> savedRun.get());
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
-        when(agentExecutionService.workspace("project-empty")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace(eq("project-empty"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-1");
         CodingTaskChangeResult noChanges = new CodingTaskChangeResult();
         noChanges.setSuccess(true);
         noChanges.setChangedFiles(java.util.List.of());
         when(changeCollector.collect(tempDir.toString(), "base-1")).thenReturn(noChanges);
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult("run-empty", "任务已完成", true, null)));
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
+                        savedRun.get().getId(), "任务已完成", true, null)));
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
 
         assertTrue(result.successful());
         assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals("任务已完成", savedRun.get().getSummary());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
                 "task-empty", false, "开发代理未在指定工作区产生代码或文档变更"));
+    }
+
+    @Test
+    void executePlanTask_cliFailureStoresOutputAndPropagatesFailureReason() {
+        CodingTask task = new CodingTask();
+        task.setId("task-cli-fail");
+        task.setRequirementId("req-cli-fail");
+        task.setProjectId("project-cli-fail");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("claude");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-cli-fail")).thenAnswer(invocation -> task);
+        when(runDao.findByCodingTaskId("task-cli-fail")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-cli-fail");
+            }
+            savedRun.set(run);
+            return run;
+        });
+        when(runDao.findOne(anyString())).thenAnswer(invocation -> savedRun.get());
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-cli-fail"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-cli-fail");
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
+                        savedRun.get().getId(), "真实 CLI 失败输出", false, "claude exited with code 1")));
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task-cli-fail", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals("真实 CLI 失败输出", savedRun.get().getSummary());
+        assertEquals("真实 CLI 失败输出", task.getFailureSummary());
+        assertEquals("真实 CLI 失败输出", task.getFailureDetail());
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-cli-fail", false, "真实 CLI 失败输出"));
     }
 
     @Test
@@ -426,14 +481,14 @@ class CodingTaskExecutionServiceTest {
             savedRun.set(run);
             return run;
         });
-        when(runDao.findOne("run-file-change")).thenAnswer(invocation -> savedRun.get());
+        when(runDao.findOne(anyString())).thenAnswer(invocation -> savedRun.get());
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
-        when(agentExecutionService.workspace("project-file-change")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace(eq("project-file-change"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated.txt"), "hello");
-                    return CompletableFuture.completedFuture(new AgentExecutionResult("run-file-change", "DONE", true, null));
+                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(), "DONE", true, null));
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");

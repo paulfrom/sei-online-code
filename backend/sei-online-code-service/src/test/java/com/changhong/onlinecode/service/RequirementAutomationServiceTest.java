@@ -347,11 +347,9 @@ class RequirementAutomationServiceTest {
         task.setStatus(CodingTaskStatus.SUCCEEDED);
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
 
-        when(validationLoopService.validatePlan(original, plan))
-                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
-
         service.onPlanTasksSettled("req-1");
 
+        verify(validationLoopService, never()).validatePlan(any(), any());
         verify(pmAgentClient, never()).reviewAcceptance(any(), any(), any(), any(), any());
         verify(requirementDeliveryService, never()).deliver(any(), any());
     }

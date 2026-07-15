@@ -145,33 +145,33 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
-    void onDevelopmentRunFinished_success_entersValidatingThenSucceeds() {
+    void onDevelopmentRunFinished_success_succeedsWithoutImplicitValidation() {
         Requirement req = requirement("req-1", "loop-1");
         when(requirementDao.findOne("req-1")).thenReturn(req);
         CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
         task.setAssignedAgent("frontend-dev-agent");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
-        when(validationLoopService.validateTask(task))
-                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 
         assertEquals(CodingTaskStatus.SUCCEEDED, task.getStatus());
+        verify(validationLoopService, never()).validateTask(any());
     }
 
     @Test
-    void onDevelopmentRunFinished_validationFailure_marksValidationFailedAndReschedules() {
+    void schedule_validationTaskRunsTestAgentAndMarksFailure() {
         Requirement req = requirement("req-1", "loop-1");
         when(requirementDao.findOne("req-1")).thenReturn(req);
-        CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
-        task.setAssignedAgent("frontend-dev-agent");
-        when(codingTaskDao.findOne("task-a")).thenReturn(task);
+        CodingTask task = task("task-a", "VAL-001", "full-stack", List.of(), CodingTaskStatus.PENDING);
+        task.setAssignedAgent("test-agent");
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
         when(validationLoopService.validateTask(task))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(false, List.of()));
 
-        scheduler.onDevelopmentRunFinished("task-a", true, null);
+        scheduler.schedule("req-1");
 
         assertEquals(CodingTaskStatus.VALIDATION_FAILED, task.getStatus());
+        verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -190,7 +190,7 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
-    void developmentFinished_loopChangesDuringValidation_marksTaskStale() {
+    void schedule_validationTaskLoopChangesDuringValidation_marksTaskStale() {
         List<CodingTaskStatus> savedStatuses = new ArrayList<>();
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
             CodingTask saved = invocation.getArgument(0);
@@ -200,14 +200,14 @@ class CodingTaskSchedulerTest {
         Requirement original = requirement("req-1", "loop-1");
         Requirement current = requirement("req-1", "loop-2");
         when(requirementDao.findOne("req-1")).thenReturn(original, current, current);
-        CodingTask task = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.RUNNING);
+        CodingTask task = task("task-a", "VAL-001", "full-stack", List.of(), CodingTaskStatus.PENDING);
+        task.setAssignedAgent("test-agent");
         task.setExecutionPlanId("plan-1");
-        when(codingTaskDao.findOne("task-a")).thenReturn(task);
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
         when(validationLoopService.validateTask(task))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
 
-        scheduler.onDevelopmentRunFinished("task-a", true, null);
+        scheduler.schedule("req-1");
 
         assertEquals(CodingTaskStatus.STALE, task.getStatus());
         assertTrue(!savedStatuses.contains(CodingTaskStatus.SUCCEEDED));

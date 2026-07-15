@@ -173,14 +173,9 @@ public class RequirementAutomationService {
             return;
         }
 
-        requirement.setAutomationStatus(RequirementAutomationStatus.VALIDATING);
-        requirementDao.save(requirement);
-        if (validationLoopService != null) {
-            validationLoopService.validatePlan(requirement, plan);
-        }
         Requirement currentRequirement = requirementDao.findOne(requirementId);
         if (!isCurrentLoop(currentRequirement, plan.getLoopId())) {
-            LOGGER.info("plan validation result ignored because loop changed. requirementId={}, planLoopId={}",
+            LOGGER.info("plan settlement ignored because loop changed. requirementId={}, planLoopId={}",
                     requirementId, plan.getLoopId());
             return;
         }

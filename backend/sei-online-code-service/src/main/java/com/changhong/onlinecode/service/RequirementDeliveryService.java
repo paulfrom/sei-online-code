@@ -4,7 +4,6 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
@@ -141,11 +140,7 @@ public class RequirementDeliveryService {
                 || isBlank(config.getGitlabProjectId())) {
             throw new IllegalStateException("GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填");
         }
-        WorkspaceResolveResult resolved = workspaceManager.resolve(requirement.getProjectId());
-        if (resolved == null || isBlank(resolved.getPath())) {
-            throw new IllegalStateException("无法解析工作区");
-        }
-        Path workspace = Path.of(resolved.getPath());
+        Path workspace = workspaceManager.resolveRequirementWorkspace(requirement.getProjectId(), requirement.getId());
         String branch = branchName(requirement);
         String targetBranch = isBlank(config.getGitlabTargetBranch()) ? "main" : config.getGitlabTargetBranch();
 

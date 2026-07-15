@@ -159,7 +159,8 @@ public class CodexRunner implements CliRunner {
                 if (events.isFailed()) {
                     log.warn("codex app-server turn failed: iterationId={} reason={}", iterationId, events.failureReason());
                     emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
-                    return failedResult(events.failureReason(), usage);
+                    String output = stripFences(events.output());
+                    return failedResult(events.failureReason(), output.isBlank() ? null : output, usage);
                 }
                 String output = stripFences(events.output());
                 emit(iterationId, taskId, runId, "system", "DONE", "PREVIEW");
@@ -218,7 +219,12 @@ public class CodexRunner implements CliRunner {
     }
 
     private CliRunResult failedResult(String reason, AgentUsage usage) {
+        return failedResult(reason, null, usage);
+    }
+
+    private CliRunResult failedResult(String reason, String output, AgentUsage usage) {
         CliRunResult result = new CliRunResult();
+        result.setOutput(output);
         result.setUsage(usage);
         result.setProcessSucceeded(false);
         result.setFailureReason(reason);
