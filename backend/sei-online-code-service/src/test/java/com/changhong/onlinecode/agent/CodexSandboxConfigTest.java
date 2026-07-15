@@ -67,7 +67,8 @@ class CodexSandboxConfigTest {
         CodexSandboxConfig.write(codexHome, workspace, LoggerFactory.getLogger(CodexSandboxConfigTest.class));
 
         String config = Files.readString(codexHome.resolve("config.toml"));
-        assertTrue(config.contains("writable_roots = [\"" + workspace.toAbsolutePath().normalize() + "\"]"),
+        String escapedWorkspace = workspace.toAbsolutePath().normalize().toString().replace("\\", "\\\\");
+        assertTrue(config.contains("writable_roots = [\"" + escapedWorkspace + "\"]"),
                 "workspace-write 须显式授权项目工作区可写");
     }
 

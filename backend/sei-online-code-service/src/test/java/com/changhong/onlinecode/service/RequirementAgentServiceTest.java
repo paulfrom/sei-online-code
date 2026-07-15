@@ -71,8 +71,7 @@ class RequirementAgentServiceTest {
         service = new RequirementAgentService(requirementDao, agentService, skillService, projectService,
                 cliRunnerRegistry, skillMaterializer, builtInSkillRegistry, failureInfoSupport,
                 mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
-                requirementCommentService, agentRunRecorder, runDao,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                requirementCommentService, agentRunRecorder, runDao);
     }
 
     @Test

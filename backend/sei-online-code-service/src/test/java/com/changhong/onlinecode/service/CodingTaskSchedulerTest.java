@@ -38,6 +38,8 @@ class CodingTaskSchedulerTest {
     private CodingTaskExecutionService executionService;
     private RunDao runDao;
     private ApplicationEventPublisher eventPublisher;
+    private RequirementCommentService requirementCommentService;
+    private ValidationLoopService validationLoopService;
     private CodingTaskScheduler scheduler;
 
     private final AtomicInteger savedTasks = new AtomicInteger(0);
@@ -49,9 +51,11 @@ class CodingTaskSchedulerTest {
         executionService = mock(CodingTaskExecutionService.class);
         runDao = mock(RunDao.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
+        requirementCommentService = mock(RequirementCommentService.class);
+        validationLoopService = mock(ValidationLoopService.class);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
                 runDao, mock(CodingTaskChangeCollector.class),
-                eventPublisher);
+                eventPublisher, requirementCommentService, validationLoopService);
         when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
@@ -147,10 +151,8 @@ class CodingTaskSchedulerTest {
         CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
         task.setAssignedAgent("frontend-dev-agent");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
-        ValidationLoopService validation = mock(ValidationLoopService.class);
-        when(validation.validateTask(task))
+        when(validationLoopService.validateTask(task))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
-        scheduler.setValidationLoopService(validation);
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 
@@ -164,10 +166,8 @@ class CodingTaskSchedulerTest {
         CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.RUNNING);
         task.setAssignedAgent("frontend-dev-agent");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
-        ValidationLoopService validation = mock(ValidationLoopService.class);
-        when(validation.validateTask(task))
+        when(validationLoopService.validateTask(task))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(false, List.of()));
-        scheduler.setValidationLoopService(validation);
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 
@@ -204,10 +204,8 @@ class CodingTaskSchedulerTest {
         task.setExecutionPlanId("plan-1");
         when(codingTaskDao.findOne("task-a")).thenReturn(task);
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
-        ValidationLoopService validation = mock(ValidationLoopService.class);
-        when(validation.validateTask(task))
+        when(validationLoopService.validateTask(task))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
-        scheduler.setValidationLoopService(validation);
 
         scheduler.onDevelopmentRunFinished("task-a", true, null);
 

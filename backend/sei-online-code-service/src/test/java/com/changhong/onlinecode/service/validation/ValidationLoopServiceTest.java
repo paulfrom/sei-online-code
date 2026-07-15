@@ -12,7 +12,6 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.agent.AgentRunRecorder;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,7 +72,7 @@ class ValidationLoopServiceTest {
         when(runDao.findOne("run-1")).thenReturn(agentRun);
 
         ValidationLoopService service = new ValidationLoopService(runDao, planDao, comments, agents, runners,
-                agentRunRecorder, new ObjectMapper());
+                agentRunRecorder);
         CodingTask task = new CodingTask();
         task.setId("task-1");
         task.setRequirementId("requirement-1");

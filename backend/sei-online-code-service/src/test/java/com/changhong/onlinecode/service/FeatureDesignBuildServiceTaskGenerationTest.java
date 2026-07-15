@@ -1,12 +1,9 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
@@ -62,7 +59,6 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         RunService runService = mock(RunService.class);
         RunNumberService runNumberService = mock(RunNumberService.class);
         CliRunnerRegistry cliRunnerRegistry = mock(CliRunnerRegistry.class);
-        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         FailureInfoSupport failureInfoSupport = mock(FailureInfoSupport.class);
         FeatureDesignBuildService service = new FeatureDesignBuildService(
                 featureDesignDao,
@@ -71,7 +67,6 @@ class FeatureDesignBuildServiceTaskGenerationTest {
                 runService,
                 runNumberService,
                 cliRunnerRegistry,
-                workspaceManager,
                 failureInfoSupport
         );
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));

@@ -20,7 +20,6 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -61,6 +60,9 @@ class RequirementAutomationServiceTest {
     private RunDao runDao;
     private RequirementDeliveryService requirementDeliveryService;
     private PmAgentClient pmAgentClient;
+    private CliRunnerRegistry cliRunnerRegistry;
+    private ValidationLoopService validationLoopService;
+    private FailureInfoSupport failureInfoSupport;
     private RequirementAutomationService service;
     private List<ExecutionPlanStatus> capturedPlanStatuses;
 
@@ -75,12 +77,15 @@ class RequirementAutomationServiceTest {
         runDao = mock(RunDao.class);
         requirementDeliveryService = mock(RequirementDeliveryService.class);
         pmAgentClient = mock(PmAgentClient.class);
+        cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        validationLoopService = mock(ValidationLoopService.class);
+        failureInfoSupport = mock(FailureInfoSupport.class);
         capturedPlanStatuses = new ArrayList<>();
 
-        service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher);
-        service.setOptionalDependencies(executionPlanDao, requirementCommentService,
-                requirementDesignContextService, runDao, requirementDeliveryService,
-                pmAgentClient, new ObjectMapper());
+        service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher,
+                executionPlanDao, requirementCommentService, requirementDesignContextService,
+                runDao, requirementDeliveryService, pmAgentClient, cliRunnerRegistry,
+                validationLoopService, failureInfoSupport);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -342,10 +347,8 @@ class RequirementAutomationServiceTest {
         task.setStatus(CodingTaskStatus.SUCCEEDED);
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
 
-        ValidationLoopService validation = mock(ValidationLoopService.class);
-        when(validation.validatePlan(original, plan))
+        when(validationLoopService.validatePlan(original, plan))
                 .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
-        service.setValidationLoopService(validation);
 
         service.onPlanTasksSettled("req-1");
 
@@ -369,16 +372,13 @@ class RequirementAutomationServiceTest {
         run.setId("run-stop");
         run.setState(RunState.RUNNING);
         when(runDao.findByRequirementIdAndState("req-stop", RunState.RUNNING)).thenReturn(List.of(run));
-        CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
-        service.setCliRunnerRegistry(registry);
-
         Requirement stopped = service.stopAutomation("req-stop");
 
         assertEquals(RequirementAutomationStatus.INTERRUPTED, stopped.getAutomationStatus());
         assertTrue(!"loop-old".equals(stopped.getActiveLoopId()));
         assertEquals(ExecutionPlanStatus.INTERRUPTED, plan.getStatus());
         assertTrue(Boolean.TRUE.equals(run.getCancelRequested()));
-        verify(registry).cancel("run-stop");
+        verify(cliRunnerRegistry).cancel("run-stop");
         verify(requirementCommentService).append(eq("req-stop"), eq(stopped.getActiveLoopId()),
                 eq(RequirementCommentAuthorType.SYSTEM), eq("system"),
                 eq(RequirementCommentType.INTERRUPTION), any(), any());

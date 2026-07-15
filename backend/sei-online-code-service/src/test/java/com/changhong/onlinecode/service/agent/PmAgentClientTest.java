@@ -1,20 +1,14 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.agent.CliRunner;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
-import com.changhong.onlinecode.service.RunNumberService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -42,9 +36,7 @@ class PmAgentClientTest {
     void generatePlan_passesPersistedRunIdToRunnerAndRejectsCancelledResult() {
         AgentService agentService = mock(AgentService.class);
         CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
-        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         RunDao runDao = mock(RunDao.class);
-        RunNumberService runNumberService = mock(RunNumberService.class);
         com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
                 mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
         when(agentWorkspace.path()).thenReturn(workspace);
@@ -56,7 +48,6 @@ class PmAgentClientTest {
         agent.setCliTool("codex");
         when(agentService.findByName("pm-agent")).thenReturn(agent);
         when(registry.workspace("project-1")).thenReturn(agentWorkspace);
-        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
             if (run.getId() == null) run.setId("run-1");
@@ -82,9 +73,7 @@ class PmAgentClientTest {
             return CompletableFuture.completedFuture(result);
         });
 
-        PmAgentClient client = new PmAgentClient(agentService, registry, workspaceManager, runDao,
-                runNumberService, agentRunRecorder,
-                new ObjectMapper());
+        PmAgentClient client = new PmAgentClient(agentService, registry, runDao, agentRunRecorder);
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
         requirement.setProjectId("project-1");
@@ -100,8 +89,7 @@ class PmAgentClientTest {
     @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(WorkspaceManager.class), mock(RunDao.class), mock(RunNumberService.class),
-                mock(AgentRunRecorder.class), new ObjectMapper());
+                mock(RunDao.class), mock(AgentRunRecorder.class));
 
         assertNull(parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"T1","title":"t","agent":"frontend-dev-agent",
@@ -126,8 +114,7 @@ class PmAgentClientTest {
     @Test
     void parsePlan_preservesAcceptanceCriteriaForValidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(WorkspaceManager.class), mock(RunDao.class), mock(RunNumberService.class),
-                mock(AgentRunRecorder.class), new ObjectMapper());
+                mock(RunDao.class), mock(AgentRunRecorder.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
                 "area":"backend","dependsOn":[],"fileScope":["backend/"],

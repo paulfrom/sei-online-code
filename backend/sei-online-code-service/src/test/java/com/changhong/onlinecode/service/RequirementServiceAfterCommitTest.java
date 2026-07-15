@@ -31,7 +31,7 @@ class RequirementServiceAfterCommitTest {
         RequirementAgentService agent = mock(RequirementAgentService.class);
         RequirementService service = new RequirementService(dao, agent,
                 mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
-                mock(RequirementCommentService.class));
+                mock(RequirementCommentService.class), mock(RequirementAutomationService.class));
 
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -55,7 +55,7 @@ class RequirementServiceAfterCommitTest {
         RequirementAgentService agent = mock(RequirementAgentService.class);
         RequirementService service = new RequirementService(dao, agent,
                 mock(RequirementDesignContextDao.class), mock(RequirementDesignContextService.class),
-                mock(RequirementCommentService.class));
+                mock(RequirementCommentService.class), mock(RequirementAutomationService.class));
 
         // 无活动事务时 TransactionUtil.afterCommit 立即执行（非事务上下文调用方的安全回退）
         service.triggerPrdSpawnAfterCommit("req2", null, "token-2");

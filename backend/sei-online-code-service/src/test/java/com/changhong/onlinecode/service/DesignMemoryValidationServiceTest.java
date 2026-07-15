@@ -170,7 +170,8 @@ class DesignMemoryValidationServiceTest {
         RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
         RequirementCommentService commentService = mock(RequirementCommentService.class);
         RequirementService requirementService = spy(new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), commentService));
+                contextDao, mock(RequirementDesignContextService.class), commentService,
+                mock(RequirementAutomationService.class)));
 
         Requirement requirement = reviewRequirementWithHistoricalFailure();
         RequirementDesignContext context = new RequirementDesignContext();
@@ -209,7 +210,8 @@ class DesignMemoryValidationServiceTest {
         RequirementDesignContextDao contextDao = mock(RequirementDesignContextDao.class);
         RequirementCommentService commentService = mock(RequirementCommentService.class);
         RequirementService requirementService = new RequirementService(dao, mock(RequirementAgentService.class),
-                contextDao, mock(RequirementDesignContextService.class), commentService);
+                contextDao, mock(RequirementDesignContextService.class), commentService,
+                mock(RequirementAutomationService.class));
 
         Requirement requirement = reviewRequirementWithHistoricalFailure();
         RequirementDesignContext context = new RequirementDesignContext();

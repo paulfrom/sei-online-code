@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -40,11 +41,11 @@ final class CodexAppServerClient {
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
         pending.put(id, future);
 
-        ObjectNode msg = OBJECT_MAPPER.createObjectNode();
+        ObjectNode msg = JsonUtils.mapper().createObjectNode();
         msg.put("jsonrpc", "2.0");
         msg.put("id", id);
         msg.put("method", method);
-        msg.set("params", OBJECT_MAPPER.valueToTree(params == null ? Map.of() : params));
+        msg.set("params", JsonUtils.mapper().valueToTree(params == null ? Map.of() : params));
         try {
             write(msg);
         } catch (IOException e) {
@@ -56,17 +57,17 @@ final class CodexAppServerClient {
     }
 
     void notify(String method) throws IOException {
-        ObjectNode msg = OBJECT_MAPPER.createObjectNode();
+        ObjectNode msg = JsonUtils.mapper().createObjectNode();
         msg.put("jsonrpc", "2.0");
         msg.put("method", method);
-        msg.set("params", OBJECT_MAPPER.createObjectNode());
+        msg.set("params", JsonUtils.mapper().createObjectNode());
         write(msg);
     }
 
     void handleLine(String line) {
         JsonNode raw;
         try {
-            raw = OBJECT_MAPPER.readTree(line);
+            raw = JsonUtils.mapper().readTree(line);
         } catch (Exception e) {
             logLine.accept("invalid codex app-server JSON: " + line);
             return;
@@ -154,18 +155,18 @@ final class CodexAppServerClient {
     }
 
     private void respond(int id, Object result) throws IOException {
-        ObjectNode msg = OBJECT_MAPPER.createObjectNode();
+        ObjectNode msg = JsonUtils.mapper().createObjectNode();
         msg.put("jsonrpc", "2.0");
         msg.put("id", id);
-        msg.set("result", OBJECT_MAPPER.valueToTree(result));
+        msg.set("result", JsonUtils.mapper().valueToTree(result));
         write(msg);
     }
 
     private void respondError(int id, int code, String message) throws IOException {
-        ObjectNode err = OBJECT_MAPPER.createObjectNode();
+        ObjectNode err = JsonUtils.mapper().createObjectNode();
         err.put("code", code);
         err.put("message", message);
-        ObjectNode msg = OBJECT_MAPPER.createObjectNode();
+        ObjectNode msg = JsonUtils.mapper().createObjectNode();
         msg.put("jsonrpc", "2.0");
         msg.put("id", id);
         msg.set("error", err);
@@ -173,7 +174,7 @@ final class CodexAppServerClient {
     }
 
     private synchronized void write(JsonNode msg) throws IOException {
-        stdin.write(OBJECT_MAPPER.writeValueAsBytes(msg));
+        stdin.write(JsonUtils.mapper().writeValueAsBytes(msg));
         stdin.write('\n');
         stdin.flush();
     }
