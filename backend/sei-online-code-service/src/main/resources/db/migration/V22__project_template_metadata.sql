@@ -1,4 +1,0 @@
-ALTER TABLE oc_project
-    ADD COLUMN IF NOT EXISTS project_code VARCHAR(200),
-    ADD COLUMN IF NOT EXISTS project_version VARCHAR(100),
-    ADD COLUMN IF NOT EXISTS package_name VARCHAR(255);
