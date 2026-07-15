@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Run;
@@ -129,6 +130,7 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         if (active != null) {
             active.setCancelRequested(Boolean.TRUE);
             active.setState(RunState.CANCELLED);
+            active.setTerminalReason(RunTerminalReason.CANCELLED);
             active.setFinishedDate(new Date());
             runDao.save(active);
             executionService.cancelRun(active.getId());

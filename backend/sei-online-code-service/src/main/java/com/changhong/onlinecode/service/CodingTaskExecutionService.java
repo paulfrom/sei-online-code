@@ -1,10 +1,6 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
@@ -15,6 +11,7 @@ import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -27,6 +24,9 @@ import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import lombok.AllArgsConstructor;
@@ -62,7 +62,7 @@ public class CodingTaskExecutionService {
     private final RequirementCommentService requirementCommentService;
     private final WorkspaceManager workspaceManager;
     private final AgentService agentService;
-    private final CliRunnerRegistry cliRunnerRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignContextPromptAssembler designContextPromptAssembler;
@@ -82,7 +82,7 @@ public class CodingTaskExecutionService {
         }
         run.setCancelRequested(Boolean.TRUE);
         runDao.save(run);
-        cliRunnerRegistry.cancel(runId);
+        agentExecutionService.cancel(runId);
     }
 
     /**
@@ -106,7 +106,7 @@ public class CodingTaskExecutionService {
         codingTaskDao.save(task);
 
         // 先解析工作区与基准 commit 再一次性 insert，避免二次 save 触发 preSave 的 existsById 校验失败。
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
+        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId());
         Agent agent = agentService.findByName(task.getAssignedAgent());
         Run run = new Run();
         run.setCodingTaskId(id);
@@ -128,23 +128,11 @@ public class CodingTaskExecutionService {
 
         String fullPrompt = buildExecutionPrompt(task, prompt);
 
-        if (agent != null) {
-            AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(),
-                    agent.getModel(),
-                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    null);
-        }
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(run.getId(), task.getRequirementId(), task.getId(),
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                fullPrompt, agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
+        CompletableFuture<String> future = agentExecutionService.executeAsync(task.getAssignedAgent(),
+                        buildRequest(run, task, fullPrompt, task.getAssignedAgent()))
+                .thenApply(AgentExecutionResult::output);
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
@@ -214,7 +202,7 @@ public class CodingTaskExecutionService {
         }
         // 先解析工作区与基准 commit 再一次性 insert，避免 insert 后立即二次 save 触发
         // sei-core preSave 的 existsById 校验（同事务内 persist 尚未 flush，DB 查不到 id）。
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(task.getProjectId());
+        AgentWorkspace workspace = agentExecutionService.workspace(task.getProjectId());
         run.setUserPrompt(prompt);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new Date());
@@ -227,18 +215,11 @@ public class CodingTaskExecutionService {
         runNumberService.assign(run);
         runDao.save(run);
 
-        AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(),
-                agent.getName(), agent.getInstructions(),
-                agent.getModel(),
-                agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                null);
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(run.getId(), task.getRequirementId(), task.getId(),
-                        agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
-                buildExecutionPrompt(task, prompt), agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
+        CompletableFuture<String> future = agentExecutionService.executeAsync(agentName,
+                        buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName))
+                .thenApply(AgentExecutionResult::output);
 
         final Run trackedRun = run;
         future.thenAccept(result -> {
@@ -276,6 +257,24 @@ public class CodingTaskExecutionService {
         return CompletionDecision.ok();
     }
 
+    private AgentExecutionRequest buildRequest(Run run, CodingTask task, String prompt, String agentName) {
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setRunId(run.getId());
+        request.setProjectId(task.getProjectId());
+        request.setRequirementId(task.getRequirementId());
+        request.setIterationId(task.getRequirementId());
+        request.setLoopId(task.getLoopId());
+        request.setCodingTaskId(task.getId());
+        request.setPrompt(prompt);
+        request.setTriggerSource(run.getTriggerSource());
+        request.setMemoryContextId(run.getMemoryContextId());
+        request.setWorkspaceMemoryId(run.getWorkspaceMemoryId());
+        if (agentName == null || agentName.isBlank()) {
+            request.setTimeoutSeconds(1_800L);
+        }
+        return request;
+    }
+
     private record CompletionDecision(boolean success, String failureReason) {
         static CompletionDecision ok() {
             return new CompletionDecision(true, null);
@@ -302,6 +301,7 @@ public class CodingTaskExecutionService {
         }
         if (Boolean.TRUE.equals(persistedRun.getCancelRequested())) {
             persistedRun.setState(RunState.CANCELLED);
+            persistedRun.setTerminalReason(RunTerminalReason.CANCELLED);
             persistedRun.setFinishedDate(now);
             runDao.save(persistedRun);
             persistedTask.setStatus(CodingTaskStatus.CANCELLED);
@@ -321,6 +321,7 @@ public class CodingTaskExecutionService {
         }
 
         persistedRun.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
+        persistedRun.setTerminalReason(success ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
         persistedRun.setFinishedDate(now);
         if (success) {
             persistedRun.setFailureSummary(null);

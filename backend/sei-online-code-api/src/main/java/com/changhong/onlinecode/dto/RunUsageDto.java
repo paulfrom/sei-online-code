@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.UsageStatus;
+import com.changhong.onlinecode.dto.enums.RunType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -17,6 +18,18 @@ public class RunUsageDto {
 
     @Schema(description = "Run id")
     private String runId;
+
+    @Schema(description = "Run 记录类型")
+    private RunType runType;
+
+    @Schema(description = "父 Run id")
+    private String parentRunId;
+
+    @Schema(description = "被本 Run 补偿的 Run id")
+    private String compensatesRunId;
+
+    @Schema(description = "尝试序号")
+    private Integer attemptNo;
 
     @Schema(description = "调用时的 Agent id 快照")
     private String agentId;

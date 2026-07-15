@@ -73,6 +73,10 @@ public class RunService extends BaseEntityService<Run> {
     private RunUsageDto toUsageDto(Run run) {
         RunUsageDto dto = new RunUsageDto();
         dto.setRunId(run.getId());
+        dto.setRunType(run.getRunType());
+        dto.setParentRunId(run.getParentRunId());
+        dto.setCompensatesRunId(run.getCompensatesRunId());
+        dto.setAttemptNo(run.getAttemptNo());
         dto.setAgentId(run.getAgentId());
         dto.setAgentName(run.getAgentName());
         dto.setCliTool(run.getCliTool());

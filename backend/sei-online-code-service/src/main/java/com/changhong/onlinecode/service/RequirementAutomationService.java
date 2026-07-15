@@ -1,6 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
@@ -20,6 +19,7 @@ import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.sei.core.util.JsonUtils;
 import com.changhong.sei.core.utils.TransactionUtil;
@@ -60,7 +60,7 @@ public class RequirementAutomationService {
     private final RunDao runDao;
     private final RequirementDeliveryService requirementDeliveryService;
     private final PmAgentClient pmAgentClient;
-    private final CliRunnerRegistry cliRunnerRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final ValidationLoopService validationLoopService;
     private final FailureInfoSupport failureInfoSupport;
 
@@ -375,8 +375,8 @@ public class RequirementAutomationService {
             run.setCancelRequested(Boolean.TRUE);
             run.setInvalidatedByCommentId(invalidatedByCommentId);
             runDao.save(run);
-            if (cliRunnerRegistry != null) {
-                cliRunnerRegistry.cancel(run.getId());
+            if (agentExecutionService != null) {
+                agentExecutionService.cancel(run.getId());
             }
         }
     }

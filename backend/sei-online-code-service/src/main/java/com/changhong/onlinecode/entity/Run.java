@@ -1,7 +1,9 @@
 package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.UsageStatus;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
@@ -52,6 +54,19 @@ public class Run extends BaseAuditableEntity {
     private Integer runNo;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "run_type", nullable = false, length = 20)
+    private RunType runType = RunType.AGENT;
+
+    @Column(name = "parent_run_id", length = 36)
+    private String parentRunId;
+
+    @Column(name = "compensates_run_id", length = 36)
+    private String compensatesRunId;
+
+    @Column(name = "attempt_no")
+    private Integer attemptNo = 1;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "trigger_source", length = 32)
     private TriggerSource triggerSource;
 
@@ -78,6 +93,10 @@ public class Run extends BaseAuditableEntity {
 
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "terminal_reason", length = 32)
+    private RunTerminalReason terminalReason;
 
     @Column(name = "iteration_id", length = 36)
     private String iterationId;

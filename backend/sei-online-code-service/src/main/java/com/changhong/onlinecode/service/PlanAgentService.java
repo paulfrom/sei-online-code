@@ -1,12 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.RunDao;
@@ -15,34 +8,32 @@ import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.plan.PlanContent;
 import com.changhong.onlinecode.dto.plan.PlanFeature;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.entity.Skill;
-import com.changhong.onlinecode.entity.SkillFile;
-import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
-import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.function.Function;
 
 /**
- * 规划/设计智能体 spawn 编排（T13）。复用 {@link ClaudeRunner} + {@link SkillMaterializer}。
+ * 规划/设计智能体 spawn 编排（T13）。Agent 执行统一委托 {@link AgentExecutionService}。
  *
  * <p>D11 链式落库：{@code ClaudeRunner.execute} 返 {@link CompletableFuture}，{@code .thenApply} 解析 JSON
  * → {@code .thenAccept} 持久化 DRAFT+content，{@code .exceptionally} 落 FAILED。无独立 onRunFinished 钩子。</p>
@@ -62,14 +53,9 @@ public class PlanAgentService {
 
     private final PlanDao planDao;
     private final FeatureDesignDao featureDesignDao;
-    private final AgentService agentService;
-    private final SkillService skillService;
     private final ProjectLifecycleService projectLifecycleService;
-    private final CliRunnerRegistry cliRunnerRegistry;
-    private final SkillMaterializer skillMaterializer;
-    private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
-    private final AgentRunRecorder agentRunRecorder;
     private final RunDao runDao;
 
     private final Semaphore fdPermits = new Semaphore(MAX_CONCURRENT_FD);
@@ -94,48 +80,28 @@ public class PlanAgentService {
             return;
         }
         plan.setLastTriggerSource(triggerSource);
-        Agent agent = agentService.findByName("planning-agent");
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildPlanningPrompt(project, modifyHint);
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
-        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId; // 规划阶段用 projectId 作日志键
-        if (agent != null) {
-            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(),
-                    agent.getModel(),
-                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    log);
-        }
-        Run run = agentRunRecorder.createAgentRun(buildProjectRunCommand(
-                projectId, iterationId, prompt, agent, triggerSource));
-        final String runId = run.getId();
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(runId, iterationId, null,
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                prompt, agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
-        future.thenApply(json -> parseJson(json, PlanContent.class))
-                .thenAccept(content -> {
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("planning-agent",
+                buildProjectRequest(projectId, iterationId, prompt, triggerSource));
+        future.thenApply(result -> resultOutput(result, json -> parseJson(json, PlanContent.class)))
+                .thenAccept(output -> {
                     Plan latest = planDao.findLatestByProjectId(projectId);
                     if (latest == null || !matchesGenerationToken(latest, generationToken)) {
                         log.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期结果", projectId);
-                        settleRun(runId, RunState.FAILED, "已被新一轮生成接管");
+                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管");
                         return;
                     }
-                    latest.setContent(content);
+                    latest.setContent(output.content());
                     latest.setStatus(PlanStatus.DRAFT);
                     failureInfoSupport.clearPlanFailure(latest);
                     planDao.save(latest);
-                    settleRun(runId, RunState.SUCCEEDED, null);
+                    settleRun(output.runId(), RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
                     log.error("spawnPlanning failed projectId={}", projectId, e);
-                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     Plan latest = planDao.findLatestByProjectId(projectId);
                     if (latest == null || !matchesGenerationToken(latest, generationToken)) {
                         log.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期失败", projectId);
@@ -208,49 +174,29 @@ public class PlanAgentService {
         fd.setLastTriggerSource(triggerSource);
         featureDesignDao.save(fd);
 
-        Agent agent = agentService.findByName("feature-design-agent");
         Plan plan = planDao.findLatestByProjectId(projectId);
         String prompt = buildFeatureDesignPrompt(plan, featureId, modifyHint);
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
-        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId + ":" + featureId;
-        if (agent != null) {
-            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(),
-                    agent.getModel(),
-                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    log);
-        }
-        Run run = agentRunRecorder.createAgentRun(buildProjectRunCommand(
-                projectId, iterationId, prompt, agent, triggerSource));
-        final String runId = run.getId();
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(runId, iterationId, null,
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                prompt, agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("feature-design-agent",
+                buildProjectRequest(projectId, iterationId, prompt, triggerSource));
         final FeatureDesign target = fd;
-        future.thenApply(json -> {
+        future.thenApply(result -> resultOutput(result, json -> {
                     // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
                     if (json == null || json.isBlank()) {
                         return cannedFeatureDesign(featureId);
                     }
                     return parseJson(json, FeatureDesignContent.class);
-                })
-                .thenAccept(content -> {
-                    target.setContent(content);
+                }))
+                .thenAccept(output -> {
+                    target.setContent(output.content());
                     target.setStatus(FeatureDesignStatus.DRAFT);
                     failureInfoSupport.clearFeatureDesignFailure(target);
                     featureDesignDao.save(target);
-                    settleRun(runId, RunState.SUCCEEDED, null);
+                    settleRun(output.runId(), RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
                     log.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
-                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     target.setStatus(FeatureDesignStatus.FAILED);
                     failureInfoSupport.markFeatureDesignFailure(target,
                             FailureCode.AGENT_JSON_PARSE_FAILED,
@@ -323,22 +269,32 @@ public class PlanAgentService {
         return current.getMessage();
     }
 
-    /**
-     * 构造项目级 AgentRunCreateCommand，写入 Agent 快照。
-     */
-    private AgentRunCreateCommand buildProjectRunCommand(String projectId, String iterationId, String prompt,
-                                                         Agent agent, TriggerSource triggerSource) {
-        AgentRunCreateCommand command = new AgentRunCreateCommand();
-        command.setIterationId(iterationId);
-        command.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
-        command.setUserPrompt(prompt);
-        if (agent != null) {
-            command.setAgentId(agent.getId());
-            command.setAgentName(agent.getName());
-            command.setCliTool(agent.getCliTool());
-            command.setModel(agent.getModel());
+    private AgentExecutionRequest buildProjectRequest(String projectId, String iterationId, String prompt,
+                                                      TriggerSource triggerSource) {
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setProjectId(projectId);
+        request.setIterationId(iterationId);
+        request.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
+        request.setPrompt(prompt);
+        return request;
+    }
+
+    private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
+        String runId = result == null ? null : result.runId();
+        if (result == null || !result.succeeded()) {
+            String reason = result == null ? "Agent 执行无结果" : result.failureReason();
+            settleRun(runId, RunState.FAILED, reason);
+            throw new IllegalStateException(reason);
         }
-        return command;
+        try {
+            return new AgentOutput<>(runId, mapper.apply(result.output()));
+        } catch (RuntimeException e) {
+            settleRun(runId, RunState.FAILED, e.getMessage());
+            throw e;
+        }
+    }
+
+    private record AgentOutput<T>(String runId, T content) {
     }
 
     /**
@@ -351,6 +307,7 @@ public class PlanAgentService {
                 return;
             }
             current.setState(state);
+            current.setTerminalReason(terminalReason(state, reason));
             current.setFinishedDate(new java.util.Date());
             if (state == RunState.FAILED) {
                 current.setFailureReason(reason);
@@ -361,39 +318,17 @@ public class PlanAgentService {
         }
     }
 
-    private Path materializeSkills(Agent agent, Path workdir) {
-        try {
-            List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
-            if (agent != null && agent.getSkillIds() != null) {
-                for (String sid : agent.getSkillIds()) {
-                    // builtin:<name> synthetic id → classpath registry；其余 → DB（SkillService.findOne populate files）
-                    if (sid.startsWith(BuiltInSkillRegistry.PREFIX)) {
-                        builtInSkillRegistry.resolve(sid).ifPresent(payloads::add);
-                        continue;
-                    }
-                    Skill s = skillService.findOne(sid);
-                    if (s != null) {
-                        payloads.add(new SkillMaterializer.SkillPayload(
-                                s.getName(), s.getContent(), s.getComputedHash(), toFileRefs(s)));
-                    }
-                }
-            }
-            skillMaterializer.materialize(workdir.toString(), payloads);
-            return workdir;
-        } catch (Exception e) {
-            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
+    private RunTerminalReason terminalReason(RunState state, String reason) {
+        if (state == RunState.SUCCEEDED) {
+            return RunTerminalReason.SUCCEEDED;
         }
-    }
-
-    /** Skill 辅助文件 → materializer SkillFileRef（files 经 SkillService.findOne populate）。 */
-    private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
-        List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
-        if (skill.getFiles() != null) {
-            for (SkillFile f : skill.getFiles()) {
-                refs.add(new SkillMaterializer.SkillFileRef(f.getPath(), f.getContent()));
-            }
+        if (state == RunState.CANCELLED) {
+            return RunTerminalReason.CANCELLED;
         }
-        return refs;
+        if (reason != null && reason.contains("新一轮生成接管")) {
+            return RunTerminalReason.SUPERSEDED;
+        }
+        return RunTerminalReason.FAILED;
     }
 
     private String buildPlanningPrompt(Project project, String modifyHint) {

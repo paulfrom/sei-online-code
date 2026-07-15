@@ -1,11 +1,6 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
@@ -22,6 +17,9 @@ import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.onlinecode.exception.ConflictException;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -46,7 +44,7 @@ public class FeatureDesignBuildService {
     private final TaskService taskService;
     private final RunService runService;
     private final RunNumberService runNumberService;
-    private final CliRunnerRegistry cliRunnerRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
 
     /**
@@ -117,7 +115,7 @@ public class FeatureDesignBuildService {
         Task savedTask = taskResult.getData();
 
         // 6. 创建 Run
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(fd.getProjectId());
+        AgentWorkspace workspace = agentExecutionService.workspace(fd.getProjectId());
         Run run = new Run();
         run.setTaskId(savedTask.getId());
         run.setIterationId(savedTask.getIterationId());
@@ -140,16 +138,15 @@ public class FeatureDesignBuildService {
 
         // 7. 异步执行编码（D11：链式回调）——按 dev-agent.cliTool 选 runner
         String prompt = buildPrompt(fd);
-        AgentBriefWriter.writeBrief(workspace.pathString(), devAgent.getCliTool(),
-                devAgent.getName(), devAgent.getInstructions(),
-                devAgent.getModel(),
-                devAgent.getMcpConfig() != null && !devAgent.getMcpConfig().isBlank(),
-                null);
-        CompletableFuture<String> executeFuture = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(savedRun.getId(), savedTask.getIterationId(), savedTask.getId(),
-                        devAgent.getId(), devAgent.getName(), devAgent.getCliTool(), devAgent.getModel()),
-                prompt, devAgent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setRunId(savedRun.getId());
+        request.setProjectId(fd.getProjectId());
+        request.setIterationId(savedTask.getIterationId());
+        request.setTaskId(savedTask.getId());
+        request.setPrompt(prompt);
+        request.setTriggerSource(triggerSource);
+        CompletableFuture<String> executeFuture = agentExecutionService.executeAsync(devAgent.getName(), request)
+                .thenApply(AgentExecutionResult::output);
         executeFuture.thenAccept(result -> {
             // 解析结果，判断成功或失败
             boolean success = parseSuccess(result);

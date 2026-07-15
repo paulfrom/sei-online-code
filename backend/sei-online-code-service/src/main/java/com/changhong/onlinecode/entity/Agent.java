@@ -51,6 +51,18 @@ public class Agent extends BaseAuditableEntity {
     @Column(name = "instructions", columnDefinition = "TEXT")
     private String instructions;
 
+    @Column(name = "prompt_template", columnDefinition = "TEXT")
+    private String promptTemplate;
+
+    @Column(name = "execution_policy", columnDefinition = "TEXT")
+    private String executionPolicy;
+
+    @Column(name = "scope_policy", columnDefinition = "TEXT")
+    private String scopePolicy;
+
+    @Column(name = "output_schema", columnDefinition = "TEXT")
+    private String outputSchema;
+
     @Column(name = "model", length = 100)
     private String model;
 

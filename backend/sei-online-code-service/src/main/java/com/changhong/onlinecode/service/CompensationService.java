@@ -17,6 +17,7 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
@@ -129,6 +130,7 @@ public class CompensationService {
                 continue;
             }
             run.setState(RunState.FAILED);
+            run.setTerminalReason(RunTerminalReason.TIMEOUT);
             run.setFinishedDate(now);
             run.setFailureSummary("运行超时");
             run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes + " 分钟未结束");

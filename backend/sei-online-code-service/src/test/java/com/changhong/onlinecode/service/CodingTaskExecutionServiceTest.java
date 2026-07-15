@@ -1,7 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RunDao;
@@ -21,6 +19,8 @@ import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
@@ -59,7 +59,7 @@ class CodingTaskExecutionServiceTest {
     private ApplicationEventPublisher eventPublisher;
     private ExecutionPlanDao executionPlanDao;
     private WorkspaceManager workspaceManager;
-    private CliRunnerRegistry cliRunnerRegistry;
+    private AgentExecutionService agentExecutionService;
     private RunNumberService runNumberService;
     private CodingTaskChangeCollector changeCollector;
     private WorkspaceChangeDetector workspaceChangeDetector;
@@ -78,7 +78,7 @@ class CodingTaskExecutionServiceTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
         executionPlanDao = mock(ExecutionPlanDao.class);
         workspaceManager = mock(WorkspaceManager.class);
-        cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        agentExecutionService = mock(AgentExecutionService.class);
         runNumberService = mock(RunNumberService.class);
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         changeCollector = mock(CodingTaskChangeCollector.class);
@@ -93,7 +93,7 @@ class CodingTaskExecutionServiceTest {
                 mock(RequirementCommentService.class),
                 workspaceManager,
                 agentService,
-                cliRunnerRegistry,
+                agentExecutionService,
                 failureInfoSupport,
                 mock(RequirementDesignContextService.class),
                 mock(DesignContextPromptAssembler.class),
@@ -334,10 +334,10 @@ class CodingTaskExecutionServiceTest {
         });
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(executionPlanDao.findOne("plan-trace")).thenReturn(plan);
-        when(cliRunnerRegistry.workspace("project-trace")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace("project-trace")).thenReturn(agentWorkspace);
         when(changeCollector.collect(any(), any())).thenReturn(
                 new com.changhong.onlinecode.service.memory.CodingTaskChangeResult());
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenReturn(new CompletableFuture<>());
 
         service.executePlanTask("task-trace", "backend-dev-agent", "prompt");
@@ -380,16 +380,14 @@ class CodingTaskExecutionServiceTest {
         });
         when(runDao.findOne("run-empty")).thenAnswer(invocation -> savedRun.get());
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
-        when(cliRunnerRegistry.workspace("project-empty")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace("project-empty")).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-1");
         CodingTaskChangeResult noChanges = new CodingTaskChangeResult();
         noChanges.setSuccess(true);
         noChanges.setChangedFiles(java.util.List.of());
         when(changeCollector.collect(tempDir.toString(), "base-1")).thenReturn(noChanges);
-        CliRunResult completedResult = new CliRunResult();
-        completedResult.setOutput("任务已完成");
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(completedResult));
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult("run-empty", "任务已完成", true, null)));
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
 
@@ -430,14 +428,12 @@ class CodingTaskExecutionServiceTest {
         });
         when(runDao.findOne("run-file-change")).thenAnswer(invocation -> savedRun.get());
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
-        when(cliRunnerRegistry.workspace("project-file-change")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace("project-file-change")).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated.txt"), "hello");
-                    CliRunResult doneResult = new CliRunResult();
-                    doneResult.setOutput("DONE");
-                    return CompletableFuture.completedFuture(doneResult);
+                    return CompletableFuture.completedFuture(new AgentExecutionResult("run-file-change", "DONE", true, null));
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");

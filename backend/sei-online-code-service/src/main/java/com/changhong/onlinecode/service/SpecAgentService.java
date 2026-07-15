@@ -1,46 +1,38 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.SpecDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.spec.SpecApiContract;
 import com.changhong.onlinecode.dto.spec.SpecContent;
 import com.changhong.onlinecode.dto.spec.SpecEntity;
 import com.changhong.onlinecode.dto.spec.SpecPage;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.entity.Skill;
-import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.entity.Spec;
-import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
-import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
- * 需求智能体 spawn 编排。复用工作区绑定 runner + {@link SkillMaterializer}，
+ * 需求智能体 spawn 编排。Agent 执行统一委托 {@link AgentExecutionService}，
  * 镜像 {@link PlanAgentService} 的链式落库（GENERATING → SPEC_REVIEW / FAILED）。
  *
  * <p>D11 链式落库：{@code CliRunner.execute} 返 {@link CompletableFuture}，{@code .thenApply} 解析 JSON
@@ -58,14 +50,9 @@ import java.util.concurrent.CompletableFuture;
 public class SpecAgentService {
 
     private final SpecDao specDao;
-    private final AgentService agentService;
-    private final SkillService skillService;
     private final ProjectLifecycleService projectLifecycleService;
-    private final CliRunnerRegistry cliRunnerRegistry;
-    private final SkillMaterializer skillMaterializer;
-    private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
-    private final AgentRunRecorder agentRunRecorder;
     private final RunDao runDao;
 
     /**
@@ -86,54 +73,34 @@ public class SpecAgentService {
             return;
         }
         spec.setLastTriggerSource(triggerSource);
-        Agent agent = agentService.findByName("requirement-agent");
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildSpecPrompt(project, spec, modifyHint);
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
-        Path workdir = materializeSkills(agent, workspace.path());
 
         String iterationId = projectId; // 需求阶段用 projectId 作日志键
-        if (agent != null) {
-            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(),
-                    agent.getModel(),
-                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    log);
-        }
-        Run run = agentRunRecorder.createAgentRun(buildSpecRunCommand(
-                projectId, iterationId, prompt, agent, triggerSource));
-        final String runId = run.getId();
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(runId, iterationId, null,
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                prompt, agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
-        future.thenApply(json -> {
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("requirement-agent",
+                buildSpecRequest(projectId, iterationId, prompt, triggerSource));
+        future.thenApply(result -> resultOutput(result, json -> {
                     // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
                     if (json == null || json.isBlank()) {
                         return cannedSpec();
                     }
                     return parseJson(json, SpecContent.class);
-                })
-                .thenAccept(content -> {
-                    spec.setPages(content.getPages());
-                    spec.setComponents(content.getComponents());
-                    spec.setEntities(content.getEntities());
-                    spec.setApiContract(content.getApiContract());
+                }))
+                .thenAccept(output -> {
+                    spec.setPages(output.content().getPages());
+                    spec.setComponents(output.content().getComponents());
+                    spec.setEntities(output.content().getEntities());
+                    spec.setApiContract(output.content().getApiContract());
                     spec.setState(SpecState.SPEC_REVIEW);
                     failureInfoSupport.clearSpecFailure(spec);
                     specDao.save(spec);
-                    settleRun(runId, RunState.SUCCEEDED, null);
+                    settleRun(output.runId(), RunState.SUCCEEDED, null);
                     // refineSpec 路径项目停在 SPEC_REFINING，此处推进到 SPEC_REVIEW；
                     // regenerate 路径项目已在 SPEC_REVIEW，自环合法（见 SpecService 注释）。
                     projectLifecycleService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
                 })
                 .exceptionally(e -> {
                     log.error("spawnRequirement failed projectId={} specId={}", projectId, specId, e);
-                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     spec.setState(SpecState.FAILED);
                     failureInfoSupport.markSpecFailure(spec,
                             FailureCode.AGENT_JSON_PARSE_FAILED,
@@ -298,22 +265,32 @@ public class SpecAgentService {
         return current.getMessage();
     }
 
-    /**
-     * 构造 Spec 级 AgentRunCreateCommand，写入 Agent 快照。
-     */
-    private AgentRunCreateCommand buildSpecRunCommand(String projectId, String iterationId, String prompt,
-                                                      Agent agent, TriggerSource triggerSource) {
-        AgentRunCreateCommand command = new AgentRunCreateCommand();
-        command.setIterationId(iterationId);
-        command.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
-        command.setUserPrompt(prompt);
-        if (agent != null) {
-            command.setAgentId(agent.getId());
-            command.setAgentName(agent.getName());
-            command.setCliTool(agent.getCliTool());
-            command.setModel(agent.getModel());
+    private AgentExecutionRequest buildSpecRequest(String projectId, String iterationId, String prompt,
+                                                   TriggerSource triggerSource) {
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setProjectId(projectId);
+        request.setIterationId(iterationId);
+        request.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
+        request.setPrompt(prompt);
+        return request;
+    }
+
+    private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
+        String runId = result == null ? null : result.runId();
+        if (result == null || !result.succeeded()) {
+            String reason = result == null ? "Agent 执行无结果" : result.failureReason();
+            settleRun(runId, RunState.FAILED, reason);
+            throw new IllegalStateException(reason);
         }
-        return command;
+        try {
+            return new AgentOutput<>(runId, mapper.apply(result.output()));
+        } catch (RuntimeException e) {
+            settleRun(runId, RunState.FAILED, e.getMessage());
+            throw e;
+        }
+    }
+
+    private record AgentOutput<T>(String runId, T content) {
     }
 
     /**
@@ -326,6 +303,8 @@ public class SpecAgentService {
                 return;
             }
             current.setState(state);
+            current.setTerminalReason(state == RunState.SUCCEEDED
+                    ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
             current.setFinishedDate(new java.util.Date());
             if (state == RunState.FAILED) {
                 current.setFailureReason(reason);
@@ -334,41 +313,6 @@ public class SpecAgentService {
         } catch (Exception e) {
             log.warn("spec-agent: 更新 Run 终态失败 runId={}", runId, e);
         }
-    }
-
-    private Path materializeSkills(Agent agent, Path workdir) {
-        try {
-            List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
-            if (agent != null && agent.getSkillIds() != null) {
-                for (String sid : agent.getSkillIds()) {
-                    // builtin:<name> synthetic id → classpath registry；其余 → DB（SkillService.findOne populate files）
-                    if (sid.startsWith(BuiltInSkillRegistry.PREFIX)) {
-                        builtInSkillRegistry.resolve(sid).ifPresent(payloads::add);
-                        continue;
-                    }
-                    Skill s = skillService.findOne(sid);
-                    if (s != null) {
-                        payloads.add(new SkillMaterializer.SkillPayload(
-                                s.getName(), s.getContent(), s.getComputedHash(), toFileRefs(s)));
-                    }
-                }
-            }
-            skillMaterializer.materialize(workdir.toString(), payloads);
-            return workdir;
-        } catch (Exception e) {
-            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
-        }
-    }
-
-    /** Skill 辅助文件 → materializer SkillFileRef（与 PlanAgentService 一致）。 */
-    private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
-        List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
-        if (skill.getFiles() != null) {
-            for (SkillFile f : skill.getFiles()) {
-                refs.add(new SkillMaterializer.SkillFileRef(f.getPath(), f.getContent()));
-            }
-        }
-        return refs;
     }
 
     private String buildSpecPrompt(Project project, Spec spec, String modifyHint) {

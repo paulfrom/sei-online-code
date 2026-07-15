@@ -1,7 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
@@ -11,6 +9,8 @@ import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.onlinecode.exception.ConflictException;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.junit.jupiter.api.BeforeAll;
@@ -59,7 +59,7 @@ class FeatureDesignBuildServiceTest {
     @Mock
     private RunNumberService runNumberService;
     @Mock
-    private CliRunnerRegistry cliRunnerRegistry;
+    private AgentExecutionService agentExecutionService;
     @Mock
     private FailureInfoSupport failureInfoSupport;
 
@@ -73,7 +73,7 @@ class FeatureDesignBuildServiceTest {
                 taskService,
                 runService,
                 runNumberService,
-                cliRunnerRegistry,
+                agentExecutionService,
                 failureInfoSupport
         );
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -226,12 +226,10 @@ class FeatureDesignBuildServiceTest {
         when(featureDesignDao.tryAcquireBuildLock(eq(fdId), eq(FeatureDesignBuildStatus.BUILDING))).thenReturn(1);
         when(agentService.findByName("dev-agent")).thenReturn(devAgent);
         when(taskService.save(any(Task.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedTask));
-        when(cliRunnerRegistry.workspace(projId)).thenReturn(workspace);
+        when(agentExecutionService.workspace(projId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
-        CliRunResult successResult = new CliRunResult();
-        successResult.setOutput("success");
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(successResult));
+        when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(runId, "success", true, null)));
 
         // 执行
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);

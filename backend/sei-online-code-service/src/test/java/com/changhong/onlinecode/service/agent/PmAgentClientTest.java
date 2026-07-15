@@ -1,79 +1,51 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.service.AgentService;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Path;
 import java.lang.reflect.Method;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PmAgentClientTest {
 
-    @TempDir
-    Path workspace;
-
     @Test
     void generatePlan_passesPersistedRunIdToRunnerAndRejectsCancelledResult() {
-        AgentService agentService = mock(AgentService.class);
-        CliRunnerRegistry registry = mock(CliRunnerRegistry.class);
         RunDao runDao = mock(RunDao.class);
-        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
-                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
-        when(agentWorkspace.path()).thenReturn(workspace);
-        when(agentWorkspace.pathString()).thenReturn(workspace.toString());
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
         AtomicReference<Run> savedRun = new AtomicReference<>();
-
-        Agent agent = new Agent();
-        agent.setName("pm-agent");
-        agent.setCliTool("codex");
-        when(agentService.findByName("pm-agent")).thenReturn(agent);
-        when(registry.workspace("project-1")).thenReturn(agentWorkspace);
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
-            if (run.getId() == null) run.setId("run-1");
             savedRun.set(run);
             return run;
         });
+        Run run = new Run();
+        run.setId("run-1");
+        run.setState(RunState.RUNNING);
+        savedRun.set(run);
         when(runDao.findOne("run-1")).thenAnswer(invocation -> savedRun.get());
-        AgentRunRecorder agentRunRecorder = mock(AgentRunRecorder.class);
-        when(agentRunRecorder.createAgentRun(any())).thenAnswer(invocation -> {
-            Run run = new Run();
-            run.setId("run-1");
-            savedRun.set(run);
-            return run;
-        });
-        when(registry.executeDetailed(eq(agentWorkspace), any(), any(), any())).thenAnswer(invocation -> {
+        when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenAnswer(invocation -> {
             savedRun.get().setCancelRequested(Boolean.TRUE);
-            CliRunResult result = new CliRunResult();
-            result.setOutput("""
+            return new AgentExecutionResult("run-1", """
                     {"goal":"g","tasks":[{"taskKey":"BE-1","title":"t","description":"d",
                     "agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"]}],
                     "risks":[],"validation":{"commands":[]}}
-                    """);
-            return CompletableFuture.completedFuture(result);
+                    """, true, null);
         });
 
-        PmAgentClient client = new PmAgentClient(agentService, registry, runDao, agentRunRecorder);
+        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
         requirement.setProjectId("project-1");
@@ -83,13 +55,11 @@ class PmAgentClientTest {
 
         assertNull(result);
         assertEquals(RunState.CANCELLED, savedRun.get().getState());
-        verify(registry).executeDetailed(eq(agentWorkspace), any(), any(), any());
     }
 
     @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(RunDao.class), mock(AgentRunRecorder.class));
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
 
         assertNull(parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"T1","title":"t","agent":"frontend-dev-agent",
@@ -113,8 +83,7 @@ class PmAgentClientTest {
 
     @Test
     void parsePlan_preservesAcceptanceCriteriaForValidDag() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(AgentService.class), mock(CliRunnerRegistry.class),
-                mock(RunDao.class), mock(AgentRunRecorder.class));
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
                 "area":"backend","dependsOn":[],"fileScope":["backend/"],

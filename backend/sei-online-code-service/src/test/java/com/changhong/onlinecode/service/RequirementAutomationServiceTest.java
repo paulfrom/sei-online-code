@@ -17,7 +17,7 @@ import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,7 +60,7 @@ class RequirementAutomationServiceTest {
     private RunDao runDao;
     private RequirementDeliveryService requirementDeliveryService;
     private PmAgentClient pmAgentClient;
-    private CliRunnerRegistry cliRunnerRegistry;
+    private AgentExecutionService agentExecutionService;
     private ValidationLoopService validationLoopService;
     private FailureInfoSupport failureInfoSupport;
     private RequirementAutomationService service;
@@ -77,14 +77,14 @@ class RequirementAutomationServiceTest {
         runDao = mock(RunDao.class);
         requirementDeliveryService = mock(RequirementDeliveryService.class);
         pmAgentClient = mock(PmAgentClient.class);
-        cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        agentExecutionService = mock(AgentExecutionService.class);
         validationLoopService = mock(ValidationLoopService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         capturedPlanStatuses = new ArrayList<>();
 
         service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher,
                 executionPlanDao, requirementCommentService, requirementDesignContextService,
-                runDao, requirementDeliveryService, pmAgentClient, cliRunnerRegistry,
+                runDao, requirementDeliveryService, pmAgentClient, agentExecutionService,
                 validationLoopService, failureInfoSupport);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -378,7 +378,7 @@ class RequirementAutomationServiceTest {
         assertTrue(!"loop-old".equals(stopped.getActiveLoopId()));
         assertEquals(ExecutionPlanStatus.INTERRUPTED, plan.getStatus());
         assertTrue(Boolean.TRUE.equals(run.getCancelRequested()));
-        verify(cliRunnerRegistry).cancel("run-stop");
+        verify(agentExecutionService).cancel("run-stop");
         verify(requirementCommentService).append(eq("req-stop"), eq(stopped.getActiveLoopId()),
                 eq(RequirementCommentAuthorType.SYSTEM), eq("system"),
                 eq(RequirementCommentType.INTERRUPTION), any(), any());

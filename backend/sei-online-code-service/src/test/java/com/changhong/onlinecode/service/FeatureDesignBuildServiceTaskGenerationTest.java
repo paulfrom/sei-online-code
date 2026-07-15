@@ -1,7 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
@@ -11,6 +9,9 @@ import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Task;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,7 +59,7 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         TaskService taskService = mock(TaskService.class);
         RunService runService = mock(RunService.class);
         RunNumberService runNumberService = mock(RunNumberService.class);
-        CliRunnerRegistry cliRunnerRegistry = mock(CliRunnerRegistry.class);
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
         FailureInfoSupport failureInfoSupport = mock(FailureInfoSupport.class);
         FeatureDesignBuildService service = new FeatureDesignBuildService(
                 featureDesignDao,
@@ -66,7 +67,7 @@ class FeatureDesignBuildServiceTaskGenerationTest {
                 taskService,
                 runService,
                 runNumberService,
-                cliRunnerRegistry,
+                agentExecutionService,
                 failureInfoSupport
         );
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -109,12 +110,10 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         when(featureDesignDao.tryAcquireBuildLock(eq("fd1"), eq(FeatureDesignBuildStatus.BUILDING))).thenReturn(1);
         when(agentService.findByName("dev-agent")).thenReturn(devAgent);
         when(taskService.save(any(Task.class))).thenReturn(savedTaskResult);
-        when(cliRunnerRegistry.workspace("project1")).thenReturn(agentWorkspace);
+        when(agentExecutionService.workspace("project1")).thenReturn(agentWorkspace);
         when(runService.save(any(Run.class))).thenReturn(savedRunResult);
-        CliRunResult successResult = new CliRunResult();
-        successResult.setOutput("success");
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(successResult));
+        when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult("run1", "success", true, null)));
 
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build("fd1");
 
@@ -132,9 +131,9 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         assertTrue(generatedTask.getDescription().contains("实现库存列表查询与筛选"));
         assertTrue(generatedTask.getDescription().contains("支持按名称筛选"));
 
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(cliRunnerRegistry).executeDetailed(eq(agentWorkspace), any(), promptCaptor.capture(), any());
-        assertTrue(promptCaptor.getValue().contains("实现库存列表查询与筛选"));
-        assertTrue(promptCaptor.getValue().contains("src/pages/inventory/index.tsx"));
+        ArgumentCaptor<AgentExecutionRequest> requestCaptor = ArgumentCaptor.forClass(AgentExecutionRequest.class);
+        verify(agentExecutionService).executeAsync(eq("dev-agent"), requestCaptor.capture());
+        assertTrue(requestCaptor.getValue().getPrompt().contains("实现库存列表查询与筛选"));
+        assertTrue(requestCaptor.getValue().getPrompt().contains("src/pages/inventory/index.tsx"));
     }
 }

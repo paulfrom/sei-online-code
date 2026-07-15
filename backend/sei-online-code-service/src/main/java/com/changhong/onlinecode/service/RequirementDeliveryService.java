@@ -11,6 +11,8 @@ import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
@@ -67,6 +69,7 @@ public class RequirementDeliveryService {
         }
 
         Run run = new Run();
+        run.setRunType(RunType.SYSTEM);
         run.setRequirementId(requirementId);
         run.setLoopId(requirement.getActiveLoopId());
         run.setTriggerSource(TriggerSource.AUTO);
@@ -78,6 +81,7 @@ public class RequirementDeliveryService {
         try {
             DeliveryResult result = doDeliver(requirement, plan);
             run.setState(RunState.SUCCEEDED);
+            run.setTerminalReason(RunTerminalReason.SUCCEEDED);
             run.setFinishedDate(new java.util.Date());
             runDao.save(run);
             requirement.setDeliveryBranch(result.branch());
@@ -99,6 +103,7 @@ public class RequirementDeliveryService {
         } catch (Exception e) {
             log.warn("requirement delivery failed requirementId={}", requirementId, e);
             run.setState(RunState.FAILED);
+            run.setTerminalReason(RunTerminalReason.FAILED);
             run.setFailureSummary("GitLab MR 交付失败");
             run.setFailureReason(e.getMessage());
             run.setFinishedDate(new java.util.Date());

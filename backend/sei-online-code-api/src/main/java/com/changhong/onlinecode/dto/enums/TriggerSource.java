@@ -6,6 +6,8 @@ package com.changhong.onlinecode.dto.enums;
 public enum TriggerSource {
     USER_ACTION,
     AUTO,
+    RETRY,
+    REMEDIATION,
     SCHEDULED_COMPENSATION,
     CHAIN_COMPENSATION
 }

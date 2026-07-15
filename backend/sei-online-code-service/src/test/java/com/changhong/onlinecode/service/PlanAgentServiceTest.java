@@ -1,21 +1,16 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunner;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -43,15 +38,9 @@ class PlanAgentServiceTest {
 
     private PlanDao planDao;
     private FeatureDesignDao featureDesignDao;
-    private AgentService agentService;
-    private SkillService skillService;
     private ProjectLifecycleService projectLifecycleService;
-    private CliRunnerRegistry cliRunnerRegistry;
-    private CliRunner runner;
-    private SkillMaterializer skillMaterializer;
-    private BuiltInSkillRegistry builtInSkillRegistry;
+    private AgentExecutionService agentExecutionService;
     private FailureInfoSupport failureInfoSupport;
-    private AgentRunRecorder agentRunRecorder;
     private RunDao runDao;
     private PlanAgentService service;
 
@@ -59,27 +48,12 @@ class PlanAgentServiceTest {
     void setUp() {
         planDao = mock(PlanDao.class);
         featureDesignDao = mock(FeatureDesignDao.class);
-        agentService = mock(AgentService.class);
-        skillService = mock(SkillService.class);
         projectLifecycleService = mock(ProjectLifecycleService.class);
-        cliRunnerRegistry = mock(CliRunnerRegistry.class);
-        runner = mock(CliRunner.class);
-        com.changhong.onlinecode.agent.AgentWorkspace workspace =
-                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
-        when(workspace.path()).thenReturn(java.nio.file.Path.of(System.getProperty("java.io.tmpdir")));
-        when(workspace.pathString()).thenReturn(System.getProperty("java.io.tmpdir"));
-        when(cliRunnerRegistry.workspace(anyString())).thenReturn(workspace);
-        skillMaterializer = mock(SkillMaterializer.class);
-        builtInSkillRegistry = mock(BuiltInSkillRegistry.class);
+        agentExecutionService = mock(AgentExecutionService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
-        agentRunRecorder = mock(AgentRunRecorder.class);
         runDao = mock(RunDao.class);
-        Run agentRun = new Run();
-        agentRun.setId("run-1");
-        when(agentRunRecorder.createAgentRun(any())).thenReturn(agentRun);
-        service = new PlanAgentService(planDao, featureDesignDao, agentService,
-                skillService, projectLifecycleService, cliRunnerRegistry, skillMaterializer, builtInSkillRegistry,
-                failureInfoSupport, agentRunRecorder, runDao);
+        service = new PlanAgentService(planDao, featureDesignDao, projectLifecycleService,
+                agentExecutionService, failureInfoSupport, runDao);
     }
 
     @Test
@@ -91,11 +65,10 @@ class PlanAgentServiceTest {
         plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
-        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(cliRunResult(json)));
+        when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult(json)));
 
         service.spawnPlanning("p1", "hint", "token-1");
 
@@ -112,10 +85,9 @@ class PlanAgentServiceTest {
         plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
-        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectLifecycleService.findById("p1")).thenReturn(new Project());
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(cliRunResult("not json")));
+        when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult("not json")));
 
         service.spawnPlanning("p1", null, "token-1");
 
@@ -133,12 +105,11 @@ class PlanAgentServiceTest {
         plan.setGenerationToken("token-1");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
-        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String raw = "前提假设：单租户\n技术假设：Spring Boot\n"
                 + "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(cliRunResult(raw)));
+        when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult(raw)));
 
         service.spawnPlanning("p1", null, "token-1");
 
@@ -152,7 +123,7 @@ class PlanAgentServiceTest {
     void spawnPlanning_noPlan_skips() {
         when(planDao.findLatestByProjectId("p1")).thenReturn(null);
         service.spawnPlanning("p1", null, "token-1");
-        verify(runner, never()).executeDetailed(any(), any(), any(), any(), any(), any(), any());
+        verify(agentExecutionService, never()).executeAsync(anyString(), any());
     }
 
     @Test
@@ -167,11 +138,10 @@ class PlanAgentServiceTest {
         latest.setGenerationToken("token-2");
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(initial, latest);
-        when(agentService.findByName("planning-agent")).thenReturn(new Agent());
         when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(cliRunResult(json)));
+        when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult(json)));
 
         service.spawnPlanning("p1", null, "token-1");
 
@@ -188,10 +158,9 @@ class PlanAgentServiceTest {
 
         when(featureDesignDao.findLatestByProjectId("p1")).thenReturn(List.of(fd));
         when(planDao.findLatestByProjectId("p1")).thenReturn(new Plan());
-        when(agentService.findByName("feature-design-agent")).thenReturn(new Agent());
         String json = "{\"featureId\":\"feat1\",\"goal\":\"g\",\"design\":null,\"acceptance\":[],\"fileScope\":[]}";
-        when(cliRunnerRegistry.executeDetailed(any(), any(), any(), any()))
-                .thenReturn(CompletableFuture.completedFuture(cliRunResult(json)));
+        when(agentExecutionService.executeAsync(eq("feature-design-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult(json)));
 
         service.spawnFeatureDesign("p1", "feat1", null);
 
@@ -206,12 +175,10 @@ class PlanAgentServiceTest {
     @Test
     void spawnFeatureDesigns_empty_skips() {
         service.spawnFeatureDesigns("p1", List.of());
-        verify(runner, never()).executeDetailed(any(), any(), any(), any(), any(), any(), any());
+        verify(agentExecutionService, never()).executeAsync(anyString(), any());
     }
 
-    private static CliRunResult cliRunResult(String output) {
-        CliRunResult result = new CliRunResult();
-        result.setOutput(output);
-        return result;
+    private static AgentExecutionResult agentResult(String output) {
+        return new AgentExecutionResult("run-1", output, true, null);
     }
 }

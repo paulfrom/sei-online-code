@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Run DAO。分页 findByPage 由 BaseEntityDao 继承提供。
@@ -55,6 +56,18 @@ public interface RunDao extends BaseEntityDao<Run> {
                                           com.changhong.onlinecode.dto.enums.RunState state);
 
     List<Run> findByRequirementIdAndLoopId(String requirementId, String loopId);
+
+    Optional<Run> findTopByCodingTaskIdAndStateInOrderByCreatedDateDesc(String codingTaskId,
+                                                                        List<com.changhong.onlinecode.dto.enums.RunState> states);
+
+    Optional<Run> findTopByRequirementIdAndLoopIdAndStateInOrderByCreatedDateDesc(
+            String requirementId,
+            String loopId,
+            List<com.changhong.onlinecode.dto.enums.RunState> states);
+
+    Optional<Run> findTopByRequirementIdAndStateInOrderByCreatedDateDesc(
+            String requirementId,
+            List<com.changhong.onlinecode.dto.enums.RunState> states);
 
     /**
      * 仅当运行仍处于期望状态时切换状态，用于终态保护。

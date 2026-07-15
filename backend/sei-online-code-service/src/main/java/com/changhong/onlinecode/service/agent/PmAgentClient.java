@@ -1,22 +1,16 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,8 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * PM agent 调用客户端。
@@ -53,10 +45,8 @@ public class PmAgentClient {
     private static final long PLAN_TIMEOUT_SECONDS = 600;
     private static final long ACCEPT_TIMEOUT_SECONDS = 600;
 
-    private final AgentService agentService;
-    private final CliRunnerRegistry cliRunnerRegistry;
     private final RunDao runDao;
-    private final AgentRunRecorder agentRunRecorder;
+    private final AgentExecutionService agentExecutionService;
 
     /**
      * 调用 pm-agent 生成执行计划。
@@ -75,30 +65,23 @@ public class PmAgentClient {
                                      RequirementDesignContext context,
                                      List<RequirementComment> previousComments,
                                      ExecutionPlan previousPlan) {
-        Agent agent = agentService.findByName(AGENT_NAME);
-        if (agent == null) {
-            LOGGER.error("pm-agent not found");
-            return null;
-        }
-
         String prompt = buildPlanningPrompt(requirement, planType, context, previousComments, previousPlan);
-        Run run = createRun(requirement.getId(), loopId, prompt,
+        AgentExecutionResult execution = executeAgent(requirement.getProjectId(), requirement.getId(), loopId, prompt,
                 context == null ? null : context.getId(),
-                context == null ? null : context.getWorkspaceMemoryId(), agent);
+                context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
 
-        String output = executeAgent(agent, requirement.getProjectId(), prompt, PLAN_TIMEOUT_SECONDS, run);
-        if (output == null) {
-            settleFailedOrCancelled(run, "pm-agent 调用失败、取消或无输出");
+        if (execution.runId() == null || execution.output() == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 调用失败、取消或无输出");
             return null;
         }
 
-        if (isCancellationRequested(run)) {
-            markRunCancelled(run);
+        if (isCancellationRequested(execution.runId())) {
+            markRunCancelled(execution.runId());
             return null;
         }
 
-        markRunSucceeded(run);
-        return parsePlanJson(output, requirement.getId(), loopId);
+        markRunSucceeded(execution.runId());
+        return parsePlanJson(execution.output(), requirement.getId(), loopId);
     }
 
     /**
@@ -116,118 +99,95 @@ public class PmAgentClient {
                                                List<RequirementAutomationService.PlanTask> tasks,
                                                List<RequirementComment> previousComments,
                                                RequirementDesignContext context) {
-        Agent agent = agentService.findByName(AGENT_NAME);
-        if (agent == null) {
-            LOGGER.error("pm-agent not found");
-            return null;
-        }
-
         String prompt = buildAcceptancePrompt(requirement, plan, tasks, previousComments, context);
-        Run run = createRun(requirement.getId(), plan.getLoopId(), prompt,
-                plan.getMemoryContextId(), plan.getWorkspaceMemoryId(), agent);
-
-        String output = executeAgent(agent, requirement.getProjectId(), prompt, ACCEPT_TIMEOUT_SECONDS, run);
-        if (output == null) {
-            settleFailedOrCancelled(run, "pm-agent 验收调用失败、取消或无输出");
+        AgentExecutionResult execution = executeAgent(requirement.getProjectId(), requirement.getId(),
+                plan.getLoopId(), prompt, plan.getMemoryContextId(), plan.getWorkspaceMemoryId(),
+                ACCEPT_TIMEOUT_SECONDS);
+        if (execution.runId() == null || execution.output() == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 验收调用失败、取消或无输出");
             return null;
         }
 
-        if (isCancellationRequested(run)) {
-            markRunCancelled(run);
+        if (isCancellationRequested(execution.runId())) {
+            markRunCancelled(execution.runId());
             return null;
         }
 
-        markRunSucceeded(run);
-        return parseAcceptanceJson(output);
+        markRunSucceeded(execution.runId());
+        return parseAcceptanceJson(execution.output());
     }
 
-    private String executeAgent(Agent agent, String projectId, String prompt, long timeoutSeconds, Run run) {
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(projectId);
-        String cwd = workspace.pathString();
-
-        AgentBriefWriter.writeBrief(cwd, agent.getCliTool(), agent.getName(),
-                agent.getInstructions(), agent.getModel(),
-                agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
-
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(run.getId(), projectId, null,
-                        agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
-                prompt, agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
-        try {
-            return future.get(timeoutSeconds, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            LOGGER.warn("pm-agent execution failed or timed out", e);
-            future.cancel(true);
-            cliRunnerRegistry.cancel(run.getId());
-            return null;
-        }
+    private AgentExecutionResult executeAgent(String projectId, String requirementId, String loopId, String prompt,
+                                              String memoryContextId, String workspaceMemoryId,
+                                              long timeoutSeconds) {
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setProjectId(projectId);
+        request.setRequirementId(requirementId);
+        request.setIterationId(requirementId);
+        request.setLoopId(loopId);
+        request.setTriggerSource(TriggerSource.AUTO);
+        request.setPrompt(prompt);
+        request.setMemoryContextId(memoryContextId);
+        request.setWorkspaceMemoryId(workspaceMemoryId);
+        request.setTimeoutSeconds(timeoutSeconds);
+        return agentExecutionService.execute(AGENT_NAME, request);
     }
 
-    private Run createRun(String requirementId, String loopId, String prompt,
-                          String memoryContextId, String workspaceMemoryId, Agent agent) {
-        AgentRunCreateCommand command = new AgentRunCreateCommand();
-        command.setRequirementId(requirementId);
-        command.setLoopId(loopId);
-        command.setTriggerSource(TriggerSource.AUTO);
-        command.setUserPrompt(prompt);
-        command.setMemoryContextId(memoryContextId);
-        command.setWorkspaceMemoryId(workspaceMemoryId);
-        if (agent != null) {
-            command.setAgentId(agent.getId());
-            command.setAgentName(agent.getName());
-            command.setCliTool(agent.getCliTool());
-            command.setModel(agent.getModel());
-        }
-        // REQUIRES_NEW 确保 Run 在 CLI 启动前提交，避免同步阻塞调用持有事务连接。
-        return agentRunRecorder.createAgentRun(command);
-    }
-
-    private void markRunSucceeded(Run run) {
-        Run current = currentRun(run);
+    private void markRunSucceeded(String runId) {
+        Run current = currentRun(runId);
         if (current.getState() == RunState.RUNNING && !Boolean.TRUE.equals(current.getCancelRequested())) {
             current.setState(RunState.SUCCEEDED);
+            current.setTerminalReason(RunTerminalReason.SUCCEEDED);
             current.setFinishedDate(new Date());
             runDao.save(current);
         }
     }
 
-    private void markRunFailed(Run run, String reason) {
-        Run current = currentRun(run);
+    private void markRunFailed(String runId, String reason) {
+        Run current = currentRun(runId);
+        if (current == null) {
+            LOGGER.error("pm-agent run not created: {}", reason);
+            return;
+        }
         if (current.getState() != RunState.RUNNING) {
             return;
         }
         current.setState(RunState.FAILED);
+        current.setTerminalReason(RunTerminalReason.FAILED);
         current.setFailureSummary("PM agent 调用失败");
         current.setFailureReason(reason);
         current.setFinishedDate(new Date());
         runDao.save(current);
     }
 
-    private void settleFailedOrCancelled(Run run, String reason) {
-        if (isCancellationRequested(run)) {
-            markRunCancelled(run);
+    private void settleFailedOrCancelled(String runId, String reason) {
+        if (isCancellationRequested(runId)) {
+            markRunCancelled(runId);
         } else {
-            markRunFailed(run, reason);
+            markRunFailed(runId, reason);
         }
     }
 
-    private boolean isCancellationRequested(Run run) {
-        Run current = currentRun(run);
-        return Boolean.TRUE.equals(current.getCancelRequested()) || current.getState() == RunState.CANCELLED;
+    private boolean isCancellationRequested(String runId) {
+        Run current = currentRun(runId);
+        return current != null
+                && (Boolean.TRUE.equals(current.getCancelRequested()) || current.getState() == RunState.CANCELLED);
     }
 
-    private void markRunCancelled(Run run) {
-        Run current = currentRun(run);
+    private void markRunCancelled(String runId) {
+        Run current = currentRun(runId);
+        if (current == null) {
+            return;
+        }
         current.setCancelRequested(Boolean.TRUE);
         current.setState(RunState.CANCELLED);
+        current.setTerminalReason(RunTerminalReason.CANCELLED);
         current.setFinishedDate(new Date());
         runDao.save(current);
     }
 
-    private Run currentRun(Run run) {
-        Run current = runDao.findOne(run.getId());
-        return current == null ? run : current;
+    private Run currentRun(String runId) {
+        return runId == null ? null : runDao.findOne(runId);
     }
 
     private String buildPlanningPrompt(Requirement requirement,

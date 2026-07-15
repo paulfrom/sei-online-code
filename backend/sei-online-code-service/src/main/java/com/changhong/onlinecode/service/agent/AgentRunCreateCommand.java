@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service.agent;
 
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import lombok.Data;
 
@@ -16,6 +17,10 @@ public class AgentRunCreateCommand {
     private String requirementId;
     private String iterationId;
     private String loopId;
+    private RunType runType;
+    private String parentRunId;
+    private String compensatesRunId;
+    private Integer attemptNo;
     private TriggerSource triggerSource;
     private String userPrompt;
     private String memoryContextId;

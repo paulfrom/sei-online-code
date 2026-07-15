@@ -1,12 +1,5 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.agent.AgentBriefWriter;
-import com.changhong.onlinecode.agent.AgentInvocationContext;
-import com.changhong.onlinecode.agent.CliRunResult;
-import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
-import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FailureCode;
@@ -16,16 +9,15 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.entity.Skill;
-import com.changhong.onlinecode.entity.SkillFile;
-import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
-import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
+import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
@@ -33,13 +25,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -61,17 +51,12 @@ public class RequirementAgentService {
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
 
     private final RequirementDao requirementDao;
-    private final AgentService agentService;
-    private final SkillService skillService;
     private final ProjectService projectService;
-    private final CliRunnerRegistry cliRunnerRegistry;
-    private final SkillMaterializer skillMaterializer;
-    private final BuiltInSkillRegistry builtInSkillRegistry;
+    private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignContextPromptAssembler designContextPromptAssembler;
     private final RequirementCommentService requirementCommentService;
-    private final AgentRunRecorder agentRunRecorder;
     private final RunDao runDao;
 
 
@@ -98,63 +83,41 @@ public class RequirementAgentService {
             return;
         }
 
-        Agent agent = agentService.findByName(PRD_AGENT_NAME);
         Project project = projectService.findOne(requirement.getProjectId());
         RequirementDesignContext context = requirementDesignContextService.prepare(requirementId);
         String fullPrompt = buildPrdPrompt(project, requirement, prompt, context);
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(requirement.getProjectId());
-        Path workdir = materializeSkills(agent, workspace.path());
+        AgentExecutionRequest request = buildRequest(requirement, fullPrompt, context);
 
-        if (agent != null) {
-            AgentBriefWriter.writeBrief(workdir.toString(), agent.getCliTool(),
-                    agent.getName(), agent.getInstructions(),
-                    agent.getModel(),
-                    agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    log);
-        }
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(PRD_AGENT_NAME, request);
 
-        Run run = agentRunRecorder.createAgentRun(buildRunCommand(
-                requirement, prompt, agent, context));
-        final String runId = run.getId();
-
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(runId, requirementId, null,
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                fullPrompt, agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
-
-        future.thenApply(RequirementAgentService::normalizeMarkdown)
-                .thenAccept(content -> {
+        future.thenApply(result -> resultOutput(result, RequirementAgentService::normalizeMarkdown))
+                .thenAccept(output -> {
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
-                        settleRun(runId, RunState.FAILED, "已被新一轮生成接管");
+                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管");
                         return;
                     }
                     try {
-                        validatePrdContent(content);
+                        validatePrdContent(output.content());
                     } catch (RuntimeException ex) {
-                        settleRun(runId, RunState.FAILED, ex.getMessage());
+                        settleRun(output.runId(), RunState.FAILED, ex.getMessage());
                         throw ex;
                     }
-                    latest.setPrdContent(content);
+                    latest.setPrdContent(output.content());
                     latest.setStatus(RequirementStatus.PRD_REVIEW);
                     latest.setDesignContextId(context.getId());
                     latest.setMemoryValidationStatus(MemoryValidationStatus.NOT_RUN);
                     latest.setMemoryValidationResultJson(null);
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
-                    settleRun(runId, RunState.SUCCEEDED, null);
+                    settleRun(output.runId(), RunState.SUCCEEDED, null);
                     log.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
                             requirementId, latest.getPrdVersion());
-                    reviewMemory(requirementId, content, context);
+                    reviewMemory(requirementId, output.content(), context);
                 })
                 .exceptionally(e -> {
                     log.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
-                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期失败", requirementId);
@@ -183,32 +146,19 @@ public class RequirementAgentService {
             return;
         }
 
-        Agent agent = agentService.findByName(MEMORY_REVIEW_AGENT_NAME);
-        AgentWorkspace workspace = cliRunnerRegistry.workspace(requirement.getProjectId());
-        materializeSkills(agent, workspace.path());
-        Run run = agentRunRecorder.createAgentRun(buildRunCommand(
-                requirement, content, agent, context));
-        final String runId = run.getId();
         String iterationId = requirementId + "-memory-review-" + UUID.randomUUID();
-        CompletableFuture<String> future = cliRunnerRegistry.executeDetailed(workspace,
-                new AgentInvocationContext(runId, iterationId, null,
-                        agent == null ? null : agent.getId(),
-                        agent == null ? null : agent.getName(),
-                        agent == null ? null : agent.getCliTool(),
-                        agent == null ? null : agent.getModel()),
-                buildMemoryReviewPrompt(content, context),
-                agent == null ? null : agent.getMcpConfig())
-                .thenApply(CliRunResult::getOutput);
+        AgentExecutionRequest request = buildRequest(requirement, buildMemoryReviewPrompt(content, context), context);
+        request.setIterationId(iterationId);
+        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(MEMORY_REVIEW_AGENT_NAME, request);
 
-        future.thenApply(this::parseMemoryReview)
-                .thenAccept(result -> {
-                    settleRun(runId, RunState.SUCCEEDED, null);
-                    persistMemoryReview(requirementId, content, result);
+        future.thenApply(result -> resultOutput(result, this::parseMemoryReview))
+                .thenAccept(output -> {
+                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    persistMemoryReview(requirementId, content, output.content());
                 })
                 .exceptionally(e -> {
                     log.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
                             requirementId, e);
-                    settleRun(runId, RunState.FAILED, rootMessage(e));
                     return null;
                 });
     }
@@ -346,34 +296,43 @@ public class RequirementAgentService {
         return generationToken != null && generationToken.equals(requirement.getGenerationToken());
     }
 
+    private AgentExecutionRequest buildRequest(Requirement requirement, String prompt,
+                                               RequirementDesignContext context) {
+        AgentExecutionRequest request = new AgentExecutionRequest();
+        request.setProjectId(requirement.getProjectId());
+        request.setRequirementId(requirement.getId());
+        request.setIterationId(requirement.getId());
+        request.setTriggerSource(TriggerSource.AUTO);
+        request.setPrompt(prompt);
+        request.setMemoryContextId(context == null ? null : context.getId());
+        request.setWorkspaceMemoryId(context == null ? null : context.getWorkspaceMemoryId());
+        return request;
+    }
+
+    private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
+        String runId = result == null ? null : result.runId();
+        if (result == null || !result.succeeded()) {
+            String reason = result == null ? "Agent 执行无结果" : result.failureReason();
+            settleRun(runId, RunState.FAILED, reason);
+            throw new IllegalStateException(reason);
+        }
+        try {
+            return new AgentOutput<>(runId, mapper.apply(result.output()));
+        } catch (RuntimeException e) {
+            settleRun(runId, RunState.FAILED, e.getMessage());
+            throw e;
+        }
+    }
+
+    private record AgentOutput<T>(String runId, T content) {
+    }
+
     private static String rootMessage(Throwable throwable) {
         Throwable current = throwable;
         while (current.getCause() != null) {
             current = current.getCause();
         }
         return current.getMessage();
-    }
-
-    /**
-     * 构造 AgentRunCreateCommand，写入 Agent 快照。
-     */
-    private AgentRunCreateCommand buildRunCommand(Requirement requirement, String prompt,
-                                                  Agent agent,
-                                                  RequirementDesignContext context) {
-        AgentRunCreateCommand command = new AgentRunCreateCommand();
-        command.setRequirementId(requirement.getId());
-        command.setIterationId(requirement.getId());
-        command.setTriggerSource(TriggerSource.AUTO);
-        command.setUserPrompt(prompt);
-        command.setMemoryContextId(context == null ? null : context.getId());
-        command.setWorkspaceMemoryId(context == null ? null : context.getWorkspaceMemoryId());
-        if (agent != null) {
-            command.setAgentId(agent.getId());
-            command.setAgentName(agent.getName());
-            command.setCliTool(agent.getCliTool());
-            command.setModel(agent.getModel());
-        }
-        return command;
     }
 
     /**
@@ -386,6 +345,7 @@ public class RequirementAgentService {
                 return;
             }
             current.setState(state);
+            current.setTerminalReason(terminalReason(state, reason));
             current.setFinishedDate(new Date());
             if (state == RunState.FAILED) {
                 current.setFailureReason(reason);
@@ -396,44 +356,24 @@ public class RequirementAgentService {
         }
     }
 
+    private RunTerminalReason terminalReason(RunState state, String reason) {
+        if (state == RunState.SUCCEEDED) {
+            return RunTerminalReason.SUCCEEDED;
+        }
+        if (state == RunState.CANCELLED) {
+            return RunTerminalReason.CANCELLED;
+        }
+        if (reason != null && reason.contains("新一轮生成接管")) {
+            return RunTerminalReason.SUPERSEDED;
+        }
+        return RunTerminalReason.FAILED;
+    }
+
     private String toJson(DesignMemoryValidationService.ValidationResult result) {
         try {
             return JsonUtils.mapper().writeValueAsString(result);
         } catch (Exception e) {
             throw new IllegalStateException("记忆审阅结果序列化失败", e);
         }
-    }
-
-    private Path materializeSkills(Agent agent, Path workdir) {
-        try {
-            List<SkillMaterializer.SkillPayload> payloads = new ArrayList<>();
-            if (agent != null && agent.getSkillIds() != null) {
-                for (String sid : agent.getSkillIds()) {
-                    if (sid.startsWith(BuiltInSkillRegistry.PREFIX)) {
-                        builtInSkillRegistry.resolve(sid).ifPresent(payloads::add);
-                        continue;
-                    }
-                    Skill s = skillService.findOne(sid);
-                    if (s != null) {
-                        payloads.add(new SkillMaterializer.SkillPayload(
-                                s.getName(), s.getContent(), s.getComputedHash(), toFileRefs(s)));
-                    }
-                }
-            }
-            skillMaterializer.materialize(workdir.toString(), payloads);
-            return workdir;
-        } catch (Exception e) {
-            throw new IllegalStateException("项目工作区技能写入失败: " + workdir, e);
-        }
-    }
-
-    private static List<SkillMaterializer.SkillFileRef> toFileRefs(Skill skill) {
-        List<SkillMaterializer.SkillFileRef> refs = new ArrayList<>();
-        if (skill.getFiles() != null) {
-            for (SkillFile f : skill.getFiles()) {
-                refs.add(new SkillMaterializer.SkillFileRef(f.getPath(), f.getContent()));
-            }
-        }
-        return refs;
     }
 }

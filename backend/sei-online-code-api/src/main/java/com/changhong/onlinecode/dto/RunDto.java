@@ -1,6 +1,8 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
+import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
@@ -32,6 +34,18 @@ public class RunDto extends BaseEntityDto {
     @Schema(description = "Run 序号")
     private Integer runNo;
 
+    @Schema(description = "Run 记录类型")
+    private RunType runType;
+
+    @Schema(description = "父 Run id；重试、补偿、修复等派生运行指向来源 Run")
+    private String parentRunId;
+
+    @Schema(description = "被本 Run 补偿的 Run id")
+    private String compensatesRunId;
+
+    @Schema(description = "同一运行链路内的尝试序号")
+    private Integer attemptNo;
+
     @Schema(description = "触发来源")
     private TriggerSource triggerSource;
 
@@ -58,6 +72,9 @@ public class RunDto extends BaseEntityDto {
 
     @Schema(description = "失败原因")
     private String failureReason;
+
+    @Schema(description = "终止原因")
+    private RunTerminalReason terminalReason;
 
     @Schema(description = "所属迭代 id")
     private String iterationId;

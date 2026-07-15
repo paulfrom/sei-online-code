@@ -27,6 +27,18 @@ public class AgentDto extends BaseEntityDto {
     @Schema(description = "指令；派发时前置到 Task.description", example = "You implement one page...")
     private String instructions;
 
+    @Schema(description = "Agent prompt 模板；为空时使用业务上下文 prompt")
+    private String promptTemplate;
+
+    @Schema(description = "执行策略，例如是否允许全量验证、是否优先 targeted check")
+    private String executionPolicy;
+
+    @Schema(description = "范围策略，例如 task 级只验证交互物、plan 级做集成验证")
+    private String scopePolicy;
+
+    @Schema(description = "期望输出 JSON schema 或结构说明")
+    private String outputSchema;
+
     @Schema(description = "模型；空串表示由 CLI 自行解析默认值", example = "")
     private String model;
 
