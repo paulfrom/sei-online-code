@@ -17,3 +17,7 @@ export async function findRunsByRequirement(requirementId) {
 export async function findOneRun(id) {
   return request({ url: `${API}/run/findOne`, method: 'GET', params: { id } });
 }
+
+export async function findRunUsage(runId) {
+  return request({ url: `${API}/run/findUsage`, method: 'GET', params: { runId } });
+}

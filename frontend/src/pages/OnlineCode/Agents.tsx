@@ -36,6 +36,10 @@ interface AgentForm {
   name: string;
   description: string;
   instructions: string;
+  promptTemplate: string;
+  executionPolicy: string;
+  scopePolicy: string;
+  outputSchema: string;
   model: string;
   cliTool: string;
   mcpConfig: string;
@@ -84,6 +88,10 @@ const Agents: React.FC = () => {
       name: record.name,
       description: record.description,
       instructions: record.instructions,
+      promptTemplate: record.promptTemplate ?? '',
+      executionPolicy: record.executionPolicy ?? '',
+      scopePolicy: record.scopePolicy ?? '',
+      outputSchema: record.outputSchema ?? '',
       model: record.model,
       cliTool: record.cliTool,
       mcpConfig: record.mcpConfig ?? '',
@@ -111,6 +119,10 @@ const Agents: React.FC = () => {
         name: editingBuiltin ? editing?.name ?? values.name : values.name,
         description: values.description ?? '',
         instructions: values.instructions ?? '',
+        promptTemplate: values.promptTemplate ?? '',
+        executionPolicy: values.executionPolicy ?? '',
+        scopePolicy: values.scopePolicy ?? '',
+        outputSchema: values.outputSchema ?? '',
         model: editingBuiltin ? editing?.model ?? '' : values.model ?? '',
         cliTool: editingBuiltin ? editing?.cliTool ?? '' : values.cliTool ?? '',
         mcpConfig: editingBuiltin ? editing?.mcpConfig ?? '' : values.mcpConfig ?? '',
@@ -237,6 +249,18 @@ const Agents: React.FC = () => {
           </Form.Item>
           <Form.Item name="instructions" label="指令（prepended to Task.description）">
             <Input.TextArea rows={5} placeholder="你负责实现单个页面…" />
+          </Form.Item>
+          <Form.Item name="promptTemplate" label="Prompt 模板" tooltip="统一 Agent 执行入口会在运行上下文前拼接该模板">
+            <Input.TextArea rows={4} placeholder="例如：请按以下结构输出实现摘要、风险和验证结果" />
+          </Form.Item>
+          <Form.Item name="executionPolicy" label="执行策略" tooltip="描述验证强度、命令选择和失败处理要求">
+            <Input.TextArea rows={3} placeholder="例如：优先 targeted check，必要时执行完整构建" />
+          </Form.Item>
+          <Form.Item name="scopePolicy" label="范围策略" tooltip="描述 task/plan/requirement 不同范围下的工作边界">
+            <Input.TextArea rows={3} placeholder="例如：task 级仅修改指定文件范围，plan 级处理跨模块集成" />
+          </Form.Item>
+          <Form.Item name="outputSchema" label="输出结构" tooltip="期望 Agent 输出 JSON schema 或结构化说明">
+            <Input.TextArea rows={4} placeholder='{"summary":"string","verification":["string"],"risks":["string"]}' />
           </Form.Item>
           <Form.Item name="model" label="模型" tooltip="留空则由 CLI 解析默认模型">
             <Input placeholder="留空 = CLI 默认" allowClear disabled={editingBuiltin} />

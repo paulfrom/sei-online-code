@@ -21,7 +21,25 @@ const STATE_META = {
   CANCELLED: { color: 'warning', label: '已取消' },
 };
 
+const RUN_TYPE_META = {
+  AGENT: { color: 'blue', label: 'Agent' },
+  SYSTEM: { color: 'default', label: '系统' },
+};
+
+const TERMINAL_REASON_LABELS = {
+  SUCCEEDED: '成功',
+  FAILED: '失败',
+  TIMEOUT: '超时',
+  CANCELLED: '取消',
+  SUPERSEDED: '被替代',
+};
+
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '-');
+
+const formatTokens = (record) => {
+  if (!record || record.totalTokens == null) return '-';
+  return `${record.totalTokens} tokens`;
+};
 
 const computeDuration = (started, finished) => {
   if (!started) return '-';
@@ -49,6 +67,21 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
   const columns = [
     { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
     {
+      title: '类型',
+      dataIndex: 'runType',
+      width: 90,
+      render: (type) => {
+        const meta = RUN_TYPE_META[type] || { color: 'default', label: type || '-' };
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
+    },
+    {
+      title: '尝试',
+      dataIndex: 'attemptNo',
+      width: 80,
+      render: (v) => v || '-',
+    },
+    {
       title: '状态',
       dataIndex: 'state',
       width: 110,
@@ -62,6 +95,23 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
       dataIndex: 'triggerSource',
       width: 130,
       render: (v) => v || '-',
+    },
+    {
+      title: '终止原因',
+      dataIndex: 'terminalReason',
+      width: 110,
+      render: (v) => TERMINAL_REASON_LABELS[v] || v || '-',
+    },
+    {
+      title: 'Agent',
+      dataIndex: 'agentName',
+      width: 130,
+      render: (v, record) => v || record.cliTool || '-',
+    },
+    {
+      title: 'Token',
+      width: 120,
+      render: (_v, record) => formatTokens(record),
     },
     {
       title: '持续时间',

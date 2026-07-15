@@ -5,6 +5,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Drawer, Descriptions, Tag } from '@ead/suid';
+import { findRunUsage } from '@/services/run';
 import { subscribeRunLog } from '@/utils/run-log-socket';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -34,7 +35,22 @@ const STATE_META = {
   CANCELLED: { color: 'warning', label: '已取消' },
 };
 
+const RUN_TYPE_META = {
+  AGENT: { color: 'blue', label: 'Agent' },
+  SYSTEM: { color: 'default', label: '系统' },
+};
+
+const TERMINAL_REASON_LABELS = {
+  SUCCEEDED: '成功',
+  FAILED: '失败',
+  TIMEOUT: '超时',
+  CANCELLED: '取消',
+  SUPERSEDED: '被替代',
+};
+
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '-');
+
+const formatTokens = (value) => (value == null ? '-' : value);
 
 /**
  * @param {{ open: boolean, run: any, onClose: () => void }} props
@@ -43,16 +59,25 @@ const RunLogDrawer = ({ open, run, onClose }) => {
   const { styles } = useStyles();
   const [lines, setLines] = useState([]);
   const [terminated, setTerminated] = useState(null);
+  const [usage, setUsage] = useState(null);
   const socketRef = useRef(null);
 
   useEffect(() => {
     if (!open || !run) {
       setLines([]);
       setTerminated(null);
+      setUsage(null);
       return undefined;
     }
     setLines([]);
     setTerminated(null);
+    setUsage(null);
+
+    findRunUsage(run.id).then((res) => {
+      if (res && res.success && res.data) {
+        setUsage(res.data);
+      }
+    });
 
     const iterationId = run.iterationId;
     if (!iterationId) {
@@ -77,6 +102,10 @@ const RunLogDrawer = ({ open, run, onClose }) => {
   }, [open, run]);
 
   const stateMeta = run && run.state ? STATE_META[run.state] : { color: 'default', label: '-' };
+  const runTypeMeta = run && run.runType
+    ? RUN_TYPE_META[run.runType] || { color: 'default', label: run.runType }
+    : { color: 'default', label: '-' };
+  const usageSnapshot = usage || run || {};
 
   return (
     <Drawer
@@ -93,7 +122,25 @@ const RunLogDrawer = ({ open, run, onClose }) => {
             <Descriptions.Item label="状态">
               <Tag color={stateMeta.color}>{stateMeta.label}</Tag>
             </Descriptions.Item>
+            <Descriptions.Item label="类型">
+              <Tag color={runTypeMeta.color}>{runTypeMeta.label}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="尝试序号">{run.attemptNo || '-'}</Descriptions.Item>
             <Descriptions.Item label="触发来源">{run.triggerSource || '-'}</Descriptions.Item>
+            <Descriptions.Item label="终止原因">
+              {TERMINAL_REASON_LABELS[run.terminalReason] || run.terminalReason || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="父 Run">{run.parentRunId || '-'}</Descriptions.Item>
+            <Descriptions.Item label="补偿 Run">{run.compensatesRunId || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Agent">{run.agentName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="CLI">{run.cliTool || '-'}</Descriptions.Item>
+            <Descriptions.Item label="模型">{run.model || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Usage 状态">{usageSnapshot.usageStatus || '-'}</Descriptions.Item>
+            <Descriptions.Item label="输入 Token">{formatTokens(usageSnapshot.inputTokens)}</Descriptions.Item>
+            <Descriptions.Item label="输出 Token">{formatTokens(usageSnapshot.outputTokens)}</Descriptions.Item>
+            <Descriptions.Item label="缓存读 Token">{formatTokens(usageSnapshot.cacheReadTokens)}</Descriptions.Item>
+            <Descriptions.Item label="缓存写 Token">{formatTokens(usageSnapshot.cacheWriteTokens)}</Descriptions.Item>
+            <Descriptions.Item label="总 Token">{formatTokens(usageSnapshot.totalTokens)}</Descriptions.Item>
             <Descriptions.Item label="开始时间">{formatDateTime(run.startedDate)}</Descriptions.Item>
             <Descriptions.Item label="结束时间">{formatDateTime(run.finishedDate)}</Descriptions.Item>
             <Descriptions.Item label="退出码">{run.exitCode ?? '-'}</Descriptions.Item>

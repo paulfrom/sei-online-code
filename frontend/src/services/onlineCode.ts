@@ -98,6 +98,14 @@ export interface AgentDto {
   name: string;
   description: string;
   instructions: string;
+  /** Agent prompt 模板；为空时使用业务上下文 prompt */
+  promptTemplate?: string | null;
+  /** 执行策略，例如是否允许全量验证、是否优先 targeted check */
+  executionPolicy?: string | null;
+  /** 范围策略，例如 task 级只验证交互物、plan 级做集成验证 */
+  scopePolicy?: string | null;
+  /** 期望输出 JSON schema 或结构说明 */
+  outputSchema?: string | null;
   /** "" = let CLI resolve its own default */
   model: string;
   /** CLI 工具：claude/codex，"" = 默认 claude（multica runtime profile protocol_family 维度） */
@@ -210,6 +218,10 @@ export async function saveAgent(params: {
   name: string;
   description: string;
   instructions: string;
+  promptTemplate?: string;
+  executionPolicy?: string;
+  scopePolicy?: string;
+  outputSchema?: string;
   model: string;
   cliTool: string;
   mcpConfig: string;

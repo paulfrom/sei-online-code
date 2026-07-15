@@ -84,14 +84,28 @@ export interface CodingTaskDto {
 }
 
 export type RunState = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type RunType = 'AGENT' | 'SYSTEM';
+export type RunTerminalReason = 'SUCCEEDED' | 'FAILED' | 'TIMEOUT' | 'CANCELLED' | 'SUPERSEDED';
+export type TriggerSource =
+  | 'USER_ACTION' | 'AUTO' | 'RETRY' | 'REMEDIATION'
+  | 'SCHEDULED_COMPENSATION' | 'CHAIN_COMPENSATION';
+export type UsageStatus = 'UNAVAILABLE' | 'PARTIAL' | 'COMPLETE' | string;
 export interface RunDto {
   id: string; taskId?: string | null; codingTaskId?: string | null; requirementId?: string | null;
-  runNo?: number; triggerSource?: string | null; loopId?: string | null;
+  runNo?: number; runType?: RunType | null; parentRunId?: string | null;
+  compensatesRunId?: string | null; attemptNo?: number | null;
+  triggerSource?: TriggerSource | string | null; loopId?: string | null;
   cancelRequested?: boolean | null; invalidatedByCommentId?: string | null;
   memoryContextId?: string | null; workspaceMemoryId?: string | null;
   userPrompt?: string | null; failureSummary?: string | null; failureReason?: string | null;
+  terminalReason?: RunTerminalReason | string | null;
   iterationId?: string | null; state?: RunState; worktreePath?: string | null;
-  exitCode?: number | null; startedDate?: string | null; finishedDate?: string | null;
+  exitCode?: number | null; agentId?: string | null; agentName?: string | null;
+  cliTool?: string | null; model?: string | null;
+  inputTokens?: number | null; outputTokens?: number | null;
+  cacheReadTokens?: number | null; cacheWriteTokens?: number | null;
+  totalTokens?: number | null; usageStatus?: UsageStatus | null;
+  startedDate?: string | null; finishedDate?: string | null;
 }
 
 export interface DeliverySummary {

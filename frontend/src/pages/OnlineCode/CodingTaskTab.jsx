@@ -22,6 +22,19 @@ const STATUS_OPTIONS = [
   { value: 'STALE', label: '已过期' },
 ];
 
+const RUN_TYPE_META = {
+  AGENT: { color: 'blue', label: 'Agent' },
+  SYSTEM: { color: 'default', label: '系统' },
+};
+
+const TERMINAL_REASON_LABELS = {
+  SUCCEEDED: '成功',
+  FAILED: '失败',
+  TIMEOUT: '超时',
+  CANCELLED: '取消',
+  SUPERSEDED: '被替代',
+};
+
 const CodingTaskTab = ({ projectId }) => {
   const tableRef = useRef(null);
   const [statusFilter, setStatusFilter] = useState('');
@@ -68,8 +81,26 @@ const CodingTaskTab = ({ projectId }) => {
 
   const runHistoryColumns = [
     { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
+    {
+      title: '类型',
+      dataIndex: 'runType',
+      width: 90,
+      render: (type) => {
+        const meta = RUN_TYPE_META[type] || { label: type || '-' };
+        return meta.label;
+      },
+    },
+    { title: '尝试', dataIndex: 'attemptNo', width: 80, render: (v) => v || '-' },
     { title: '状态', dataIndex: 'state', width: 120 },
     { title: '触发来源', dataIndex: 'triggerSource', width: 120 },
+    {
+      title: '终止原因',
+      dataIndex: 'terminalReason',
+      width: 110,
+      render: (v) => TERMINAL_REASON_LABELS[v] || v || '-',
+    },
+    { title: 'Agent', dataIndex: 'agentName', width: 120, render: (v) => v || '-' },
+    { title: 'Token', dataIndex: 'totalTokens', width: 110, render: (v) => (v == null ? '-' : v) },
     { title: '失败原因', dataIndex: 'failureReason', expandUnusedSpace: true },
     { title: '开始时间', dataIndex: 'startedDate', width: 170, dataType: 'datetime' },
     { title: '结束时间', dataIndex: 'finishedDate', width: 170, dataType: 'datetime' },
