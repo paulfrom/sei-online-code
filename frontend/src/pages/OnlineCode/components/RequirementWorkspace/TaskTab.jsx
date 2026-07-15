@@ -16,6 +16,7 @@ import {
   HistoryOutlined,
   FileTextOutlined,
   StopOutlined,
+  ArrowLeftOutlined,
 } from '@ead/suid-icons';
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`
@@ -155,6 +156,8 @@ const TaskTab = ({
   stopEnabled,
   highlightTaskKey,
   onHighlightTaskConsumed,
+  showBackToPlan,
+  onBackToPlan,
 }) => {
   const { styles } = useStyles();
   const [scopeModal, setScopeModal] = useState({ open: false, title: '', files: [] });
@@ -330,6 +333,15 @@ const TaskTab = ({
     <div>
       <div className={styles.toolbar}>
         <Space>
+          {showBackToPlan && (
+            <Button
+              type="link"
+              icon={<ArrowLeftOutlined />}
+              onClick={onBackToPlan}
+            >
+              返回执行计划
+            </Button>
+          )}
           <span>共 {tasks.length} 个任务</span>
           {stats.RUNNING > 0 && <Tag color="processing">执行中 {stats.RUNNING}</Tag>}
           {stats.FAILED > 0 && <Tag color="error">失败 {stats.FAILED}</Tag>}

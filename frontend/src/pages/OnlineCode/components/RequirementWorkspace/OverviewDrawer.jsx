@@ -36,10 +36,14 @@ const TITLE_BY_PANEL = {
  * @param {{
  *   panelKey: 'plan'|'task'|'run'|'delivery'|null,
  *   onClose: () => void,
+ *   titleOverride?: string,
  *   width?: number,
  *   plan: any, tasks: any[], runs: any[], delivery: any, comments: any[],
  *   taskFilterId?: string|null,
  *   onClearTaskFilter?: () => void,
+ *   onBackToTask?: () => void,
+ *   taskPanelFromPlan?: boolean,
+ *   onBackToPlan?: () => void,
  *   highlightTaskKey?: string|null,
  *   onHighlightTaskConsumed?: () => void,
  *   onRunLog?: (run: any) => void,
@@ -54,6 +58,7 @@ const TITLE_BY_PANEL = {
 const OverviewDrawer = ({
   panelKey,
   onClose,
+  titleOverride,
   width = 960,
   plan,
   tasks,
@@ -62,6 +67,9 @@ const OverviewDrawer = ({
   comments,
   taskFilterId,
   onClearTaskFilter,
+  onBackToTask,
+  taskPanelFromPlan,
+  onBackToPlan,
   highlightTaskKey,
   onHighlightTaskConsumed,
   onRunLog,
@@ -74,7 +82,7 @@ const OverviewDrawer = ({
 }) => {
   const { styles } = useStyles();
   const open = Boolean(panelKey);
-  const title = panelKey ? TITLE_BY_PANEL[panelKey] : '';
+  const title = titleOverride || (panelKey ? TITLE_BY_PANEL[panelKey] : '');
 
   const renderPanel = () => {
     switch (panelKey) {
@@ -91,6 +99,8 @@ const OverviewDrawer = ({
             stopEnabled={autoStopEnabled}
             highlightTaskKey={highlightTaskKey}
             onHighlightTaskConsumed={onHighlightTaskConsumed}
+            showBackToPlan={taskPanelFromPlan}
+            onBackToPlan={onBackToPlan}
           />
         );
       case 'run':
@@ -99,6 +109,7 @@ const OverviewDrawer = ({
             runs={runs}
             taskFilterId={taskFilterId}
             onClearTaskFilter={onClearTaskFilter}
+            onBackToTask={onBackToTask}
             onOpenLog={onRunLog}
           />
         );

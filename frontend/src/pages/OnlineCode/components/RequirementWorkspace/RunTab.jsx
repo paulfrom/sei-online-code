@@ -4,6 +4,7 @@
 import React, { useMemo } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Space, Table, Tag } from '@ead/suid';
+import { ArrowLeftOutlined } from '@ead/suid-icons';
 
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`
@@ -55,9 +56,9 @@ const computeDuration = (started, finished) => {
 
 /**
  * @param {{ runs: any[], taskFilterId?: string|null, onClearTaskFilter?: () => void,
- *   onOpenLog: (run: any) => void }} props
+ *   onBackToTask?: () => void, onOpenLog: (run: any) => void }} props
  */
-const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
+const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog }) => {
   const { styles } = useStyles();
 
   const filteredRuns = useMemo(() => {
@@ -65,7 +66,13 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
   }, [runs, taskFilterId]);
 
   const columns = [
-    { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
+    // { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
+    {
+      title: 'Agent',
+      dataIndex: 'agentName',
+      width: 130,
+      render: (v, record) => v || record.cliTool || '-',
+    },
     {
       title: '类型',
       dataIndex: 'runType',
@@ -75,12 +82,12 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
         return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
-    {
-      title: '尝试',
-      dataIndex: 'attemptNo',
-      width: 80,
-      render: (v) => v || '-',
-    },
+    // {
+    //   title: '尝试',
+    //   dataIndex: 'attemptNo',
+    //   width: 80,
+    //   render: (v) => v || '-',
+    // },
     {
       title: '状态',
       dataIndex: 'state',
@@ -90,24 +97,19 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
         return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
-    {
-      title: '触发来源',
-      dataIndex: 'triggerSource',
-      width: 130,
-      render: (v) => v || '-',
-    },
+    // {
+    //   title: '触发来源',
+    //   dataIndex: 'triggerSource',
+    //   width: 130,
+    //   render: (v) => v || '-',
+    // },
     {
       title: '终止原因',
       dataIndex: 'terminalReason',
       width: 110,
       render: (v) => TERMINAL_REASON_LABELS[v] || v || '-',
     },
-    {
-      title: 'Agent',
-      dataIndex: 'agentName',
-      width: 130,
-      render: (v, record) => v || record.cliTool || '-',
-    },
+    
     {
       title: 'Token',
       width: 120,
@@ -138,6 +140,15 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onOpenLog }) => {
           <Space>
             <Tag color="blue">已按任务筛选</Tag>
             <Button type="link" onClick={onClearTaskFilter}>清除</Button>
+            {onBackToTask && (
+              <Button
+                type="link"
+                icon={<ArrowLeftOutlined />}
+                onClick={onBackToTask}
+              >
+                返回编码任务
+              </Button>
+            )}
           </Space>
         )}
       </div>

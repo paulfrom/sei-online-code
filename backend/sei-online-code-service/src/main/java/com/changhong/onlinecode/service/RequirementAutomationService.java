@@ -11,6 +11,7 @@ import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -85,6 +86,9 @@ public class RequirementAutomationService {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (requirement.getStatus() == RequirementStatus.PRD_GENERATING) {
+            throw new IllegalStateException("PRD 生成中，暂不允许发送评论");
         }
         RequirementComment comment = appendComment(requirementId, requirement.getActiveLoopId(),
                 RequirementCommentAuthorType.HUMAN, "human", RequirementCommentType.HUMAN_FEEDBACK,

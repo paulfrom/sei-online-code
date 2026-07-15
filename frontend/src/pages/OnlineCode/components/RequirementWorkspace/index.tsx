@@ -97,6 +97,9 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   const [detailPanel, setDetailPanel] = useState<'plan' | 'task' | 'run' | 'delivery' | null>(null);
   const [taskFilterId, setTaskFilterId] = useState<string | null>(null);
   const [highlightTaskKey, setHighlightTaskKey] = useState<string | null>(null);
+  // Tracks whether the task panel was reached from the execution plan, so a
+  // "back to plan" affordance can be offered. Reset by other entry points.
+  const [taskPanelFromPlan, setTaskPanelFromPlan] = useState(false);
   const [stopping, setStopping] = useState(false);
 
   const handleBack = useCallback(() => {
@@ -126,6 +129,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   const handleHighlightTask = useCallback((taskKey: string) => {
     setHighlightTaskKey(taskKey);
     setDetailPanel('task');
+    setTaskPanelFromPlan(false);
   }, []);
 
   const handleHighlightTaskConsumed = useCallback(() => {
@@ -137,6 +141,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
       setDetailPanel(key);
       setTaskFilterId(null);
       setHighlightTaskKey(null);
+      setTaskPanelFromPlan(false);
     },
     [],
   );
@@ -145,6 +150,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     setDetailPanel(null);
     setTaskFilterId(null);
     setHighlightTaskKey(null);
+    setTaskPanelFromPlan(false);
   }, []);
 
   // Inside the run panel, a task row's "查看运行" jumps to the run panel
@@ -154,11 +160,26 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     setDetailPanel('run');
   }, []);
 
+  // From the run panel (filtered by a task), go back to the coding task panel.
+  // taskFilterId being set is the signal that we arrived here from a task.
+  const handleBackToTaskFromRun = useCallback(() => {
+    setDetailPanel('task');
+    setTaskFilterId(null);
+  }, []);
+
   // Inside the plan panel, a task's "查看任务" jumps to the task panel and
   // highlights that row.
   const handleJumpTaskFromPlan = useCallback((taskKey: string) => {
     setHighlightTaskKey(taskKey);
     setDetailPanel('task');
+    setTaskPanelFromPlan(true);
+  }, []);
+
+  // From the task panel, go back to the execution plan panel.
+  const handleBackToPlanFromTask = useCallback(() => {
+    setHighlightTaskKey(null);
+    setDetailPanel('plan');
+    setTaskPanelFromPlan(false);
   }, []);
 
   const handleStop = useCallback(async () => {
@@ -254,6 +275,9 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
         comments={comments}
         taskFilterId={taskFilterId}
         onClearTaskFilter={() => setTaskFilterId(null)}
+        onBackToTask={handleBackToTaskFromRun}
+        taskPanelFromPlan={taskPanelFromPlan}
+        onBackToPlan={handleBackToPlanFromTask}
         highlightTaskKey={highlightTaskKey}
         onHighlightTaskConsumed={handleHighlightTaskConsumed}
         onRunLog={handleRunLogOpen}

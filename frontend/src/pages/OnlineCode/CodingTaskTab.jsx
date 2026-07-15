@@ -5,12 +5,13 @@ import React, { useRef, useState, useMemo } from 'react';
 import {
   Button,
   ExtTable,
-  Modal,
   Select,
   message,
 } from '@ead/suid';
 import { CODING_TASK_FIND_BY_PAGE_URL, runCodingTask, rerunCodingTask } from '@/services/codingTask';
 import { findRunsByCodingTask } from '@/services/run';
+import OverviewDrawer from './components/RequirementWorkspace/OverviewDrawer';
+import RunLogDrawer from './components/RequirementWorkspace/RunLogDrawer';
 
 const STATUS_OPTIONS = [
   { value: '', label: '全部' },
@@ -22,25 +23,18 @@ const STATUS_OPTIONS = [
   { value: 'STALE', label: '已过期' },
 ];
 
-const RUN_TYPE_META = {
-  AGENT: { color: 'blue', label: 'Agent' },
-  SYSTEM: { color: 'default', label: '系统' },
-};
-
-const TERMINAL_REASON_LABELS = {
-  SUCCEEDED: '成功',
-  FAILED: '失败',
-  TIMEOUT: '超时',
-  CANCELLED: '取消',
-  SUPERSEDED: '被替代',
-};
-
 const CodingTaskTab = ({ projectId }) => {
   const tableRef = useRef(null);
   const [statusFilter, setStatusFilter] = useState('');
+  // Unified run-history drawer (reuses the RequirementWorkspace components).
+  // open=true shows OverviewDrawer with panelKey='run'; runLogDrawer carries
+  // the selected run for the RunLogDrawer.
   const [runHistoryVisible, setRunHistoryVisible] = useState(false);
   const [runHistory, setRunHistory] = useState([]);
-  const [runHistoryTitle, setRunHistoryTitle] = useState('运行历史');
+  const [runHistoryTaskTitle, setRunHistoryTaskTitle] = useState('');
+  // Log sub-drawer.
+  const [logDrawerOpen, setLogDrawerOpen] = useState(false);
+  const [logDrawerRun, setLogDrawerRun] = useState(null);
 
   const handleRun = async (record) => {
     const res = await runCodingTask(record.id, null);
@@ -68,43 +62,28 @@ const CodingTaskTab = ({ projectId }) => {
     const res = await findRunsByCodingTask(record.id);
     if (res.success && res.data) {
       setRunHistory(res.data);
-      setRunHistoryTitle(`运行历史 - ${record.title || record.id}`);
+      setRunHistoryTaskTitle(record.title || record.id);
       setRunHistoryVisible(true);
-      message.info(`该任务已有 ${res.data.length} 次运行记录`);
+    } else {
+      message.error(res?.message ?? '获取运行历史失败');
     }
   };
 
   const handleCloseRunHistory = () => {
     setRunHistoryVisible(false);
     setRunHistory([]);
+    setRunHistoryTaskTitle('');
   };
 
-  const runHistoryColumns = [
-    { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
-    {
-      title: '类型',
-      dataIndex: 'runType',
-      width: 90,
-      render: (type) => {
-        const meta = RUN_TYPE_META[type] || { label: type || '-' };
-        return meta.label;
-      },
-    },
-    { title: '尝试', dataIndex: 'attemptNo', width: 80, render: (v) => v || '-' },
-    { title: '状态', dataIndex: 'state', width: 120 },
-    { title: '触发来源', dataIndex: 'triggerSource', width: 120 },
-    {
-      title: '终止原因',
-      dataIndex: 'terminalReason',
-      width: 110,
-      render: (v) => TERMINAL_REASON_LABELS[v] || v || '-',
-    },
-    { title: 'Agent', dataIndex: 'agentName', width: 120, render: (v) => v || '-' },
-    { title: 'Token', dataIndex: 'totalTokens', width: 110, render: (v) => (v == null ? '-' : v) },
-    { title: '失败原因', dataIndex: 'failureReason', expandUnusedSpace: true },
-    { title: '开始时间', dataIndex: 'startedDate', width: 170, dataType: 'datetime' },
-    { title: '结束时间', dataIndex: 'finishedDate', width: 170, dataType: 'datetime' },
-  ];
+  const handleOpenLog = (run) => {
+    setLogDrawerRun(run);
+    setLogDrawerOpen(true);
+  };
+
+  const handleCloseLog = () => {
+    setLogDrawerOpen(false);
+    setLogDrawerRun(null);
+  };
 
   const columns = [
     {
@@ -182,21 +161,18 @@ const CodingTaskTab = ({ projectId }) => {
           searchProperties={['title']}
         />
       </div>
-      <Modal
-        title={runHistoryTitle}
-        open={runHistoryVisible}
-        onCancel={handleCloseRunHistory}
-        footer={<Button onClick={handleCloseRunHistory}>关闭</Button>}
-        width={960}
-      >
-        <ExtTable
-          rowKey="id"
-          columns={runHistoryColumns}
-          dataSource={runHistory}
-          remotePaging={false}
-          showSearch={false}
-        />
-      </Modal>
+      <OverviewDrawer
+        panelKey={runHistoryVisible ? 'run' : null}
+        onClose={handleCloseRunHistory}
+        titleOverride={runHistoryVisible ? `运行历史 - ${runHistoryTaskTitle}` : ''}
+        runs={runHistory}
+        onRunLog={handleOpenLog}
+      />
+      <RunLogDrawer
+        open={logDrawerOpen}
+        run={logDrawerRun}
+        onClose={handleCloseLog}
+      />
     </div>
   );
 };
