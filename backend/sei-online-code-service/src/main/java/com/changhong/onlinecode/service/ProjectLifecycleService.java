@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +18,10 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class ProjectLifecycleService {
 
     private final ProjectDao projectDao;
-
-    public ProjectLifecycleService(ProjectDao projectDao) {
-        this.projectDao = projectDao;
-    }
 
     /**
      * 按 id 查找项目。

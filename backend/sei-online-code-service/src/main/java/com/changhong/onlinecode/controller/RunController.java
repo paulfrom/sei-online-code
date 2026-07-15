@@ -11,6 +11,7 @@ import com.changhong.sei.core.dto.serach.PageResult;
 import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,14 +27,11 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "RunApi", description = "运行记录服务")
 @RequestMapping(path = RunApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class RunController extends BaseEntityController<Run, RunDto>
         implements RunApi {
 
     private final RunService service;
-
-    public RunController(RunService service) {
-        this.service = service;
-    }
 
     @Override
     public BaseEntityService<Run> getService() {
@@ -48,18 +46,12 @@ public class RunController extends BaseEntityController<Run, RunDto>
     @Override
     public ResultData<List<RunDto>> findByCodingTask(String codingTaskId) {
         List<Run> runs = service.findByCodingTaskId(codingTaskId);
-        List<RunDto> dtos = runs.stream()
-                .map(this::convertToDto)
-                .collect(Collectors.toList());
-        return ResultData.success(dtos);
+        return ResultData.success(convertToDtos(runs));
     }
 
     @Override
     public ResultData<List<RunDto>> findByRequirement(String requirementId) {
-        List<RunDto> dtos = service.findByRequirementId(requirementId).stream()
-                .map(this::convertToDto)
-                .collect(Collectors.toList());
-        return ResultData.success(dtos);
+        return ResultData.success(convertToDtos(service.findByRequirementId(requirementId)));
     }
 
     @Override

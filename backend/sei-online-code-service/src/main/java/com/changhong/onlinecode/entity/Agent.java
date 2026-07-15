@@ -38,9 +38,6 @@ import java.util.List;
         @Index(name = "uk_agent_name", columnList = "name", unique = true)
 })
 @Access(AccessType.FIELD)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class Agent extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

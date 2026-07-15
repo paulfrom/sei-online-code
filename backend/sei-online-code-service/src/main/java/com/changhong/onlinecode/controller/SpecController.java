@@ -11,6 +11,7 @@ import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,14 +27,11 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "SpecApi", description = "Spec 管理服务")
 @RequestMapping(path = SpecApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class SpecController extends BaseEntityController<Spec, SpecDto>
         implements SpecApi {
 
     private final SpecService service;
-
-    public SpecController(SpecService service) {
-        this.service = service;
-    }
 
     @Override
     public BaseEntityService<Spec> getService() {

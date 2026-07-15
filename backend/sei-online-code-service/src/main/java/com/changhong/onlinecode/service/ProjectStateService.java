@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -19,15 +20,11 @@ import java.util.List;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class ProjectStateService {
 
     private final PlanDao planDao;
     private final FeatureDesignDao featureDesignDao;
-
-    public ProjectStateService(PlanDao planDao, FeatureDesignDao featureDesignDao) {
-        this.planDao = planDao;
-        this.featureDesignDao = featureDesignDao;
-    }
 
     /**
      * 解析项目编码前状态（实时聚合，不持久化）。

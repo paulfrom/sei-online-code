@@ -29,8 +29,8 @@ import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,9 +50,10 @@ import java.util.concurrent.CompletableFuture;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class CodingTaskExecutionService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskExecutionService.class);
     private final CodingTaskDao codingTaskDao;
     private final RunDao runDao;
     private final RunNumberService runNumberService;
@@ -70,42 +71,6 @@ public class CodingTaskExecutionService {
     private final CodingTaskChangeCollector codingTaskChangeCollector;
     private final WorkspaceChangeDetector workspaceChangeDetector;
     private final ApplicationEventPublisher eventPublisher;
-
-    public CodingTaskExecutionService(CodingTaskDao codingTaskDao,
-                                      RunDao runDao,
-                                      RunNumberService runNumberService,
-                                      RequirementService requirementService,
-                                      ExecutionPlanDao executionPlanDao,
-                                      RequirementCommentService requirementCommentService,
-                                      WorkspaceManager workspaceManager,
-                                      AgentService agentService,
-                                      CliRunnerRegistry cliRunnerRegistry,
-                                      FailureInfoSupport failureInfoSupport,
-                                      RequirementDesignContextService requirementDesignContextService,
-                                      DesignContextPromptAssembler designContextPromptAssembler,
-                                      MemoryJobService memoryJobService,
-                                      WorkspaceMemoryService workspaceMemoryService,
-                                      CodingTaskChangeCollector codingTaskChangeCollector,
-                                      WorkspaceChangeDetector workspaceChangeDetector,
-                                      ApplicationEventPublisher eventPublisher) {
-        this.codingTaskDao = codingTaskDao;
-        this.runDao = runDao;
-        this.runNumberService = runNumberService;
-        this.requirementService = requirementService;
-        this.executionPlanDao = executionPlanDao;
-        this.requirementCommentService = requirementCommentService;
-        this.workspaceManager = workspaceManager;
-        this.agentService = agentService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.failureInfoSupport = failureInfoSupport;
-        this.requirementDesignContextService = requirementDesignContextService;
-        this.designContextPromptAssembler = designContextPromptAssembler;
-        this.memoryJobService = memoryJobService;
-        this.workspaceMemoryService = workspaceMemoryService;
-        this.codingTaskChangeCollector = codingTaskChangeCollector;
-        this.workspaceChangeDetector = workspaceChangeDetector;
-        this.eventPublisher = eventPublisher;
-    }
 
     /**
      * Requests logical cancellation and best-effort process termination.
@@ -186,7 +151,7 @@ public class CodingTaskExecutionService {
             CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
             finishRun(trackedRun, task, decision.success(), decision.failureReason(), false);
         }).exceptionally(e -> {
-            LOGGER.error("coding-task execute failed taskId={}", id, e);
+            log.error("coding-task execute failed taskId={}", id, e);
             finishRun(trackedRun, task, false, rootMessage(e), false);
             return null;
         });
@@ -223,7 +188,7 @@ public class CodingTaskExecutionService {
 
         Agent agent = agentService.findByName(agentName);
         if (agent == null) {
-            LOGGER.error("coding-task plan agent not found taskId={}, agentName={}", codingTaskId, agentName);
+            log.error("coding-task plan agent not found taskId={}, agentName={}", codingTaskId, agentName);
             task.setStatus(CodingTaskStatus.FAILED);
             task.setFailureSummary("开发代理未找到");
             task.setFailureDetail("agentName=" + agentName);
@@ -280,7 +245,7 @@ public class CodingTaskExecutionService {
             CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
             finishRun(trackedRun, task, decision.success(), decision.failureReason(), true);
         }).exceptionally(e -> {
-            LOGGER.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
+            log.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
             finishRun(trackedRun, task, false, rootMessage(e), true);
             return null;
         });
@@ -303,8 +268,8 @@ public class CodingTaskExecutionService {
         if (changedFiles.isEmpty()) {
             return CompletionDecision.failed("开发代理未在指定工作区产生代码或文档变更");
         }
-        if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("coding-task: detected workspace changes runId={}, files={}",
+        if (log.isDebugEnabled()) {
+            log.debug("coding-task: detected workspace changes runId={}, files={}",
                     run.getId(), changedFiles);
             return CompletionDecision.ok();
         }
@@ -331,7 +296,7 @@ public class CodingTaskExecutionService {
         Run persistedRun = runDao.findOne(run.getId());
         CodingTask persistedTask = codingTaskDao.findOne(task.getId());
         if (persistedRun == null || persistedTask == null) {
-            LOGGER.warn("finishRun skipped because run/task disappeared. runId={}, taskId={}",
+            log.warn("finishRun skipped because run/task disappeared. runId={}, taskId={}",
                     run.getId(), task.getId());
             return;
         }
@@ -350,7 +315,7 @@ public class CodingTaskExecutionService {
             return;
         }
         if (persistedRun.getState() != RunState.RUNNING || persistedTask.getStatus() != CodingTaskStatus.RUNNING) {
-            LOGGER.info("finishRun skipped because run/task already settled. runId={}, runState={}, taskId={}, taskStatus={}",
+            log.info("finishRun skipped because run/task already settled. runId={}, runState={}, taskId={}, taskStatus={}",
                     persistedRun.getId(), persistedRun.getState(), persistedTask.getId(), persistedTask.getStatus());
             return;
         }
@@ -401,14 +366,14 @@ public class CodingTaskExecutionService {
                     run.getId(),
                     baseWorkspaceMemoryId);
             if (result.successful()) {
-                LOGGER.info("coding-task: 已投递记忆回写 job taskId={}, runId={}, baseMemoryId={}",
+                log.info("coding-task: 已投递记忆回写 job taskId={}, runId={}, baseMemoryId={}",
                         task.getId(), run.getId(), baseWorkspaceMemoryId);
             } else {
-                LOGGER.warn("coding-task: 投递记忆回写 job 失败 taskId={}, reason={}",
+                log.warn("coding-task: 投递记忆回写 job 失败 taskId={}, reason={}",
                         task.getId(), result.getMessage());
             }
         } catch (Exception e) {
-            LOGGER.warn("coding-task: 投递记忆回写 job 异常 taskId={}", task.getId(), e);
+            log.warn("coding-task: 投递记忆回写 job 异常 taskId={}", task.getId(), e);
         }
     }
 

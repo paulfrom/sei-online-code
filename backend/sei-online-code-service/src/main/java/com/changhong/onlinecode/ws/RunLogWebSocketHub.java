@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.ws;
 
 import com.changhong.onlinecode.dto.run.RunLogFrame;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.changhong.sei.core.util.JsonUtils;
 import jakarta.websocket.OnClose;
 import jakarta.websocket.OnError;
 import jakarta.websocket.OnOpen;
@@ -33,7 +33,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RunLogWebSocketHub {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunLogWebSocketHub.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** iterationId → 该迭代的浏览器连接集合。 */
     private static final Map<String, Set<Session>> SESSIONS = new ConcurrentHashMap<>();
@@ -76,7 +75,7 @@ public class RunLogWebSocketHub {
         }
         String payload;
         try {
-            payload = MAPPER.writeValueAsString(frame);
+            payload = JsonUtils.mapper().writeValueAsString(frame);
         } catch (Exception e) {
             LOGGER.warn("run-log ws marshal failed", e);
             return;

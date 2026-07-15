@@ -31,9 +31,6 @@ import jakarta.persistence.Table;
         @Index(name = "idx_agent_skill_skill", columnList = "skill_id")
 })
 @Access(AccessType.FIELD)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class AgentSkill extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

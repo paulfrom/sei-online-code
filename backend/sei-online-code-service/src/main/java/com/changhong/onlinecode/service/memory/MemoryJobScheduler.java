@@ -3,6 +3,8 @@ package com.changhong.onlinecode.service.memory;
 import com.changhong.onlinecode.dao.MemoryJobDao;
 import com.changhong.onlinecode.dto.enums.MemoryJobStatus;
 import com.changhong.onlinecode.entity.MemoryJob;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,17 +24,12 @@ import java.util.Set;
  * @author sei-online-code
  */
 @Component
+@Slf4j
+@AllArgsConstructor
 public class MemoryJobScheduler {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(MemoryJobScheduler.class);
 
     private final MemoryJobDao memoryJobDao;
     private final MemoryJobExecutor executor;
-
-    public MemoryJobScheduler(MemoryJobDao memoryJobDao, MemoryJobExecutor executor) {
-        this.memoryJobDao = memoryJobDao;
-        this.executor = executor;
-    }
 
     /**
      * 轮询可执行 job。默认 30 秒一次，可通过 {@code oc.memory.job.poll-ms} 覆盖。
@@ -57,7 +54,7 @@ public class MemoryJobScheduler {
             try {
                 executor.execute(job);
             } catch (Exception e) {
-                LOGGER.error("memory-scheduler: 执行 job 异常 jobId={}", job.getId(), e);
+                log.error("memory-scheduler: 执行 job 异常 jobId={}", job.getId(), e);
             }
         }
     }

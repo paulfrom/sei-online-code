@@ -24,8 +24,7 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.utils.TransactionUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -46,9 +45,8 @@ import java.util.Objects;
  * {@code INTERRUPTED} or {@code WAITING_HUMAN} requirements.</p>
  */
 @Service
+@Slf4j
 public class CompensationService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(CompensationService.class);
 
     private final RequirementDao requirementDao;
     private final RequirementDesignContextDao requirementDesignContextDao;
@@ -111,7 +109,7 @@ public class CompensationService {
         try {
             transactionTemplate.executeWithoutResult(status -> action.run());
         } catch (Exception e) {
-            LOGGER.error("compensation phase failed: {}", phase, e);
+            log.error("compensation phase failed: {}", phase, e);
         }
     }
 
@@ -135,7 +133,7 @@ public class CompensationService {
             run.setFailureSummary("运行超时");
             run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes + " 分钟未结束");
             runDao.save(run);
-            LOGGER.info("compensation runNo {}, loopId {} 运行超时", run.getRunNo(), run.getLoopId());
+            log.info("compensation runNo {}, loopId {} 运行超时", run.getRunNo(), run.getLoopId());
             CodingTask task = run.getCodingTaskId() == null ? null : codingTaskDao.findOne(run.getCodingTaskId());
             if (task != null && (task.getStatus() == CodingTaskStatus.RUNNING
                     || task.getStatus() == CodingTaskStatus.VALIDATING)) {
@@ -167,7 +165,7 @@ public class CompensationService {
                 FailureStage.PLAN, "PM 执行计划生成超时", run.getFailureReason(),
                 TriggerSource.SCHEDULED_COMPENSATION, now);
         requirementDao.save(requirement);
-        LOGGER.info("PM 执行计划生成超时，requirement {}，loopId {}",
+        log.info("PM 执行计划生成超时，requirement {}，loopId {}",
                 requirement.getId(), run.getLoopId());
     }
 
@@ -196,7 +194,7 @@ public class CompensationService {
             requirementDao.save(requirement);
             compensationLogService.record("REQUIREMENT", requirement.getId(), "RETRY_PRD", true,
                     "恢复 PRD 生成", requirement.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            LOGGER.info("恢复prd生成，prd {}", requirement.getTitle());
+            log.info("恢复prd生成，prd {}", requirement.getTitle());
             String prompt = "上次生成失败，请结合失败摘要重试："
                     + Objects.toString(requirement.getFailureSummary(), "未知失败");
             String generationToken = requirement.getGenerationToken();
@@ -232,7 +230,7 @@ public class CompensationService {
             requirementDao.save(requirement);
             compensationLogService.record("REQUIREMENT", requirement.getId(), "REGENERATE_STALE_PRD", true,
                     "设计上下文 STALE，生成新版本 PRD", null, TriggerSource.SCHEDULED_COMPENSATION);
-            LOGGER.info("设计上下文 STALE，重新生成 PRD，requirement {}，version {}",
+            log.info("设计上下文 STALE，重新生成 PRD，requirement {}，version {}",
                     requirement.getId(), requirement.getPrdVersion());
             requirementCommentService.append(
                     requirement.getId(), requirement.getActiveLoopId(), RequirementCommentAuthorType.SYSTEM,
@@ -293,7 +291,7 @@ public class CompensationService {
         requirementDao.save(requirement);
         compensationLogService.record("REQUIREMENT", requirement.getId(), "RESUME_PLANNING", true,
                 "恢复 PM 执行计划生成", null, TriggerSource.SCHEDULED_COMPENSATION);
-        LOGGER.info("恢复 PM 执行计划生成，requirement {}，loopId {}",
+        log.info("恢复 PM 执行计划生成，requirement {}，loopId {}",
                 requirement.getId(), requirement.getActiveLoopId());
 
         String loopId = requirement.getActiveLoopId();
@@ -336,7 +334,7 @@ public class CompensationService {
             codingTaskDao.save(task);
             compensationLogService.record("CODING_TASK", task.getId(), "RETRY_LOOP_TASK", true,
                     "恢复 loop 编码任务", task.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            LOGGER.info("恢复 loop 编码任务，task {}，requirement {}",
+            log.info("恢复 loop 编码任务，task {}，requirement {}",
                     task.getId(), requirement.getId());
         }
         if (!waitingForRetryWindow && !hasActiveRun(requirement)) {
@@ -351,7 +349,7 @@ public class CompensationService {
         }
         compensationLogService.record("REQUIREMENT", requirement.getId(), "RESUME_ACCEPTANCE", true,
                 "恢复验证/验收边界", null, TriggerSource.SCHEDULED_COMPENSATION);
-        LOGGER.info("恢复验证/验收边界，requirement {}，loopId {}",
+        log.info("恢复验证/验收边界，requirement {}，loopId {}",
                 requirement.getId(), requirement.getActiveLoopId());
         TransactionUtil.afterCommit(() -> automationService.onPlanTasksSettled(requirement.getId()));
     }
@@ -362,7 +360,7 @@ public class CompensationService {
         }
         compensationLogService.record("REQUIREMENT", requirement.getId(), "RESUME_DELIVERY", true,
                 "恢复 GitLab MR 交付", null, TriggerSource.SCHEDULED_COMPENSATION);
-        LOGGER.info("恢复 GitLab MR 交付，requirement {}", requirement.getId());
+        log.info("恢复 GitLab MR 交付，requirement {}", requirement.getId());
         TransactionUtil.afterCommit(() -> deliveryService.retry(requirement.getId()));
     }
 

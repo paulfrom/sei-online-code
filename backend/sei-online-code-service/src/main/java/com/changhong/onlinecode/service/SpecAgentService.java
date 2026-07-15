@@ -16,7 +16,6 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.spec.SpecApiContract;
-import com.changhong.onlinecode.dto.spec.SpecComponent;
 import com.changhong.onlinecode.dto.spec.SpecContent;
 import com.changhong.onlinecode.dto.spec.SpecEntity;
 import com.changhong.onlinecode.dto.spec.SpecPage;
@@ -28,9 +27,9 @@ import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
 import com.changhong.onlinecode.service.agent.AgentRunRecorder;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -54,9 +53,9 @@ import java.util.concurrent.CompletableFuture;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class SpecAgentService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(SpecAgentService.class);
 
     private final SpecDao specDao;
     private final AgentService agentService;
@@ -68,24 +67,6 @@ public class SpecAgentService {
     private final FailureInfoSupport failureInfoSupport;
     private final AgentRunRecorder agentRunRecorder;
     private final RunDao runDao;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    public SpecAgentService(SpecDao specDao, AgentService agentService, SkillService skillService,
-                            ProjectLifecycleService projectLifecycleService, CliRunnerRegistry cliRunnerRegistry,
-                            SkillMaterializer skillMaterializer, BuiltInSkillRegistry builtInSkillRegistry,
-                            FailureInfoSupport failureInfoSupport,
-                            AgentRunRecorder agentRunRecorder, RunDao runDao) {
-        this.specDao = specDao;
-        this.agentService = agentService;
-        this.skillService = skillService;
-        this.projectLifecycleService = projectLifecycleService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.skillMaterializer = skillMaterializer;
-        this.builtInSkillRegistry = builtInSkillRegistry;
-        this.failureInfoSupport = failureInfoSupport;
-        this.agentRunRecorder = agentRunRecorder;
-        this.runDao = runDao;
-    }
 
     /**
      * spawn 需求智能体（latest Spec 应已由 caller 置 GENERATING）。D11 链式落库 SPEC_REVIEW/FAILED。
@@ -101,7 +82,7 @@ public class SpecAgentService {
     public void spawnRequirement(String projectId, String modifyHint, String specId, TriggerSource triggerSource) {
         Spec spec = specDao.findById(specId).orElse(null);
         if (spec == null) {
-            LOGGER.warn("spawnRequirement: no Spec specId={} for projectId={}, skip", specId, projectId);
+            log.warn("spawnRequirement: no Spec specId={} for projectId={}, skip", specId, projectId);
             return;
         }
         spec.setLastTriggerSource(triggerSource);
@@ -117,7 +98,7 @@ public class SpecAgentService {
                     agent.getName(), agent.getInstructions(),
                     agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    LOGGER);
+                    log);
         }
         Run run = agentRunRecorder.createAgentRun(buildSpecRunCommand(
                 projectId, iterationId, prompt, agent, triggerSource));
@@ -151,7 +132,7 @@ public class SpecAgentService {
                     projectLifecycleService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
                 })
                 .exceptionally(e -> {
-                    LOGGER.error("spawnRequirement failed projectId={} specId={}", projectId, specId, e);
+                    log.error("spawnRequirement failed projectId={} specId={}", projectId, specId, e);
                     settleRun(runId, RunState.FAILED, rootMessage(e));
                     spec.setState(SpecState.FAILED);
                     failureInfoSupport.markSpecFailure(spec,
@@ -197,12 +178,12 @@ public class SpecAgentService {
     private <T> T parseJson(String json, Class<T> type) {
         String extracted = extractJsonObject(json);
         try {
-            return objectMapper.readValue(extracted, type);
+            return JsonUtils.mapper().readValue(extracted, type);
         } catch (Exception e) {
             String repaired = repairTruncatedJson(extracted);
             if (!repaired.equals(extracted)) {
                 try {
-                    return objectMapper.readValue(repaired, type);
+                    return JsonUtils.mapper().readValue(repaired, type);
                 } catch (Exception retry) {
                     e.addSuppressed(retry);
                 }
@@ -351,7 +332,7 @@ public class SpecAgentService {
             }
             runDao.save(current);
         } catch (Exception e) {
-            LOGGER.warn("spec-agent: 更新 Run 终态失败 runId={}", runId, e);
+            log.warn("spec-agent: 更新 Run 终态失败 runId={}", runId, e);
         }
     }
 

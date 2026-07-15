@@ -1,7 +1,6 @@
 package com.changhong.onlinecode.service.memory;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -28,9 +27,8 @@ import java.util.concurrent.TimeUnit;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class CodingTaskChangeCollector {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskChangeCollector.class);
 
     /** 默认最大变更文件数；超过则不再读取片段，由调用方判断是否降级。 */
     private static final int MAX_CHANGED_FILES_FOR_SNIPPETS = 20;
@@ -232,18 +230,18 @@ public class CodingTaskChangeCollector {
             boolean finished = process.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                LOGGER.warn("coding-task-memory: git 命令超时 command={}", command);
+                log.warn("coding-task-memory: git 命令超时 command={}", command);
                 return null;
             }
             if (process.exitValue() != 0) {
                 String error = readStream(process);
-                LOGGER.warn("coding-task-memory: git 命令失败 command={}, exit={}, output={}",
+                log.warn("coding-task-memory: git 命令失败 command={}, exit={}, output={}",
                         command, process.exitValue(), error);
                 return null;
             }
             return readStream(process).trim();
         } catch (IOException | InterruptedException e) {
-            LOGGER.warn("coding-task-memory: git 命令异常 command={}", command, e);
+            log.warn("coding-task-memory: git 命令异常 command={}", command, e);
             Thread.currentThread().interrupt();
             return null;
         }
@@ -304,7 +302,7 @@ public class CodingTaskChangeCollector {
             }
             return text;
         } catch (IOException e) {
-            LOGGER.warn("coding-task-memory: 读取文件片段失败 file={}", filePath, e);
+            log.warn("coding-task-memory: 读取文件片段失败 file={}", filePath, e);
             return null;
         }
     }

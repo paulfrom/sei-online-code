@@ -7,6 +7,7 @@ import com.changhong.onlinecode.service.MemorySeedTemplateService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,13 +27,10 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "MemorySeedTemplateApi", description = "平台 seed 记忆模板配置服务")
 @RequestMapping(path = MemorySeedTemplateApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class MemorySeedTemplateController implements MemorySeedTemplateApi {
 
     private final MemorySeedTemplateService service;
-
-    public MemorySeedTemplateController(MemorySeedTemplateService service) {
-        this.service = service;
-    }
 
     @Override
     public ResultData<List<MemorySeedTemplateDto>> list() {

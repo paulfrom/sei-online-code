@@ -19,6 +19,9 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.gitlab4j.api.Constants;
 import org.gitlab4j.api.GitLabApi;
 import org.gitlab4j.api.models.MergeRequest;
@@ -41,9 +44,9 @@ import java.util.Objects;
  * Requirement 交付服务：commit/push 并创建或更新 GitLab MR。
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class RequirementDeliveryService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(RequirementDeliveryService.class);
 
     private final RequirementDao requirementDao;
     private final ExecutionPlanDao executionPlanDao;
@@ -54,26 +57,6 @@ public class RequirementDeliveryService {
     private final RequirementCommentService requirementCommentService;
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
-
-    public RequirementDeliveryService(RequirementDao requirementDao,
-                                      ExecutionPlanDao executionPlanDao,
-                                      RunDao runDao,
-                                      RunNumberService runNumberService,
-                                      ConfigService configService,
-                                      WorkspaceManager workspaceManager,
-                                      RequirementCommentService requirementCommentService,
-                                      MemoryJobService memoryJobService,
-                                      WorkspaceMemoryService workspaceMemoryService) {
-        this.requirementDao = requirementDao;
-        this.executionPlanDao = executionPlanDao;
-        this.runDao = runDao;
-        this.runNumberService = runNumberService;
-        this.configService = configService;
-        this.workspaceManager = workspaceManager;
-        this.requirementCommentService = requirementCommentService;
-        this.memoryJobService = memoryJobService;
-        this.workspaceMemoryService = workspaceMemoryService;
-    }
 
     @Transactional(rollbackFor = Exception.class)
     public void deliver(String requirementId, String executionPlanId) {
@@ -114,7 +97,7 @@ public class RequirementDeliveryService {
                             validationComment == null ? null : validationComment.getContent()));
             submitDeliveryMemoryJob(requirement, plan, result, run);
         } catch (Exception e) {
-            LOGGER.warn("requirement delivery failed requirementId={}", requirementId, e);
+            log.warn("requirement delivery failed requirementId={}", requirementId, e);
             run.setState(RunState.FAILED);
             run.setFailureSummary("GitLab MR 交付失败");
             run.setFailureReason(e.getMessage());
@@ -270,7 +253,7 @@ public class RequirementDeliveryService {
 
     private String toJson(Object value) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (Exception e) {
             throw new IllegalStateException("交付记忆载荷序列化失败", e);
         }

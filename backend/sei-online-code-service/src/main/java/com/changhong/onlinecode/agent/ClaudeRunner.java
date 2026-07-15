@@ -3,10 +3,9 @@ package com.changhong.onlinecode.agent;
 import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.dto.run.RunLogFrame;
 import com.changhong.onlinecode.ws.RunLogWebSocketHub;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -35,9 +34,9 @@ import java.util.concurrent.ConcurrentMap;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class ClaudeRunner implements CliRunner {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ClaudeRunner.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     @Override
@@ -48,7 +47,6 @@ public class ClaudeRunner implements CliRunner {
     /** claude 可执行文件路径，允许由环境变量覆盖，缺省为 PATH 中的 "claude"。 */
     private final String executable;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final ConcurrentMap<String, Process> activeProcesses = new ConcurrentHashMap<>();
 
     public ClaudeRunner() {
@@ -128,7 +126,7 @@ public class ClaudeRunner implements CliRunner {
             // 非零退出码但 stdout 中存在可解析 usage 时，仍尽力保存。
             return failedResult("claude exited with code " + code, usage);
         } catch (IOException e) {
-            LOGGER.warn("claude spawn failed: iterationId={}", iterationId, e);
+            log.warn("claude spawn failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } catch (InterruptedException e) {
@@ -143,7 +141,7 @@ public class ClaudeRunner implements CliRunner {
                 try {
                     Files.deleteIfExists(mcpConfigFile);
                 } catch (IOException e) {
-                    LOGGER.debug("claude mcp config temp file cleanup failed: iterationId={}, path={}",
+                    log.debug("claude mcp config temp file cleanup failed: iterationId={}, path={}",
                             iterationId, mcpConfigFile, e);
                 }
             }
@@ -187,12 +185,12 @@ public class ClaudeRunner implements CliRunner {
      */
     private Envelope parseEnvelope(String stdout, String iterationId) {
         try {
-            JsonNode node = objectMapper.readTree(stdout);
+            JsonNode node = JsonUtils.mapper().readTree(stdout);
             String result = extractResultText(node);
             AgentUsage usage = extractUsage(node);
             return new Envelope(result, usage);
         } catch (Exception e) {
-            LOGGER.warn("claude result envelope parse failed, iterationId={}, rawHead={}",
+            log.warn("claude result envelope parse failed, iterationId={}, rawHead={}",
                     iterationId, stdout.substring(0, Math.min(stdout.length(), 200)));
             AgentUsage unavailable = new AgentUsage();
             unavailable.setStatus(UsageStatus.UNAVAILABLE);
@@ -296,9 +294,9 @@ public class ClaudeRunner implements CliRunner {
             return null;
         }
         try {
-            objectMapper.readTree(mcpConfig);
+            JsonUtils.mapper().readTree(mcpConfig);
         } catch (IOException e) {
-            LOGGER.warn("claude mcp config ignored because it is not valid JSON", e);
+            log.warn("claude mcp config ignored because it is not valid JSON", e);
             return null;
         }
         Path file = Files.createTempFile("claude-mcp-", ".json");
@@ -315,7 +313,7 @@ public class ClaudeRunner implements CliRunner {
                     emit(iterationId, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
-                LOGGER.debug("claude stderr pump ended: iterationId={}", iterationId, e);
+                log.debug("claude stderr pump ended: iterationId={}", iterationId, e);
             }
         }, "claude-stderr-" + iterationId);
     }

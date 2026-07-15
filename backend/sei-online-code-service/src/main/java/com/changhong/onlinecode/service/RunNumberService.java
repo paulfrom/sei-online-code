@@ -2,6 +2,7 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.entity.Run;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -9,13 +10,10 @@ import java.util.Objects;
 
 /** Assigns monotonic display numbers to Runs within their owning execution scope. */
 @Service
+@AllArgsConstructor
 public class RunNumberService {
 
     private final RunDao runDao;
-
-    public RunNumberService(RunDao runDao) {
-        this.runDao = runDao;
-    }
 
     public synchronized Run assign(Run run) {
         if (run == null || run.getRunNo() != null) {

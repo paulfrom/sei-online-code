@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service.memory;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -31,10 +31,8 @@ import java.util.stream.Stream;
  * @author sei-online-code
  */
 @Service
+@Slf4j
 public class WorkspaceMemoryScannerService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceMemoryScannerService.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final Set<String> AGENT_MEMORY_FILES = Set.of(
             "project-memory.md", "memory-rules.md", "decisions.md", "modules.md");
@@ -192,7 +190,7 @@ public class WorkspaceMemoryScannerService {
                             }
                         });
             } catch (IOException e) {
-                LOGGER.warn("memory-scan: 读取 docs 失败 projectId=?", e);
+                log.warn("memory-scan: 读取 docs 失败 projectId=?", e);
             }
         }
         return result;
@@ -211,7 +209,7 @@ public class WorkspaceMemoryScannerService {
             file.body = parse.body;
             return file;
         } catch (IOException e) {
-            LOGGER.warn("memory-scan: 读取文件失败 file={}", path, e);
+            log.warn("memory-scan: 读取文件失败 file={}", path, e);
             return null;
         }
     }
@@ -409,7 +407,7 @@ public class WorkspaceMemoryScannerService {
 
     private String toJson(Object value) {
         try {
-            return MAPPER.writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (Exception e) {
             throw new IllegalStateException("序列化 JSON 失败", e);
         }

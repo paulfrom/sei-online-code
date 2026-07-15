@@ -6,6 +6,7 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.service.RequirementDesignContextService;
 import com.changhong.sei.core.dto.ResultData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,13 +22,10 @@ import java.util.Objects;
 @RestController
 @Tag(name = "MemoryRequirementContextApi", description = "需求级设计上下文服务")
 @RequestMapping(path = MemoryRequirementContextApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class MemoryRequirementContextController implements MemoryRequirementContextApi {
 
     private final RequirementDesignContextService requirementDesignContextService;
-
-    public MemoryRequirementContextController(RequirementDesignContextService requirementDesignContextService) {
-        this.requirementDesignContextService = requirementDesignContextService;
-    }
 
     @Override
     public ResultData<RequirementDesignContextDto> current(String requirementId) {

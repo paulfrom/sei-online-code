@@ -1,7 +1,7 @@
 package com.changhong.onlinecode.entity.converter;
 
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.AttributeConverter;
 import org.apache.commons.lang3.StringUtils;
 
@@ -17,8 +17,6 @@ import java.util.List;
  */
 public abstract class AbstractJsonListConverter<T> implements AttributeConverter<List<T>, String> {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     protected abstract TypeReference<List<T>> typeReference();
 
     @Override
@@ -27,7 +25,7 @@ public abstract class AbstractJsonListConverter<T> implements AttributeConverter
             return null;
         }
         try {
-            return MAPPER.writeValueAsString(attribute);
+            return JsonUtils.mapper().writeValueAsString(attribute);
         } catch (Exception e) {
             throw new IllegalStateException("序列化 JSON 列失败", e);
         }
@@ -39,7 +37,7 @@ public abstract class AbstractJsonListConverter<T> implements AttributeConverter
             return null;
         }
         try {
-            return MAPPER.readValue(dbData, typeReference());
+            return JsonUtils.mapper().readValue(dbData, typeReference());
         } catch (Exception e) {
             throw new IllegalStateException("反序列化 JSON 列失败", e);
         }

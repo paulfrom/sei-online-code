@@ -1,7 +1,6 @@
 package com.changhong.onlinecode.agent;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
@@ -28,9 +27,8 @@ import java.util.List;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class WorktreeManager {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(WorktreeManager.class);
 
     /**
      * 为某任务在 gitRoot 下新建 worktree 与分支。
@@ -45,7 +43,7 @@ public class WorktreeManager {
         // git worktree add 需要自行创建目录，若占位目录已存在则先删除（参考 git.go setupGitWorktree）。
         File placeholder = new File(worktreePath);
         if (placeholder.exists() && !placeholder.delete()) {
-            LOGGER.warn("worktree: 占位目录删除失败 path={}", worktreePath);
+            log.warn("worktree: 占位目录删除失败 path={}", worktreePath);
         }
         // TODO(oma-deferred): 分支名冲突时追加时间戳重试（参考 git.go 的 branchName-<ts> 兜底）
         return runGit(gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef);
@@ -62,7 +60,7 @@ public class WorktreeManager {
         boolean ok = runGit(gitRoot, "merge", "--ff-only", branchName);
         if (!ok) {
             // TODO(oma-deferred): 冲突回退（ADR-0001 A-primary + B-fallback）—— 由责任 Task 串行重解后重试
-            LOGGER.warn("worktree: fast-forward 合并失败（冲突），需串行重解 branch={}", branchName);
+            log.warn("worktree: fast-forward 合并失败（冲突），需串行重解 branch={}", branchName);
         }
         return ok;
     }
@@ -76,11 +74,11 @@ public class WorktreeManager {
      */
     public void removeWorktree(String gitRoot, String worktreePath, String branchName) {
         if (!runGit(gitRoot, "worktree", "remove", "--force", worktreePath)) {
-            LOGGER.warn("worktree: 移除失败 path={}", worktreePath);
+            log.warn("worktree: 移除失败 path={}", worktreePath);
         }
         if (branchName != null && !branchName.isBlank()
                 && !runGit(gitRoot, "branch", "-D", branchName)) {
-            LOGGER.warn("worktree: 分支删除失败 branch={}", branchName);
+            log.warn("worktree: 分支删除失败 branch={}", branchName);
         }
     }
 
@@ -106,12 +104,12 @@ public class WorktreeManager {
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             int code = process.waitFor();
             if (code != 0) {
-                LOGGER.warn("git 命令失败 code={} cmd={} output={}", code, String.join(" ", cmd), output.trim());
+                log.warn("git 命令失败 code={} cmd={} output={}", code, String.join(" ", cmd), output.trim());
                 return false;
             }
             return true;
         } catch (IOException e) {
-            LOGGER.warn("git 命令执行异常 cmd={}", String.join(" ", cmd), e);
+            log.warn("git 命令执行异常 cmd={}", String.join(" ", cmd), e);
             return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

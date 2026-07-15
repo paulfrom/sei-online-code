@@ -42,9 +42,6 @@ import java.util.List;
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class Skill extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

@@ -35,9 +35,6 @@ import java.util.Date;
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class Run extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

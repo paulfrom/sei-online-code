@@ -6,11 +6,10 @@ import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.service.ConfigService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.gitlab4j.api.Constants;
 import org.gitlab4j.api.GitLabApi;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -49,10 +48,9 @@ import java.util.zip.ZipInputStream;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class WorkspaceManager {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceManager.class);
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String MANIFEST_PATH = ".sei/workspace.json";
     private static final Pattern REPLACE_PATTERN = Pattern.compile("([a-zA-Z]+)_(\\w+)_([a-zA-Z]+)");
     private static final String DEFAULT_PROJECT_VERSION = "1.0.0-SNAPSHOT";
@@ -197,7 +195,7 @@ public class WorkspaceManager {
             for (ScaffoldGenerator.ScaffoldFile file : scaffoldGenerator.generate()) {
                 writeFile(workspaceDir.resolve(file.path()), scaffoldGenerator.contentOf(file.path()));
             }
-            LOGGER.info("workspace: 已生成脚手架 dir={}, files={}", workspaceDir, scaffoldGenerator.generate().size());
+            log.info("workspace: 已生成脚手架 dir={}, files={}", workspaceDir, scaffoldGenerator.generate().size());
         } catch (IOException e) {
             throw new IllegalStateException("初始化脚手架工作区失败: " + workspaceDir, e);
         }
@@ -218,7 +216,7 @@ public class WorkspaceManager {
             } else {
                 generateFromTemplateArchive(resolveTemplateRepo(templateUrl), workspaceDir, project);
             }
-            LOGGER.info("workspace: 已从模板生成 dir={}, template={}", workspaceDir, templateUrl);
+            log.info("workspace: 已从模板生成 dir={}, template={}", workspaceDir, templateUrl);
         } catch (IOException e) {
             deleteTree(workspaceDir);
             throw new IllegalStateException("拉取模板仓归档失败: " + templateUrl, e);
@@ -537,9 +535,9 @@ public class WorkspaceManager {
             return null;
         }
         try {
-            return OBJECT_MAPPER.readValue(Files.readString(manifestPath, StandardCharsets.UTF_8), WorkspaceManifest.class);
+            return JsonUtils.mapper().readValue(Files.readString(manifestPath, StandardCharsets.UTF_8), WorkspaceManifest.class);
         } catch (IOException e) {
-            LOGGER.warn("workspace manifest 读取失败，path={}", manifestPath, e);
+            log.warn("workspace manifest 读取失败，path={}", manifestPath, e);
             return null;
         }
     }
@@ -552,7 +550,7 @@ public class WorkspaceManager {
                 Files.createDirectories(parent);
             }
             Files.writeString(target,
-                    OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(manifest),
+                    JsonUtils.mapper().writerWithDefaultPrettyPrinter().writeValueAsString(manifest),
                     StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new IllegalStateException("写入工作区清单失败: " + workspaceDir, e);
@@ -576,11 +574,11 @@ public class WorkspaceManager {
                 try {
                     Files.deleteIfExists(path);
                 } catch (IOException e) {
-                    LOGGER.warn("workspace 清理失败 path={}", path, e);
+                    log.warn("workspace 清理失败 path={}", path, e);
                 }
             });
         } catch (IOException e) {
-            LOGGER.warn("workspace 清理失败 root={}", dir, e);
+            log.warn("workspace 清理失败 root={}", dir, e);
         }
     }
 

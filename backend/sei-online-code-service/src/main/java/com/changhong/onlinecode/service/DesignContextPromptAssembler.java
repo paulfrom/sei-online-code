@@ -5,15 +5,14 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.MemoryConflictFinding;
 import com.changhong.onlinecode.service.memory.MemoryRealityClaim;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -34,7 +33,6 @@ import java.util.Objects;
 public class DesignContextPromptAssembler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DesignContextPromptAssembler.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** agent-memory 正文注入到 prompt 的字符预算，避免占用过多上下文窗口。 */
     static final int AGENT_MEMORY_BUDGET = 4000;
@@ -224,15 +222,15 @@ public class DesignContextPromptAssembler {
             return List.of();
         }
         try {
-            JsonNode root = MAPPER.readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(json);
             if (root.isArray()) {
-                return MAPPER.convertValue(root, new TypeReference<List<MemoryConflictFinding>>() { });
+                return JsonUtils.mapper().convertValue(root, new TypeReference<List<MemoryConflictFinding>>() { });
             }
             List<MemoryConflictFinding> result = new java.util.ArrayList<>();
             for (String level : List.of("high", "medium", "low")) {
                 JsonNode values = root.get(level);
                 if (values != null && values.isArray()) {
-                    result.addAll(MAPPER.convertValue(values,
+                    result.addAll(JsonUtils.mapper().convertValue(values,
                             new TypeReference<List<MemoryConflictFinding>>() { }));
                 }
             }
@@ -256,7 +254,7 @@ public class DesignContextPromptAssembler {
             return null;
         }
         try {
-            return MAPPER.readValue(json, typeReference);
+            return JsonUtils.mapper().readValue(json, typeReference);
         } catch (IOException e) {
             LOGGER.warn("设计上下文 JSON 反序列化失败", e);
             return null;

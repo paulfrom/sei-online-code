@@ -37,9 +37,6 @@ import java.util.List;
         @Index(name = "idx_coding_task_status", columnList = "status")
 })
 @Access(AccessType.FIELD)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class CodingTask extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

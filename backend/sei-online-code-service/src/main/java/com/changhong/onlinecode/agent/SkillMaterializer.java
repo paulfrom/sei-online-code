@@ -1,7 +1,6 @@
 package com.changhong.onlinecode.agent;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -34,9 +33,8 @@ import java.util.List;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class SkillMaterializer {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(SkillMaterializer.class);
 
     private static final String SKILL_FILE = "SKILL.md";
     private static final String LOCK_FILE = ".lock";
@@ -91,7 +89,7 @@ public class SkillMaterializer {
                     written++;
                 }
             } catch (IOException e) {
-                LOGGER.warn("materialize: 写入技能失败 name={} path={}", skill.name(), worktreePath, e);
+                log.warn("materialize: 写入技能失败 name={} path={}", skill.name(), worktreePath, e);
             }
         }
         return written;
@@ -140,7 +138,7 @@ public class SkillMaterializer {
             }
             Path resolved = dir.resolve(file.path()).normalize();
             if (!resolved.startsWith(dir)) {
-                LOGGER.warn("materialize: 辅助文件路径越界，跳过 name={} path={}", skill.name(), file.path());
+                log.warn("materialize: 辅助文件路径越界，跳过 name={} path={}", skill.name(), file.path());
                 continue;
             }
             Path parent = resolved.getParent();

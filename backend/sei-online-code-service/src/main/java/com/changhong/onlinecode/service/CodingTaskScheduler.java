@@ -12,10 +12,9 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,9 +39,9 @@ import java.util.stream.Collectors;
  * {@link CodingTaskStatus#VALIDATION_FAILED}，任何终态变化后重新调度。</p>
  */
 @Service
+@Slf4j
+@AllArgsConstructor
 public class CodingTaskScheduler {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskScheduler.class);
 
     private static final Set<CodingTaskStatus> ACTIVE_STATUSES = EnumSet.of(
             CodingTaskStatus.RUNNING, CodingTaskStatus.VALIDATING);
@@ -60,38 +59,9 @@ public class CodingTaskScheduler {
     private final CodingTaskChangeCollector changeCollector;
     private final ApplicationEventPublisher eventPublisher;
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
-    private RequirementCommentService requirementCommentService;
-    private ValidationLoopService validationLoopService;
-    private ObjectMapper objectMapper = new ObjectMapper();
+    private final RequirementCommentService requirementCommentService;
+    private final ValidationLoopService validationLoopService;
 
-    public CodingTaskScheduler(CodingTaskDao codingTaskDao,
-                               RequirementDao requirementDao,
-                               CodingTaskExecutionService executionService,
-                               RunDao runDao,
-                               CodingTaskChangeCollector changeCollector,
-                               ApplicationEventPublisher eventPublisher) {
-        this.codingTaskDao = codingTaskDao;
-        this.requirementDao = requirementDao;
-        this.executionService = executionService;
-        this.runDao = runDao;
-        this.changeCollector = changeCollector;
-        this.eventPublisher = eventPublisher;
-    }
-
-    @Autowired
-    public void setRequirementCommentService(RequirementCommentService requirementCommentService) {
-        this.requirementCommentService = requirementCommentService;
-    }
-
-    @Autowired
-    public void setObjectMapper(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
-
-    @Autowired
-    public void setValidationLoopService(ValidationLoopService validationLoopService) {
-        this.validationLoopService = validationLoopService;
-    }
 
     /**
      * 重新调度指定需求下的所有 CodingTask。
@@ -106,7 +76,7 @@ public class CodingTaskScheduler {
         }
         ReentrantLock lock = requirementLocks.computeIfAbsent(requirementId, k -> new ReentrantLock());
         if (!lock.tryLock()) {
-            LOGGER.debug("schedule skipped because another pass is running for requirement {}", requirementId);
+            log.debug("schedule skipped because another pass is running for requirement {}", requirementId);
             return;
         }
         try {
@@ -120,7 +90,7 @@ public class CodingTaskScheduler {
     protected void doSchedule(String requirementId) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
-            LOGGER.warn("schedule: requirement not found {}", requirementId);
+            log.warn("schedule: requirement not found {}", requirementId);
             return;
         }
         String currentLoopId = requirement.getActiveLoopId();
@@ -222,16 +192,16 @@ public class CodingTaskScheduler {
     public void onDevelopmentRunFinished(String codingTaskId, boolean success, String failureReason) {
         CodingTask task = codingTaskDao.findOne(codingTaskId);
         if (task == null) {
-            LOGGER.warn("onDevelopmentRunFinished: task not found {}", codingTaskId);
+            log.warn("onDevelopmentRunFinished: task not found {}", codingTaskId);
             return;
         }
         Requirement requirement = requirementDao.findOne(task.getRequirementId());
         if (requirement == null) {
-            LOGGER.warn("onDevelopmentRunFinished: requirement not found {}", task.getRequirementId());
+            log.warn("onDevelopmentRunFinished: requirement not found {}", task.getRequirementId());
             return;
         }
         if (!Objects.equals(task.getLoopId(), requirement.getActiveLoopId())) {
-            LOGGER.info("onDevelopmentRunFinished: task {} loopId mismatch, mark stale", codingTaskId);
+            log.info("onDevelopmentRunFinished: task {} loopId mismatch, mark stale", codingTaskId);
             task.setStatus(CodingTaskStatus.STALE);
             codingTaskDao.save(task);
             schedule(task.getRequirementId());
@@ -335,9 +305,9 @@ public class CodingTaskScheduler {
 
     private String toJson(Object value) {
         try {
-            return objectMapper.writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (Exception e) {
-            LOGGER.warn("serialize coding-task comment metadata failed", e);
+            log.warn("serialize coding-task comment metadata failed", e);
             return "{}";
         }
     }

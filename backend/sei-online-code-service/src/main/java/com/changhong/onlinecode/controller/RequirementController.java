@@ -19,6 +19,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,6 +34,7 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "RequirementApi", description = "需求管理服务")
 @RequestMapping(path = RequirementApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class RequirementController extends BaseEntityController<Requirement, RequirementDto>
         implements RequirementApi {
 
@@ -41,15 +43,6 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     private final RequirementCommentService requirementCommentService;
     private final RequirementDeliveryService requirementDeliveryService;
 
-    public RequirementController(RequirementService service,
-                                 RequirementAutomationService requirementAutomationService,
-                                 RequirementCommentService requirementCommentService,
-                                 RequirementDeliveryService requirementDeliveryService) {
-        this.service = service;
-        this.requirementAutomationService = requirementAutomationService;
-        this.requirementCommentService = requirementCommentService;
-        this.requirementDeliveryService = requirementDeliveryService;
-    }
 
     @Override
     public BaseEntityService<Requirement> getService() {
@@ -58,12 +51,7 @@ public class RequirementController extends BaseEntityController<Requirement, Req
 
     @Override
     public ResultData<PageResult<RequirementDto>> findByPage(Search search) {
-        PageResult<Requirement> page = service.findByPage(search);
-        PageResult<RequirementDto> dtoPage = new PageResult<>(page);
-        dtoPage.setRows(page.getRows().stream()
-                .map(service::convertToDto)
-                .collect(Collectors.toList()));
-        return ResultData.success(dtoPage);
+        return convertToDtoPageResult(service.findByPage(search));
     }
 
     @Override

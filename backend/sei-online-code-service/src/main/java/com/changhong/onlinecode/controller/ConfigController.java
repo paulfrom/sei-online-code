@@ -8,6 +8,7 @@ import com.changhong.onlinecode.service.ConfigService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,13 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @Tag(name = "ConfigApi", description = "平台配置服务")
 @RequestMapping(path = ConfigApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class ConfigController implements ConfigApi {
 
     private final ConfigService service;
-
-    public ConfigController(ConfigService service) {
-        this.service = service;
-    }
 
     @Override
     public ResultData<PlatformConfigDto> get() {

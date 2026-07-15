@@ -9,9 +9,11 @@ import com.changhong.onlinecode.service.memory.MemoryNormClaim;
 import com.changhong.onlinecode.service.memory.MemoryRealityClaim;
 import com.changhong.onlinecode.service.memory.WorkspaceNorms;
 import com.changhong.onlinecode.service.memory.WorkspaceSnapshot;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -43,7 +45,7 @@ import java.util.stream.Collectors;
 public class DesignMemoryValidationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DesignMemoryValidationService.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private static final List<String> CHOICE_MARKERS = List.of(
             "使用", "采用", "选用", "引入", "依赖", "基于", "接入",
             "use", "using", "adopt", "choose", "chosen", "based on", "depend on", "depends on");
@@ -82,23 +84,12 @@ public class DesignMemoryValidationService {
     /**
      * 校验发现项。
      */
+    @Data
+    @AllArgsConstructor
     public static class ValidationFinding {
         private String severity;
         private String message;
         private String suggestedAction;
-
-        public ValidationFinding(String severity, String message, String suggestedAction) {
-            this.severity = severity;
-            this.message = message;
-            this.suggestedAction = suggestedAction;
-        }
-
-        public String getSeverity() { return severity; }
-        public void setSeverity(String severity) { this.severity = severity; }
-        public String getMessage() { return message; }
-        public void setMessage(String message) { this.message = message; }
-        public String getSuggestedAction() { return suggestedAction; }
-        public void setSuggestedAction(String suggestedAction) { this.suggestedAction = suggestedAction; }
     }
 
     private final WorkspaceMemoryDao workspaceMemoryDao;
@@ -471,15 +462,15 @@ public class DesignMemoryValidationService {
             return List.of();
         }
         try {
-            JsonNode root = MAPPER.readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(json);
             if (root.isArray()) {
-                return MAPPER.convertValue(root, new TypeReference<List<MemoryConflictFinding>>() { });
+                return JsonUtils.mapper().convertValue(root, new TypeReference<List<MemoryConflictFinding>>() { });
             }
             List<MemoryConflictFinding> result = new ArrayList<>();
             for (String level : List.of("high", "medium", "low")) {
                 JsonNode values = root.get(level);
                 if (values != null && values.isArray()) {
-                    result.addAll(MAPPER.convertValue(values,
+                    result.addAll(JsonUtils.mapper().convertValue(values,
                             new TypeReference<List<MemoryConflictFinding>>() { }));
                 }
             }
@@ -495,7 +486,7 @@ public class DesignMemoryValidationService {
             return null;
         }
         try {
-            return MAPPER.readValue(json, type);
+            return JsonUtils.mapper().readValue(json, type);
         } catch (IOException e) {
             LOGGER.warn("校验服务 JSON 反序列化失败", e);
             return null;
@@ -507,7 +498,7 @@ public class DesignMemoryValidationService {
             return List.of();
         }
         try {
-            return MAPPER.readValue(json, MAPPER.getTypeFactory()
+            return JsonUtils.mapper().readValue(json, JsonUtils.mapper().getTypeFactory()
                     .constructCollectionType(List.class, elementType));
         } catch (IOException e) {
             LOGGER.warn("校验服务 JSON 列表反序列化失败", e);

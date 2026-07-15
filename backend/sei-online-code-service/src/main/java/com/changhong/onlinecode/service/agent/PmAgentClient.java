@@ -5,11 +5,8 @@ import com.changhong.onlinecode.agent.AgentInvocationContext;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
-import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
-import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
@@ -21,10 +18,9 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.RequirementAutomationService;
-import com.changhong.onlinecode.service.RunNumberService;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -49,6 +45,7 @@ import java.util.concurrent.TimeUnit;
  * 在事务内决定是否回滚。</p>
  */
 @Component
+@AllArgsConstructor
 public class PmAgentClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PmAgentClient.class);
@@ -58,27 +55,8 @@ public class PmAgentClient {
 
     private final AgentService agentService;
     private final CliRunnerRegistry cliRunnerRegistry;
-    private final WorkspaceManager workspaceManager;
     private final RunDao runDao;
-    private final RunNumberService runNumberService;
     private final AgentRunRecorder agentRunRecorder;
-    private final ObjectMapper objectMapper;
-
-    public PmAgentClient(AgentService agentService,
-                         CliRunnerRegistry cliRunnerRegistry,
-                         WorkspaceManager workspaceManager,
-                         RunDao runDao,
-                         RunNumberService runNumberService,
-                         AgentRunRecorder agentRunRecorder,
-                         ObjectMapper objectMapper) {
-        this.agentService = agentService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.workspaceManager = workspaceManager;
-        this.runDao = runDao;
-        this.runNumberService = runNumberService;
-        this.agentRunRecorder = agentRunRecorder;
-        this.objectMapper = objectMapper;
-    }
 
     /**
      * 调用 pm-agent 生成执行计划。
@@ -370,7 +348,7 @@ public class PmAgentClient {
 
     private PmPlanResult parsePlanJson(String json, String requirementId, String loopId) {
         try {
-            JsonNode root = objectMapper.readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(json);
             String goal = root.path("goal").asText("");
             List<String> risks = readStringList(root.path("risks"));
             List<ValidationCommand> validationCommands = readValidationCommands(root.path("validation"));
@@ -413,7 +391,7 @@ public class PmAgentClient {
 
     private PmAcceptanceResult parseAcceptanceJson(String json) {
         try {
-            JsonNode root = objectMapper.readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(json);
             boolean accepted = root.path("accepted").asBoolean(false);
             String summary = root.path("summary").asText("");
             List<String> findings = readStringList(root.path("findings"));

@@ -10,6 +10,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResult;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,15 +33,11 @@ import java.util.stream.Collectors;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class AgentService extends BaseEntityService<Agent> {
 
     private final AgentDao dao;
     private final AgentSkillDao agentSkillDao;
-
-    public AgentService(AgentDao dao, AgentSkillDao agentSkillDao) {
-        this.dao = dao;
-        this.agentSkillDao = agentSkillDao;
-    }
 
     @Override
     protected BaseEntityDao<Agent> getDao() {

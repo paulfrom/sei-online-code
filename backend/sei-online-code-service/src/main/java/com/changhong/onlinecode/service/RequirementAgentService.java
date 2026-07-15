@@ -8,6 +8,7 @@ import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
@@ -16,7 +17,6 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
@@ -26,10 +26,10 @@ import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
 import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -52,9 +52,10 @@ import java.util.regex.Pattern;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class RequirementAgentService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAgentService.class);
     private static final String PRD_AGENT_NAME = "prd-agent";
     private static final String MEMORY_REVIEW_AGENT_NAME = "memory-review-agent";
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
@@ -71,38 +72,8 @@ public class RequirementAgentService {
     private final DesignContextPromptAssembler designContextPromptAssembler;
     private final RequirementCommentService requirementCommentService;
     private final AgentRunRecorder agentRunRecorder;
-    private final com.changhong.onlinecode.dao.RunDao runDao;
-    private final ObjectMapper objectMapper;
+    private final RunDao runDao;
 
-    public RequirementAgentService(RequirementDao requirementDao,
-                                   AgentService agentService,
-                                   SkillService skillService,
-                                   ProjectService projectService,
-                                   CliRunnerRegistry cliRunnerRegistry,
-                                   SkillMaterializer skillMaterializer,
-                                   BuiltInSkillRegistry builtInSkillRegistry,
-                                   FailureInfoSupport failureInfoSupport,
-                                   RequirementDesignContextService requirementDesignContextService,
-                                   DesignContextPromptAssembler designContextPromptAssembler,
-                                   RequirementCommentService requirementCommentService,
-                                   AgentRunRecorder agentRunRecorder,
-                                   com.changhong.onlinecode.dao.RunDao runDao,
-                                   ObjectMapper objectMapper) {
-        this.requirementDao = requirementDao;
-        this.agentService = agentService;
-        this.skillService = skillService;
-        this.projectService = projectService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.skillMaterializer = skillMaterializer;
-        this.builtInSkillRegistry = builtInSkillRegistry;
-        this.failureInfoSupport = failureInfoSupport;
-        this.requirementDesignContextService = requirementDesignContextService;
-        this.designContextPromptAssembler = designContextPromptAssembler;
-        this.requirementCommentService = requirementCommentService;
-        this.agentRunRecorder = agentRunRecorder;
-        this.runDao = runDao;
-        this.objectMapper = objectMapper;
-    }
 
     /**
      * 异步启动 PRD 生成。
@@ -114,16 +85,16 @@ public class RequirementAgentService {
     public void spawnPrd(String requirementId, String prompt, String generationToken) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (Objects.isNull(requirement)) {
-            LOGGER.warn("prd-agent: requirement 不存在 {}", requirementId);
+            log.warn("prd-agent: requirement 不存在 {}", requirementId);
             return;
         }
         if (!matchesGenerationToken(requirement, generationToken)) {
-            LOGGER.info("prd-agent: requirement {} generation token 已变化，跳过过期执行", requirementId);
+            log.info("prd-agent: requirement {} generation token 已变化，跳过过期执行", requirementId);
             return;
         }
         if (requirement.getStatus() != RequirementStatus.PRD_GENERATING
                 && requirement.getStatus() != RequirementStatus.FAILED) {
-            LOGGER.warn("prd-agent: requirement 状态不允许生成 {}", requirement.getStatus());
+            log.warn("prd-agent: requirement 状态不允许生成 {}", requirement.getStatus());
             return;
         }
 
@@ -139,7 +110,7 @@ public class RequirementAgentService {
                     agent.getName(), agent.getInstructions(),
                     agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    LOGGER);
+                    log);
         }
 
         Run run = agentRunRecorder.createAgentRun(buildRunCommand(
@@ -159,7 +130,7 @@ public class RequirementAgentService {
                 .thenAccept(content -> {
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
-                        LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
+                        log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
                         settleRun(runId, RunState.FAILED, "已被新一轮生成接管");
                         return;
                     }
@@ -177,16 +148,16 @@ public class RequirementAgentService {
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
                     settleRun(runId, RunState.SUCCEEDED, null);
-                    LOGGER.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
+                    log.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
                             requirementId, latest.getPrdVersion());
                     reviewMemory(requirementId, content, context);
                 })
                 .exceptionally(e -> {
-                    LOGGER.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
+                    log.error("prd-agent: requirement {} PRD 生成失败", requirementId, e);
                     settleRun(runId, RunState.FAILED, rootMessage(e));
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
-                        LOGGER.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期失败", requirementId);
+                        log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期失败", requirementId);
                         return null;
                     }
                     latest.setStatus(RequirementStatus.FAILED);
@@ -208,7 +179,7 @@ public class RequirementAgentService {
     public void reviewMemory(String requirementId, String content, RequirementDesignContext context) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null || context == null || !Objects.equals(content, requirement.getPrdContent())) {
-            LOGGER.info("memory-review-agent: requirement {} 内容或上下文已变化，跳过过期审阅", requirementId);
+            log.info("memory-review-agent: requirement {} 内容或上下文已变化，跳过过期审阅", requirementId);
             return;
         }
 
@@ -235,7 +206,7 @@ public class RequirementAgentService {
                     persistMemoryReview(requirementId, content, result);
                 })
                 .exceptionally(e -> {
-                    LOGGER.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
+                    log.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
                             requirementId, e);
                     settleRun(runId, RunState.FAILED, rootMessage(e));
                     return null;
@@ -255,7 +226,7 @@ public class RequirementAgentService {
 
     private DesignMemoryValidationService.ValidationResult parseMemoryReview(String raw) {
         try {
-            JsonNode root = objectMapper.readTree(extractJsonObject(raw));
+            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(raw));
             DesignMemoryValidationService.ValidationResult result =
                     new DesignMemoryValidationService.ValidationResult();
             JsonNode findings = root.path("findings");
@@ -287,7 +258,7 @@ public class RequirementAgentService {
                                      DesignMemoryValidationService.ValidationResult result) {
         Requirement latest = requirementDao.findOne(requirementId);
         if (latest == null || !Objects.equals(reviewedContent, latest.getPrdContent())) {
-            LOGGER.info("memory-review-agent: requirement {} 已有更新，丢弃过期审阅结果", requirementId);
+            log.info("memory-review-agent: requirement {} 已有更新，丢弃过期审阅结果", requirementId);
             return;
         }
         String resultJson = toJson(result);
@@ -421,13 +392,13 @@ public class RequirementAgentService {
             }
             runDao.save(current);
         } catch (Exception e) {
-            LOGGER.warn("prd-agent: 更新 Run 终态失败 runId={}", runId, e);
+            log.warn("prd-agent: 更新 Run 终态失败 runId={}", runId, e);
         }
     }
 
     private String toJson(DesignMemoryValidationService.ValidationResult result) {
         try {
-            return objectMapper.writeValueAsString(result);
+            return JsonUtils.mapper().writeValueAsString(result);
         } catch (Exception e) {
             throw new IllegalStateException("记忆审阅结果序列化失败", e);
         }

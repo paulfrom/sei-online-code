@@ -23,6 +23,7 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.onlinecode.exception.ConflictException;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
  * 调用 ClaudeRunner 异步执行编码、回调更新 build_status。
  */
 @Service
+@AllArgsConstructor
 public class FeatureDesignBuildService {
 
     private final FeatureDesignDao featureDesignDao;
@@ -45,28 +47,7 @@ public class FeatureDesignBuildService {
     private final RunService runService;
     private final RunNumberService runNumberService;
     private final CliRunnerRegistry cliRunnerRegistry;
-    private final WorkspaceManager workspaceManager;
     private final FailureInfoSupport failureInfoSupport;
-
-    public FeatureDesignBuildService(
-            FeatureDesignDao featureDesignDao,
-            AgentService agentService,
-            TaskService taskService,
-            RunService runService,
-            RunNumberService runNumberService,
-            CliRunnerRegistry cliRunnerRegistry,
-            WorkspaceManager workspaceManager,
-            FailureInfoSupport failureInfoSupport
-    ) {
-        this.featureDesignDao = featureDesignDao;
-        this.agentService = agentService;
-        this.taskService = taskService;
-        this.runService = runService;
-        this.runNumberService = runNumberService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.workspaceManager = workspaceManager;
-        this.failureInfoSupport = failureInfoSupport;
-    }
 
     /**
      * 构建单个功能设计（P12a）。

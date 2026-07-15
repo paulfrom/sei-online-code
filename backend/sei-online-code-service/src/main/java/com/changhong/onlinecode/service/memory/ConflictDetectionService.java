@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service.memory;
 
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -26,18 +27,12 @@ public class ConflictDetectionService {
     /**
      * 单条对立规则。
      */
+    @AllArgsConstructor
     private static final class OppositionPair {
         final String normKey;
         final String realityKey;
         final String severity;
         final String recommendedHandling;
-
-        OppositionPair(String normKey, String realityKey, String severity, String recommendedHandling) {
-            this.normKey = normKey;
-            this.realityKey = realityKey;
-            this.severity = severity;
-            this.recommendedHandling = recommendedHandling;
-        }
     }
 
     /**

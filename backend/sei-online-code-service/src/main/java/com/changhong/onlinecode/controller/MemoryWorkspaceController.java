@@ -12,6 +12,7 @@ import com.changhong.onlinecode.service.WorkspaceMemoryService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,16 +32,11 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "MemoryWorkspaceApi", description = "项目级记忆管理服务")
 @RequestMapping(path = MemoryWorkspaceApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class MemoryWorkspaceController implements MemoryWorkspaceApi {
 
     private final WorkspaceMemoryService workspaceMemoryService;
     private final MemoryJobService memoryJobService;
-
-    public MemoryWorkspaceController(WorkspaceMemoryService workspaceMemoryService,
-                                     MemoryJobService memoryJobService) {
-        this.workspaceMemoryService = workspaceMemoryService;
-        this.memoryJobService = memoryJobService;
-    }
 
     @Override
     public ResultData<WorkspaceMemoryDto> current(String projectId) {

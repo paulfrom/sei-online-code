@@ -28,9 +28,9 @@ import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
 import com.changhong.onlinecode.service.agent.AgentRunRecorder;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.changhong.sei.core.util.JsonUtils;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -54,9 +54,10 @@ import java.util.concurrent.Semaphore;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class PlanAgentService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(PlanAgentService.class);
     private static final int MAX_CONCURRENT_FD = 4;
 
     private final PlanDao planDao;
@@ -70,28 +71,10 @@ public class PlanAgentService {
     private final FailureInfoSupport failureInfoSupport;
     private final AgentRunRecorder agentRunRecorder;
     private final RunDao runDao;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Semaphore fdPermits = new Semaphore(MAX_CONCURRENT_FD);
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
-    public PlanAgentService(PlanDao planDao, FeatureDesignDao featureDesignDao, AgentService agentService,
-                            SkillService skillService, ProjectLifecycleService projectLifecycleService,
-                            CliRunnerRegistry cliRunnerRegistry, SkillMaterializer skillMaterializer,
-                            BuiltInSkillRegistry builtInSkillRegistry, FailureInfoSupport failureInfoSupport,
-                            AgentRunRecorder agentRunRecorder, RunDao runDao) {
-        this.planDao = planDao;
-        this.featureDesignDao = featureDesignDao;
-        this.agentService = agentService;
-        this.skillService = skillService;
-        this.projectLifecycleService = projectLifecycleService;
-        this.cliRunnerRegistry = cliRunnerRegistry;
-        this.skillMaterializer = skillMaterializer;
-        this.builtInSkillRegistry = builtInSkillRegistry;
-        this.failureInfoSupport = failureInfoSupport;
-        this.agentRunRecorder = agentRunRecorder;
-        this.runDao = runDao;
-    }
 
     /**
      * spawn 规划智能体（latest Plan 应已由 caller 置 GENERATING）。D11 链式落库 DRAFT/FAILED。
@@ -103,11 +86,11 @@ public class PlanAgentService {
     public void spawnPlanning(String projectId, String modifyHint, String generationToken, TriggerSource triggerSource) {
         Plan plan = planDao.findLatestByProjectId(projectId);
         if (plan == null) {
-            LOGGER.warn("spawnPlanning: no Plan for projectId={}, skip", projectId);
+            log.warn("spawnPlanning: no Plan for projectId={}, skip", projectId);
             return;
         }
         if (!matchesGenerationToken(plan, generationToken)) {
-            LOGGER.info("spawnPlanning: projectId={} generation token 已变化，跳过过期执行", projectId);
+            log.info("spawnPlanning: projectId={} generation token 已变化，跳过过期执行", projectId);
             return;
         }
         plan.setLastTriggerSource(triggerSource);
@@ -123,7 +106,7 @@ public class PlanAgentService {
                     agent.getName(), agent.getInstructions(),
                     agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    LOGGER);
+                    log);
         }
         Run run = agentRunRecorder.createAgentRun(buildProjectRunCommand(
                 projectId, iterationId, prompt, agent, triggerSource));
@@ -140,7 +123,7 @@ public class PlanAgentService {
                 .thenAccept(content -> {
                     Plan latest = planDao.findLatestByProjectId(projectId);
                     if (latest == null || !matchesGenerationToken(latest, generationToken)) {
-                        LOGGER.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期结果", projectId);
+                        log.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期结果", projectId);
                         settleRun(runId, RunState.FAILED, "已被新一轮生成接管");
                         return;
                     }
@@ -151,11 +134,11 @@ public class PlanAgentService {
                     settleRun(runId, RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
-                    LOGGER.error("spawnPlanning failed projectId={}", projectId, e);
+                    log.error("spawnPlanning failed projectId={}", projectId, e);
                     settleRun(runId, RunState.FAILED, rootMessage(e));
                     Plan latest = planDao.findLatestByProjectId(projectId);
                     if (latest == null || !matchesGenerationToken(latest, generationToken)) {
-                        LOGGER.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期失败", projectId);
+                        log.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期失败", projectId);
                         return null;
                     }
                     latest.setStatus(PlanStatus.FAILED);
@@ -237,7 +220,7 @@ public class PlanAgentService {
                     agent.getName(), agent.getInstructions(),
                     agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(),
-                    LOGGER);
+                    log);
         }
         Run run = agentRunRecorder.createAgentRun(buildProjectRunCommand(
                 projectId, iterationId, prompt, agent, triggerSource));
@@ -266,7 +249,7 @@ public class PlanAgentService {
                     settleRun(runId, RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
-                    LOGGER.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
+                    log.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
                     settleRun(runId, RunState.FAILED, rootMessage(e));
                     target.setStatus(FeatureDesignStatus.FAILED);
                     failureInfoSupport.markFeatureDesignFailure(target,
@@ -289,7 +272,7 @@ public class PlanAgentService {
         FeatureDesignContent c = new FeatureDesignContent();
         c.setFeatureId(featureId);
         c.setGoal("fallback: claude CLI 不可用");
-        c.setDesign(objectMapper.createArrayNode());
+        c.setDesign(JsonUtils.mapper().createArrayNode());
         c.setAcceptance(List.of("fallback"));
         c.setFileScope(List.of("src/fallback/" + featureId + ".tsx"));
         return c;
@@ -298,7 +281,7 @@ public class PlanAgentService {
     private <T> T parseJson(String json, Class<T> type) {
         String extracted = extractJsonObject(json);
         try {
-            return objectMapper.readValue(extracted, type);
+            return JsonUtils.mapper().readValue(extracted, type);
         } catch (Exception e) {
             throw new RuntimeException("parse " + type.getSimpleName() + " failed, rawHead="
                     + (json == null ? "null" : json.substring(0, Math.min(json.length(), 200))), e);
@@ -374,7 +357,7 @@ public class PlanAgentService {
             }
             runDao.save(current);
         } catch (Exception e) {
-            LOGGER.warn("plan-agent: 更新 Run 终态失败 runId={}", runId, e);
+            log.warn("plan-agent: 更新 Run 终态失败 runId={}", runId, e);
         }
     }
 

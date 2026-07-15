@@ -21,8 +21,10 @@ import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RunNumberService;
 import com.changhong.onlinecode.service.agent.AgentRunCreateCommand;
 import com.changhong.onlinecode.service.agent.AgentRunRecorder;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Runs validation through test-agent in the project's bound workspace. */
 @Service
+@AllArgsConstructor
 public class ValidationLoopService {
 
     private final RunDao runDao;
@@ -43,21 +46,6 @@ public class ValidationLoopService {
     private final AgentService agentService;
     private final CliRunnerRegistry runnerRegistry;
     private final AgentRunRecorder agentRunRecorder;
-    private final ObjectMapper objectMapper;
-
-    public ValidationLoopService(RunDao runDao,
-                                 ExecutionPlanDao executionPlanDao, RequirementCommentService commentService,
-                                 AgentService agentService, CliRunnerRegistry runnerRegistry,
-                                 AgentRunRecorder agentRunRecorder,
-                                 ObjectMapper objectMapper) {
-        this.runDao = runDao;
-        this.executionPlanDao = executionPlanDao;
-        this.commentService = commentService;
-        this.agentService = agentService;
-        this.runnerRegistry = runnerRegistry;
-        this.agentRunRecorder = agentRunRecorder;
-        this.objectMapper = objectMapper;
-    }
 
     public ValidationOutcome validateTask(CodingTask task) {
         ExecutionPlan plan = executionPlanDao.findOne(task.getExecutionPlanId());
@@ -214,13 +202,13 @@ public class ValidationLoopService {
             return null;
         }
         try {
-            return objectMapper.readTree(report);
+            return JsonUtils.mapper().readTree(report);
         } catch (Exception ignored) {
             int start = report.indexOf('{');
             int end = report.lastIndexOf('}');
             if (start >= 0 && end > start) {
                 try {
-                    return objectMapper.readTree(report.substring(start, end + 1));
+                    return JsonUtils.mapper().readTree(report.substring(start, end + 1));
                 } catch (Exception nestedIgnored) {
                     return null;
                 }
@@ -230,7 +218,7 @@ public class ValidationLoopService {
     }
 
     private String toJson(Object value) {
-        try { return objectMapper.writeValueAsString(value); }
+        try { return JsonUtils.mapper().writeValueAsString(value); }
         catch (Exception e) { return "{}"; }
     }
 

@@ -29,9 +29,6 @@ import lombok.extern.slf4j.Slf4j;
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class Project extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

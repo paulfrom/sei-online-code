@@ -4,8 +4,7 @@ import com.changhong.onlinecode.dto.enums.UsageStatus;
 import com.changhong.onlinecode.dto.run.RunLogFrame;
 import com.changhong.onlinecode.ws.RunLogWebSocketHub;
 import com.fasterxml.jackson.databind.JsonNode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -46,9 +45,9 @@ import java.util.stream.Stream;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class CodexRunner implements CliRunner {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CodexRunner.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     /** codex 可执行文件路径，允许由环境变量覆盖，缺省为 PATH 中的 "codex"。 */
@@ -94,15 +93,15 @@ public class CodexRunner implements CliRunner {
             codexHome = Files.createTempDirectory("codex-home-");
             Path writableRoot = (cwd == null || cwd.isBlank())
                     ? null : Path.of(cwd).toAbsolutePath().normalize();
-            CodexSandboxConfig.write(codexHome, writableRoot, LOGGER);
-            CodexSandboxConfig.linkSharedHome(codexHome, LOGGER);
-            CodexSandboxConfig.seedUserSkills(codexHome, LOGGER);
-            CodexSandboxConfig.writeMcpBlock(codexHome, mcpConfig, LOGGER);
+            CodexSandboxConfig.write(codexHome, writableRoot, log);
+            CodexSandboxConfig.linkSharedHome(codexHome, log);
+            CodexSandboxConfig.seedUserSkills(codexHome, log);
+            CodexSandboxConfig.writeMcpBlock(codexHome, mcpConfig, log);
         } catch (IOException e) {
             // 覆盖 sandbox 写块 / MCP 块（mcpConfig 畸形时 writeMcpBlock 抛）。
             // codexHome 可能已部分配置（如 MCP 块未写但 sandbox 块已写）——soft-fail：仍注入 CODEX_HOME
             // 让 codex 跑（损失 MCP/sandbox 能力但不阻断任务），由 e 携带的具体消息定位根因。
-            LOGGER.warn("codex spawn 前置配置失败（sandbox/MCP），soft-fail 继续运行：iterationId={}", iterationId, e);
+            log.warn("codex spawn 前置配置失败（sandbox/MCP），soft-fail 继续运行：iterationId={}", iterationId, e);
         }
 
         List<String> args = buildArgs();
@@ -158,7 +157,7 @@ public class CodexRunner implements CliRunner {
 
                 AgentUsage usage = buildUsage(events);
                 if (events.isFailed()) {
-                    LOGGER.warn("codex app-server turn failed: iterationId={} reason={}", iterationId, events.failureReason());
+                    log.warn("codex app-server turn failed: iterationId={} reason={}", iterationId, events.failureReason());
                     emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
                     return failedResult(events.failureReason(), usage);
                 }
@@ -176,11 +175,11 @@ public class CodexRunner implements CliRunner {
                 }
             }
         } catch (IOException e) {
-            LOGGER.warn("codex spawn failed: iterationId={}", iterationId, e);
+            log.warn("codex spawn failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } catch (TimeoutException e) {
-            LOGGER.warn("codex app-server timed out: iterationId={}", iterationId, e);
+            log.warn("codex app-server timed out: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
             return failedResult("codex app-server timed out", null);
         } catch (InterruptedException e) {
@@ -188,7 +187,7 @@ public class CodexRunner implements CliRunner {
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
             return failedResult("interrupted", null);
         } catch (Exception e) {
-            LOGGER.warn("codex app-server failed: iterationId={}", iterationId, e);
+            log.warn("codex app-server failed: iterationId={}", iterationId, e);
             emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } finally {
@@ -266,7 +265,7 @@ public class CodexRunner implements CliRunner {
                     emit(iterationId, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
-                LOGGER.debug("codex stderr pump ended: iterationId={}", iterationId, e);
+                log.debug("codex stderr pump ended: iterationId={}", iterationId, e);
             }
         }, "codex-stderr-" + iterationId);
     }
@@ -283,7 +282,7 @@ public class CodexRunner implements CliRunner {
                 }
                 client.failPendingRequests(new IOException("codex app-server stdout closed"));
             } catch (IOException e) {
-                LOGGER.debug("codex app-server stdout pump ended: iterationId={}", iterationId, e);
+                log.debug("codex app-server stdout pump ended: iterationId={}", iterationId, e);
                 client.failPendingRequests(e);
             }
         }, "codex-stdout-" + iterationId);
@@ -345,7 +344,7 @@ public class CodexRunner implements CliRunner {
                 }
             });
         } catch (IOException e) {
-            LOGGER.debug("codex-home 清理失败 root={}", root, e);
+            log.debug("codex-home 清理失败 root={}", root, e);
         }
     }
 }

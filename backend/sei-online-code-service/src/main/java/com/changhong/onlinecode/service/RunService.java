@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dto.RunUsageDto;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,13 +16,10 @@ import java.util.List;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class RunService extends BaseEntityService<Run> {
 
     private final RunDao dao;
-
-    public RunService(RunDao dao) {
-        this.dao = dao;
-    }
 
     @Override
     protected BaseEntityDao<Run> getDao() {

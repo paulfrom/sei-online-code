@@ -8,6 +8,7 @@ import com.changhong.onlinecode.service.PlanService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,13 +25,10 @@ import java.util.List;
 @RestController
 @Tag(name = "PlanApi", description = "规划书服务")
 @RequestMapping(path = PlanApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class PlanController implements PlanApi {
 
     private final PlanService service;
-
-    public PlanController(PlanService service) {
-        this.service = service;
-    }
 
     @Override
     public ResultData<PlanDto> getLatest(String projectId) {

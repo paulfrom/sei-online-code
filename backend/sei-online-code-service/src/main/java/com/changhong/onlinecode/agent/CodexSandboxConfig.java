@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.agent;
 
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -53,8 +54,6 @@ public final class CodexSandboxConfig {
     /** 匹配用户 config.toml 中的 {@code [mcp_servers.<name>]} 表头（含 quoted-key 形式）。 */
     private static final Pattern USER_MCP_TABLE_HEADER = Pattern.compile(
             "^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:\"[^\"]*\"|[^\\]\\s]+)\\s*\\]\\s*(?:#.*)?$");
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private CodexSandboxConfig() {
     }
@@ -485,7 +484,7 @@ public final class CodexSandboxConfig {
         if (mcpConfig == null || mcpConfig.isBlank()) {
             return null;
         }
-        JsonNode root = MAPPER.readTree(mcpConfig);
+        JsonNode root = JsonUtils.mapper().readTree(mcpConfig);
         JsonNode servers = root.path("mcpServers");
         if (!servers.isObject() || servers.isEmpty()) {
             return null;
@@ -531,7 +530,7 @@ public final class CodexSandboxConfig {
         if (!isCodexRemoteMcpServer(server)) {
             return server;
         }
-        ObjectNode normalized = MAPPER.createObjectNode();
+        ObjectNode normalized = JsonUtils.mapper().createObjectNode();
         boolean hasHttpHeaders = server.has("http_headers");
         java.util.Iterator<java.util.Map.Entry<String, JsonNode>> it = server.fields();
         while (it.hasNext()) {

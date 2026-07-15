@@ -14,6 +14,7 @@ import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
  * <p>职责：规划书的 CRUD、编辑、重生、确认、历史版本查询。</p>
  */
 @Service
+@AllArgsConstructor
 public class PlanService extends BaseEntityService<Plan> {
 
     private final PlanDao planDao;
@@ -34,20 +36,6 @@ public class PlanService extends BaseEntityService<Plan> {
     private final SpecAgentService specAgentService;
     private final PlanAgentService planAgentService;
     private final FailureInfoSupport failureInfoSupport;
-
-    public PlanService(PlanDao planDao,
-                       FeatureDesignDao featureDesignDao,
-                       SpecDao specDao,
-                       SpecAgentService specAgentService,
-                       PlanAgentService planAgentService,
-                       FailureInfoSupport failureInfoSupport) {
-        this.planDao = planDao;
-        this.featureDesignDao = featureDesignDao;
-        this.specDao = specDao;
-        this.specAgentService = specAgentService;
-        this.planAgentService = planAgentService;
-        this.failureInfoSupport = failureInfoSupport;
-    }
 
     @Override
     protected BaseEntityDao<Plan> getDao() {

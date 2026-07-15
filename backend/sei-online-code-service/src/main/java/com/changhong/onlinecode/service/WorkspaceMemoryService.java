@@ -16,8 +16,9 @@ import com.changhong.onlinecode.service.memory.WorkspaceMemoryScanResult;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +40,7 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class WorkspaceMemoryService extends BaseEntityService<WorkspaceMemory> {
 
     private final WorkspaceMemoryDao dao;
@@ -46,18 +48,6 @@ public class WorkspaceMemoryService extends BaseEntityService<WorkspaceMemory> {
     private final RequirementDao requirementDao;
     private final RequirementDesignContextDao requirementDesignContextDao;
     private final WorkspaceMemoryFreshnessChecker freshnessChecker;
-
-    public WorkspaceMemoryService(WorkspaceMemoryDao dao,
-                                  ProjectDao projectDao,
-                                  RequirementDao requirementDao,
-                                  RequirementDesignContextDao requirementDesignContextDao,
-                                  WorkspaceMemoryFreshnessChecker freshnessChecker) {
-        this.dao = dao;
-        this.projectDao = projectDao;
-        this.requirementDao = requirementDao;
-        this.requirementDesignContextDao = requirementDesignContextDao;
-        this.freshnessChecker = freshnessChecker;
-    }
 
     @Override
     protected BaseEntityDao<WorkspaceMemory> getDao() {
@@ -271,7 +261,7 @@ public class WorkspaceMemoryService extends BaseEntityService<WorkspaceMemory> {
 
     private String toJson(Object value) {
         try {
-            return new ObjectMapper().writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("序列化 WorkspaceMemory JSON 字段失败", e);
         }

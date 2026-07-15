@@ -13,6 +13,8 @@ import com.changhong.onlinecode.entity.Spec;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,8 @@ import java.util.stream.Collectors;
  * @author sei-online-code
  */
 @Service
+@Slf4j
+@AllArgsConstructor
 public class SpecService extends BaseEntityService<Spec> {
 
     private final SpecDao dao;
@@ -37,20 +41,6 @@ public class SpecService extends BaseEntityService<Spec> {
     private final PlanService planService;
     private final PlanAgentService planAgentService;
     private final FailureInfoSupport failureInfoSupport;
-
-    public SpecService(SpecDao dao,
-                       ProjectService projectService,
-                       SpecAgentService specAgentService,
-                       PlanService planService,
-                       PlanAgentService planAgentService,
-                       FailureInfoSupport failureInfoSupport) {
-        this.dao = dao;
-        this.projectService = projectService;
-        this.specAgentService = specAgentService;
-        this.planService = planService;
-        this.planAgentService = planAgentService;
-        this.failureInfoSupport = failureInfoSupport;
-    }
 
     @Override
     protected BaseEntityDao<Spec> getDao() {

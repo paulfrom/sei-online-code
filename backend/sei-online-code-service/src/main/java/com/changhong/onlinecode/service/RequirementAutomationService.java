@@ -21,11 +21,10 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
+import com.changhong.sei.core.util.JsonUtils;
 import com.changhong.sei.core.utils.TransactionUtil;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -47,6 +46,7 @@ import java.util.UUID;
  * <p>负责在 PM 执行计划生成成功后持久化任务并启动调度器。</p>
  */
 @Service
+@AllArgsConstructor
 public class RequirementAutomationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAutomationService.class);
@@ -54,56 +54,15 @@ public class RequirementAutomationService {
     private final RequirementDao requirementDao;
     private final CodingTaskDao codingTaskDao;
     private final ApplicationEventPublisher eventPublisher;
-    private ExecutionPlanDao executionPlanDao;
-    private RequirementCommentService requirementCommentService;
-    private RequirementDesignContextService requirementDesignContextService;
-    private RunDao runDao;
-    private RequirementDeliveryService requirementDeliveryService;
-    private PmAgentClient pmAgentClient;
-    private CliRunnerRegistry cliRunnerRegistry;
-    private ValidationLoopService validationLoopService;
-    private FailureInfoSupport failureInfoSupport;
-    private ObjectMapper objectMapper = new ObjectMapper();
-
-    public RequirementAutomationService(RequirementDao requirementDao,
-                                        CodingTaskDao codingTaskDao,
-                                        ApplicationEventPublisher eventPublisher) {
-        this.requirementDao = requirementDao;
-        this.codingTaskDao = codingTaskDao;
-        this.eventPublisher = eventPublisher;
-    }
-
-    @Autowired
-    public void setOptionalDependencies(ExecutionPlanDao executionPlanDao,
-                                        RequirementCommentService requirementCommentService,
-                                        RequirementDesignContextService requirementDesignContextService,
-                                        RunDao runDao,
-                                        RequirementDeliveryService requirementDeliveryService,
-                                        PmAgentClient pmAgentClient,
-                                        ObjectMapper objectMapper) {
-        this.executionPlanDao = executionPlanDao;
-        this.requirementCommentService = requirementCommentService;
-        this.requirementDesignContextService = requirementDesignContextService;
-        this.runDao = runDao;
-        this.requirementDeliveryService = requirementDeliveryService;
-        this.pmAgentClient = pmAgentClient;
-        this.objectMapper = objectMapper;
-    }
-
-    @Autowired
-    public void setCliRunnerRegistry(CliRunnerRegistry cliRunnerRegistry) {
-        this.cliRunnerRegistry = cliRunnerRegistry;
-    }
-
-    @Autowired
-    public void setValidationLoopService(ValidationLoopService validationLoopService) {
-        this.validationLoopService = validationLoopService;
-    }
-
-    @Autowired
-    public void setFailureInfoSupport(FailureInfoSupport failureInfoSupport) {
-        this.failureInfoSupport = failureInfoSupport;
-    }
+    private final ExecutionPlanDao executionPlanDao;
+    private final RequirementCommentService requirementCommentService;
+    private final RequirementDesignContextService requirementDesignContextService;
+    private final RunDao runDao;
+    private final RequirementDeliveryService requirementDeliveryService;
+    private final PmAgentClient pmAgentClient;
+    private final CliRunnerRegistry cliRunnerRegistry;
+    private final ValidationLoopService validationLoopService;
+    private final FailureInfoSupport failureInfoSupport;
 
     /**
      * PRD 确认后的自动化入口。当前实现生成结构化初始计划并启动调度；
@@ -558,7 +517,7 @@ public class RequirementAutomationService {
             return List.of();
         }
         try {
-            JsonNode root = objectMapper.readTree(planJson);
+            JsonNode root = JsonUtils.mapper().readTree(planJson);
             JsonNode tasksNode = root.path("tasks");
             if (!tasksNode.isArray()) {
                 return List.of();
@@ -600,7 +559,7 @@ public class RequirementAutomationService {
 
     private String acceptanceMetadata(PmAgentClient.PmAcceptanceResult result, boolean accepted) {
         try {
-            return objectMapper.writeValueAsString(Map.of(
+            return JsonUtils.mapper().writeValueAsString(Map.of(
                     "accepted", accepted,
                     "findings", result.findings() == null ? List.of() : result.findings()));
         } catch (Exception e) {
@@ -664,7 +623,7 @@ public class RequirementAutomationService {
             root.put("validation", Map.of(
                     "mode", "test-agent",
                     "guidance", "test-agent inspects the workspace and chooses the correct test/build/package validation"));
-            return objectMapper.writeValueAsString(root);
+            return JsonUtils.mapper().writeValueAsString(root);
         } catch (Exception e) {
             LOGGER.warn("planJson serialize failed", e);
             return "{\"goal\":\"" + requirement.getTitle() + "\",\"tasks\":[]}";
@@ -673,7 +632,7 @@ public class RequirementAutomationService {
 
     private String validationMetadata(List<CodingTask> tasks) {
         try {
-            return objectMapper.writeValueAsString(Map.of(
+            return JsonUtils.mapper().writeValueAsString(Map.of(
                     "tasks", tasks.stream().map(t -> Map.of(
                             "taskKey", Objects.toString(t.getPlanTaskKey(), ""),
                             "status", t.getStatus().name(),
@@ -711,7 +670,7 @@ public class RequirementAutomationService {
 
     private String planCommentMetadata(ExecutionPlan plan) {
         try {
-            return objectMapper.writeValueAsString(Map.of(
+            return JsonUtils.mapper().writeValueAsString(Map.of(
                     "executionPlanId", plan.getId(),
                     "planType", plan.getPlanType().name(),
                     "planVersion", plan.getVersion()));

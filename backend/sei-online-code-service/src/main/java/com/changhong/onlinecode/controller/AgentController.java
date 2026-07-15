@@ -12,6 +12,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,14 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @Tag(name = "AgentApi", description = "Agent 管理服务")
 @RequestMapping(path = AgentApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class AgentController extends BaseEntityController<Agent, AgentDto>
         implements AgentApi {
 
     private final AgentService service;
-
-    public AgentController(AgentService service) {
-        this.service = service;
-    }
 
     @Override
     public BaseEntityService<Agent> getService() {

@@ -14,10 +14,10 @@ import com.changhong.onlinecode.service.memory.MemoryNormClaim;
 import com.changhong.onlinecode.service.memory.MemoryRealityClaim;
 import com.changhong.onlinecode.service.memory.WorkspaceMemoryScanResult;
 import com.changhong.onlinecode.service.memory.WorkspaceMemoryScannerService;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,28 +37,15 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
+@Slf4j
+@AllArgsConstructor
 public class RequirementDesignContextService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(RequirementDesignContextService.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final RequirementDao requirementDao;
     private final ProjectDao projectDao;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final WorkspaceMemoryScannerService scannerService;
     private final RequirementDesignContextDao requirementDesignContextDao;
-
-    public RequirementDesignContextService(RequirementDao requirementDao,
-                                           ProjectDao projectDao,
-                                           WorkspaceMemoryService workspaceMemoryService,
-                                           WorkspaceMemoryScannerService scannerService,
-                                           RequirementDesignContextDao requirementDesignContextDao) {
-        this.requirementDao = requirementDao;
-        this.projectDao = projectDao;
-        this.workspaceMemoryService = workspaceMemoryService;
-        this.scannerService = scannerService;
-        this.requirementDesignContextDao = requirementDesignContextDao;
-    }
 
     /**
      * 查询需求当前 CURRENT RequirementDesignContext。
@@ -129,7 +116,7 @@ public class RequirementDesignContextService {
         context.setSourceFingerprintsJson(scan.getSourceFingerprintsJson());
         context.setGeneratedAt(new Date());
         RequirementDesignContext saved = requirementDesignContextDao.save(context);
-        LOGGER.info("requirement-context: 已准备 requirementId={}, contextId={}, workspaceMemoryId={}",
+        log.info("requirement-context: 已准备 requirementId={}, contextId={}, workspaceMemoryId={}",
                 requirementId, saved.getId(), workspaceMemory.getId());
         return saved;
     }
@@ -302,7 +289,7 @@ public class RequirementDesignContextService {
 
     private String toJson(Object value) {
         try {
-            return MAPPER.writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("序列化 RequirementDesignContext JSON 字段失败", e);
         }

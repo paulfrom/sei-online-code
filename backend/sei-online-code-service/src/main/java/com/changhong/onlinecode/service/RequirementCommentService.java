@@ -7,6 +7,7 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,13 +17,10 @@ import java.util.List;
  * Requirement 评论服务。
  */
 @Service
+@AllArgsConstructor
 public class RequirementCommentService extends BaseEntityService<RequirementComment> {
 
     private final RequirementCommentDao dao;
-
-    public RequirementCommentService(RequirementCommentDao dao) {
-        this.dao = dao;
-    }
 
     @Override
     protected BaseEntityDao<RequirementComment> getDao() {

@@ -16,6 +16,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,16 +34,12 @@ import java.util.List;
 @RestController
 @Tag(name = "FeatureDesignApi", description = "功能设计服务")
 @RequestMapping(path = FeatureDesignApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class FeatureDesignController extends BaseEntityController<FeatureDesign, FeatureDesignDto>
         implements FeatureDesignApi {
 
     private final FeatureDesignService service;
     private final FeatureDesignBuildService buildService;
-
-    public FeatureDesignController(FeatureDesignService service, FeatureDesignBuildService buildService) {
-        this.service = service;
-        this.buildService = buildService;
-    }
 
     @Override
     public BaseEntityService<FeatureDesign> getService() {

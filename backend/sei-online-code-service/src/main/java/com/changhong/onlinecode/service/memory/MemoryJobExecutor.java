@@ -19,8 +19,7 @@ import com.changhong.onlinecode.service.MemoryJobService;
 import com.changhong.onlinecode.service.PlatformMemoryWriterService;
 import com.changhong.onlinecode.service.WorkspaceMemoryService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -46,9 +45,8 @@ import java.util.Set;
  * @author sei-online-code
  */
 @Component
+@Slf4j
 public class MemoryJobExecutor {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(MemoryJobExecutor.class);
 
     /**
      * CodingTask 后增量更新降级的变更文件数阈值（契约 §16.5）。
@@ -138,12 +136,12 @@ public class MemoryJobExecutor {
             claimed = memoryJobService.tryClaim(job.getId(), MemoryJobStatus.PENDING, MemoryJobStatus.RUNNING);
         } catch (DataIntegrityViolationException e) {
             // 多实例可能同时抢占同一项目的不同 job；数据库 RUNNING partial unique index 负责裁决。
-            LOGGER.debug("memory-job: 项目已有 RUNNING job，跳过本次抢占 jobId={}, projectId={}",
+            log.debug("memory-job: 项目已有 RUNNING job，跳过本次抢占 jobId={}, projectId={}",
                     job.getId(), job.getProjectId());
             return;
         }
         if (Objects.isNull(claimed)) {
-            LOGGER.debug("memory-job: 未能抢占 jobId={}", job.getId());
+            log.debug("memory-job: 未能抢占 jobId={}", job.getId());
             return;
         }
         try {
@@ -156,7 +154,7 @@ public class MemoryJobExecutor {
                 executeFullScan(claimed);
             }
         } catch (Exception e) {
-            LOGGER.error("memory-job: 执行失败 jobId={}", claimed.getId(), e);
+            log.error("memory-job: 执行失败 jobId={}", claimed.getId(), e);
             memoryJobService.markFailed(claimed.getId(), e.getMessage(), stackTrace(e));
         }
     }
@@ -222,7 +220,7 @@ public class MemoryJobExecutor {
             workspaceMemoryService.markFreshness(memory, WorkspaceMemoryFreshness.PLATFORM_MEMORY_DRIFT);
         }
         memoryJobService.markSucceeded(job.getId(), memory.getId());
-        LOGGER.info("memory-job: 执行成功 jobId={}, newWorkspaceMemoryId={}", job.getId(), memory.getId());
+        log.info("memory-job: 执行成功 jobId={}, newWorkspaceMemoryId={}", job.getId(), memory.getId());
     }
 
     /**
@@ -240,7 +238,7 @@ public class MemoryJobExecutor {
 
         WorkspaceMemory baseMemory = findBaseWorkspaceMemory(job);
         if (baseMemory == null || baseMemory.getStatus() != WorkspaceMemoryStatus.CURRENT) {
-            LOGGER.warn("memory-job: base WorkspaceMemory 不存在或已过期，降级为 REBUILD jobId={}", job.getId());
+            log.warn("memory-job: base WorkspaceMemory 不存在或已过期，降级为 REBUILD jobId={}", job.getId());
             submitRebuildAndSucceed(job);
             return;
         }
@@ -255,14 +253,14 @@ public class MemoryJobExecutor {
         String worktreePath = run.getWorktreePath() != null ? run.getWorktreePath() : workspacePath;
         CodingTaskChangeResult changeResult = changeCollector.collect(worktreePath, run.getBaseCommit());
         if (!changeResult.isSuccess()) {
-            LOGGER.warn("memory-job: 变更采集失败，降级为 REBUILD jobId={}, reason={}",
+            log.warn("memory-job: 变更采集失败，降级为 REBUILD jobId={}, reason={}",
                     job.getId(), changeResult.getFailureReason());
             submitRebuildAndSucceed(job);
             return;
         }
 
         if (shouldDowngradeToRebuild(changeResult)) {
-            LOGGER.info("memory-job: 变更范围过大，降级为 REBUILD jobId={}, changedFiles={}",
+            log.info("memory-job: 变更范围过大，降级为 REBUILD jobId={}, changedFiles={}",
                     job.getId(), changeResult.getChangedFiles().size());
             submitRebuildAndSucceed(job);
             return;
@@ -284,10 +282,10 @@ public class MemoryJobExecutor {
                 throw new IllegalStateException("platform-memory latest 写入失败");
             }
             memoryJobService.markSucceeded(job.getId(), memory.getId());
-            LOGGER.info("memory-job: CodingTask 回写成功 jobId={}, newWorkspaceMemoryId={}",
+            log.info("memory-job: CodingTask 回写成功 jobId={}, newWorkspaceMemoryId={}",
                     job.getId(), memory.getId());
         } catch (Exception e) {
-            LOGGER.warn("memory-job: 增量分析或写入失败，降级为 REBUILD jobId={}", job.getId(), e);
+            log.warn("memory-job: 增量分析或写入失败，降级为 REBUILD jobId={}", job.getId(), e);
             submitRebuildAndSucceed(job);
         }
     }

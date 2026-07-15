@@ -10,6 +10,7 @@ import com.changhong.onlinecode.exception.ConflictException;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,19 +23,12 @@ import java.util.stream.Collectors;
  * <p>职责：功能设计的查询、编辑、重生、确认、历史版本查询。与编码执行互斥（BUILDING 态抛 409 ConflictException）。
  */
 @Service
+@AllArgsConstructor
 public class FeatureDesignService extends BaseEntityService<FeatureDesign> {
 
     private final FeatureDesignDao featureDesignDao;
     private final PlanAgentService planAgentService;
     private final FailureInfoSupport failureInfoSupport;
-
-    public FeatureDesignService(FeatureDesignDao featureDesignDao,
-                                PlanAgentService planAgentService,
-                                FailureInfoSupport failureInfoSupport) {
-        this.featureDesignDao = featureDesignDao;
-        this.planAgentService = planAgentService;
-        this.failureInfoSupport = failureInfoSupport;
-    }
 
     @Override
     protected BaseEntityDao<FeatureDesign> getDao() {

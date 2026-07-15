@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.TaskDao;
 import com.changhong.onlinecode.entity.Task;
 import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -14,13 +15,10 @@ import java.util.List;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class TaskService extends BaseEntityService<Task> {
 
     private final TaskDao dao;
-
-    public TaskService(TaskDao dao) {
-        this.dao = dao;
-    }
 
     @Override
     protected BaseEntityDao<Task> getDao() {

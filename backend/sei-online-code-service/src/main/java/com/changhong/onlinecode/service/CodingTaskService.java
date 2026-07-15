@@ -12,6 +12,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,19 +27,12 @@ import java.util.stream.Collectors;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class CodingTaskService extends BaseEntityService<CodingTask> {
 
     private final CodingTaskDao dao;
     private final RunDao runDao;
     private final CodingTaskExecutionService executionService;
-
-    public CodingTaskService(CodingTaskDao dao,
-                             RunDao runDao,
-                             CodingTaskExecutionService executionService) {
-        this.dao = dao;
-        this.runDao = runDao;
-        this.executionService = executionService;
-    }
 
     @Override
     protected BaseEntityDao<CodingTask> getDao() {

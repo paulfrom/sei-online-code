@@ -15,6 +15,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,16 +32,12 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @Tag(name = "SkillApi", description = "技能管理服务")
 @RequestMapping(path = SkillApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class SkillController extends BaseEntityController<Skill, SkillDto>
         implements SkillApi {
 
     private final SkillService service;
     private final SkillImportService importService;
-
-    public SkillController(SkillService service, SkillImportService importService) {
-        this.service = service;
-        this.importService = importService;
-    }
 
     @Override
     public BaseEntityService<Skill> getService() {

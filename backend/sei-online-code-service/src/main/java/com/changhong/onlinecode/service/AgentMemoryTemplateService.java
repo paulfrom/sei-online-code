@@ -3,8 +3,8 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.entity.MemorySeedTemplate;
 import com.changhong.onlinecode.entity.Project;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -31,9 +31,9 @@ import java.util.Set;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
+@Slf4j
 public class AgentMemoryTemplateService {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(AgentMemoryTemplateService.class);
 
     /** 工作区内 agent-memory 目录相对路径。 */
     public static final String AGENT_MEMORY_DIR = "agent-memory";
@@ -52,12 +52,6 @@ public class AgentMemoryTemplateService {
     private final ProjectDao projectDao;
     private final MemorySeedTemplateService seedTemplateService;
 
-    public AgentMemoryTemplateService(ProjectDao projectDao,
-                                       MemorySeedTemplateService seedTemplateService) {
-        this.projectDao = projectDao;
-        this.seedTemplateService = seedTemplateService;
-    }
-
     /**
      * 给指定工作区初始化 agent-memory 四文件（缺文件补齐，不覆盖已有）。
      *
@@ -75,7 +69,7 @@ public class AgentMemoryTemplateService {
         Project project = projectId == null ? null : projectDao.findOne(projectId);
         MemorySeedTemplate seed = resolveAndBindSeed(project);
         if (Objects.isNull(seed)) {
-            LOGGER.warn("agent-memory: 无可用 seed 模板，跳过初始化 projectId={}", projectId);
+            log.warn("agent-memory: 无可用 seed 模板，跳过初始化 projectId={}", projectId);
             return List.of();
         }
 
@@ -101,7 +95,7 @@ public class AgentMemoryTemplateService {
             writeFile(target, body);
             written.add(AGENT_MEMORY_DIR + "/" + fileName);
         }
-        LOGGER.info("agent-memory: 初始化完成 projectId={}, seedId={}, seedVersion={}, written={}",
+        log.info("agent-memory: 初始化完成 projectId={}, seedId={}, seedVersion={}, written={}",
                 projectId, seed.getId(), seed.getVersion(), written);
         return written;
     }

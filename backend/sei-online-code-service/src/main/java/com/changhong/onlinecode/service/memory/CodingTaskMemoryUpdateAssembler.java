@@ -3,11 +3,10 @@ package com.changhong.onlinecode.service.memory;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -29,19 +28,14 @@ import java.util.stream.Collectors;
  * @author sei-online-code
  */
 @Component
+@AllArgsConstructor
+@Slf4j
 public class CodingTaskMemoryUpdateAssembler {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(CodingTaskMemoryUpdateAssembler.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final WorkspaceNormsBuilder normsBuilder;
     private final ConflictDetectionService conflictDetectionService;
 
-    public CodingTaskMemoryUpdateAssembler(WorkspaceNormsBuilder normsBuilder,
-                                           ConflictDetectionService conflictDetectionService) {
-        this.normsBuilder = normsBuilder;
-        this.conflictDetectionService = conflictDetectionService;
-    }
 
     /**
      * 组装新的 WorkspaceMemoryScanResult。
@@ -347,9 +341,9 @@ public class CodingTaskMemoryUpdateAssembler {
             return new ArrayList<>();
         }
         try {
-            return MAPPER.readValue(json, MAPPER.getTypeFactory().constructCollectionType(List.class, elementType));
+            return JsonUtils.mapper().readValue(json, JsonUtils.mapper().getTypeFactory().constructCollectionType(List.class, elementType));
         } catch (JsonProcessingException e) {
-            LOGGER.warn("coding-task-memory: 反序列化 JSON 列表失败", e);
+            log.warn("coding-task-memory: 反序列化 JSON 列表失败", e);
             return new ArrayList<>();
         }
     }
@@ -359,16 +353,16 @@ public class CodingTaskMemoryUpdateAssembler {
             return null;
         }
         try {
-            return MAPPER.readValue(json, type);
+            return JsonUtils.mapper().readValue(json, type);
         } catch (JsonProcessingException e) {
-            LOGGER.warn("coding-task-memory: 反序列化 JSON 失败", e);
+            log.warn("coding-task-memory: 反序列化 JSON 失败", e);
             return null;
         }
     }
 
     private String toJson(Object value) {
         try {
-            return MAPPER.writeValueAsString(value);
+            return JsonUtils.mapper().writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("序列化 JSON 失败", e);
         }

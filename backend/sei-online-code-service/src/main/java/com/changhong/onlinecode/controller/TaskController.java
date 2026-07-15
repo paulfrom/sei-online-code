@@ -10,6 +10,7 @@ import com.changhong.sei.core.dto.serach.PageResult;
 import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,14 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @Tag(name = "TaskApi", description = "任务管理服务")
 @RequestMapping(path = TaskApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class TaskController extends BaseEntityController<Task, TaskDto>
         implements TaskApi {
 
     private final TaskService service;
-
-    public TaskController(TaskService service) {
-        this.service = service;
-    }
 
     @Override
     public BaseEntityService<Task> getService() {

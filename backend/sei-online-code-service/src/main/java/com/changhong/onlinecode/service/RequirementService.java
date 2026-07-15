@@ -15,6 +15,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
+import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +29,7 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class RequirementService extends BaseEntityService<Requirement> {
 
     private static final String STALE_CONTEXT_MESSAGE = "设计上下文已过期（STALE），请重新生成 PRD";
@@ -39,24 +41,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
     private final RequirementDesignContextDao requirementDesignContextDao;
     private final RequirementDesignContextService requirementDesignContextService;
     private final RequirementCommentService requirementCommentService;
-    private RequirementAutomationService requirementAutomationService;
-
-    public RequirementService(RequirementDao dao,
-                              RequirementAgentService requirementAgentService,
-                              RequirementDesignContextDao requirementDesignContextDao,
-                              RequirementDesignContextService requirementDesignContextService,
-                              RequirementCommentService requirementCommentService) {
-        this.dao = dao;
-        this.requirementAgentService = requirementAgentService;
-        this.requirementDesignContextDao = requirementDesignContextDao;
-        this.requirementDesignContextService = requirementDesignContextService;
-        this.requirementCommentService = requirementCommentService;
-    }
-
-    @Autowired
-    public void setRequirementAutomationService(RequirementAutomationService requirementAutomationService) {
-        this.requirementAutomationService = requirementAutomationService;
-    }
+    private final RequirementAutomationService requirementAutomationService;
 
     @Override
     protected BaseEntityDao<Requirement> getDao() {

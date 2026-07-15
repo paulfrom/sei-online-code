@@ -29,9 +29,6 @@ import jakarta.persistence.Transient;
         @Index(name = "idx_comp_log_created", columnList = "created_date")
 })
 @Access(AccessType.FIELD)
-@Slf4j
-@NoArgsConstructor
-@AllArgsConstructor
 public class CompensationLog extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;

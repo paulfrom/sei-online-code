@@ -17,6 +17,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,20 +32,13 @@ import java.util.stream.Collectors;
 @RestController
 @Tag(name = "ProjectApi", description = "项目管理服务")
 @RequestMapping(path = ProjectApi.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
+@AllArgsConstructor
 public class ProjectController extends BaseEntityController<Project, ProjectDto>
         implements ProjectApi {
 
     private final ProjectService service;
     private final ProjectStateService projectStateService;
     private final FeatureDesignBuildService featureDesignBuildService;
-
-    public ProjectController(ProjectService service,
-                            ProjectStateService projectStateService,
-                            FeatureDesignBuildService featureDesignBuildService) {
-        this.service = service;
-        this.projectStateService = projectStateService;
-        this.featureDesignBuildService = featureDesignBuildService;
-    }
 
     @Override
     public BaseEntityService<Project> getService() {

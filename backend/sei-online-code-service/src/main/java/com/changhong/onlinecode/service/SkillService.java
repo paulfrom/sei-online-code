@@ -15,6 +15,7 @@ import com.changhong.sei.core.dto.serach.Search;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResult;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,17 +35,12 @@ import java.util.stream.Collectors;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class SkillService extends BaseEntityService<Skill> {
 
     private final SkillDao dao;
     private final AgentSkillDao agentSkillDao;
     private final SkillFileDao skillFileDao;
-
-    public SkillService(SkillDao dao, AgentSkillDao agentSkillDao, SkillFileDao skillFileDao) {
-        this.dao = dao;
-        this.agentSkillDao = agentSkillDao;
-        this.skillFileDao = skillFileDao;
-    }
 
     @Override
     protected BaseEntityDao<Skill> getDao() {

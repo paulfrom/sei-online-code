@@ -14,6 +14,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import java.util.Objects;
  * @author sei-online-code
  */
 @Service
+@AllArgsConstructor
 public class ProjectService extends BaseEntityService<Project> {
 
     private final ProjectDao dao;
@@ -35,21 +37,6 @@ public class ProjectService extends BaseEntityService<Project> {
     private final MemoryJobService memoryJobService;
     private final MemorySeedTemplateService memorySeedTemplateService;
 
-    public ProjectService(ProjectDao dao,
-                          PlanService planService,
-                          ProjectLifecycleService lifecycleService,
-                          WorkspaceManager workspaceManager,
-                          AgentMemoryTemplateService agentMemoryTemplateService,
-                          MemoryJobService memoryJobService,
-                          MemorySeedTemplateService memorySeedTemplateService) {
-        this.dao = dao;
-        this.planService = planService;
-        this.lifecycleService = lifecycleService;
-        this.workspaceManager = workspaceManager;
-        this.agentMemoryTemplateService = agentMemoryTemplateService;
-        this.memoryJobService = memoryJobService;
-        this.memorySeedTemplateService = memorySeedTemplateService;
-    }
 
     @Override
     protected BaseEntityDao<Project> getDao() {
