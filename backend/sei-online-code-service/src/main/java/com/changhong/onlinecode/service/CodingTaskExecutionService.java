@@ -29,6 +29,7 @@ import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.utils.TransactionUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -130,18 +131,9 @@ public class CodingTaskExecutionService {
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(task.getAssignedAgent(),
-                buildRequest(run, task, fullPrompt, task.getAssignedAgent()));
-
         final Run trackedRun = run;
-        future.thenAccept(result -> {
-            CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
-            finishRun(trackedRun, task, decision.success(), decision.summary(), decision.failureReason(), false);
-        }).exceptionally(e -> {
-            log.error("coding-task execute failed taskId={}", id, e);
-            finishRun(trackedRun, task, false, rootMessage(e), rootMessage(e), false);
-            return null;
-        });
+        AgentExecutionRequest request = buildRequest(run, task, fullPrompt, task.getAssignedAgent());
+        startAgentAfterCommit(task.getAssignedAgent(), request, trackedRun, task, baseline, false);
 
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
@@ -216,23 +208,29 @@ public class CodingTaskExecutionService {
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
-        CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName,
-                buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName));
-
         final Run trackedRun = run;
-        future.thenAccept(result -> {
-            CompletionDecision decision = decideCompletion(trackedRun, result, baseline);
-            finishRun(trackedRun, task, decision.success(), decision.summary(), decision.failureReason(), true);
-        }).exceptionally(e -> {
-            log.error("coding-task executePlanTask failed taskId={}", codingTaskId, e);
-            finishRun(trackedRun, task, false, rootMessage(e), rootMessage(e), true);
-            return null;
-        });
+        AgentExecutionRequest request = buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName);
+        startAgentAfterCommit(agentName, request, trackedRun, task, baseline, true);
 
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
         dto.setStatus(task.getStatus());
         return ResultData.success(dto);
+    }
+
+    private void startAgentAfterCommit(String agentName, AgentExecutionRequest request, Run run, CodingTask task,
+                                       WorkspaceChangeDetector.Snapshot baseline, boolean schedulerManaged) {
+        TransactionUtil.afterCommit(() -> {
+            CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName, request);
+            future.thenAccept(result -> {
+                CompletionDecision decision = decideCompletion(run, result, baseline);
+                finishRun(run, task, decision.success(), decision.summary(), decision.failureReason(), schedulerManaged);
+            }).exceptionally(e -> {
+                log.error("coding-task execute failed taskId={}", task.getId(), e);
+                finishRun(run, task, false, rootMessage(e), rootMessage(e), schedulerManaged);
+                return null;
+            });
+        });
     }
 
     private CompletionDecision decideCompletion(Run run, AgentExecutionResult result,

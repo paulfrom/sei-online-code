@@ -27,6 +27,8 @@ import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 
@@ -396,6 +398,56 @@ class CodingTaskExecutionServiceTest {
 
         assertTrue(result.successful());
         assertEquals("run-generated", savedRun.get().getId());
+    }
+
+    @Test
+    void executePlanTask_defersAgentExecutionUntilTransactionCommit() {
+        CodingTask task = new CodingTask();
+        task.setId("task-after-commit");
+        task.setRequirementId("req-after-commit");
+        task.setProjectId("project-after-commit");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        when(codingTaskDao.findOne("task-after-commit")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-after-commit")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-after-commit");
+            }
+            return run;
+        });
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-after-commit"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-after-commit");
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            ResultData<CodingTaskDto> result = service.executePlanTask(
+                    "task-after-commit", "backend-dev-agent", "prompt");
+
+            assertTrue(result.successful());
+            verify(agentExecutionService, never()).executeAsync(anyString(), any());
+            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+            verify(agentExecutionService).executeAsync(eq("backend-dev-agent"), any());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
