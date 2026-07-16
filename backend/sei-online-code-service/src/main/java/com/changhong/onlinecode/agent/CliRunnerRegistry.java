@@ -82,11 +82,21 @@ public class CliRunnerRegistry {
         if (workspaceManager == null) {
             throw new IllegalStateException("WorkspaceManager 未配置，拒绝启动 Agent");
         }
-        Path path = workspaceManager.resolveIsolatedWorkspace(projectId, workspaceKey);
+        Path path = workspaceManager.resolveIsolatedWorkspace(projectId, normalizeWorkspaceKey(workspaceKey));
         if (!Files.isDirectory(path)) {
             throw new IllegalStateException("Agent 工作区不存在或不是目录: " + path);
         }
         return new AgentWorkspace(projectId, path);
+    }
+
+    private String normalizeWorkspaceKey(String workspaceKey) {
+        if (workspaceKey != null && workspaceKey.startsWith("requirement-")) {
+            String requirementId = workspaceKey.substring("requirement-".length());
+            if (!requirementId.isBlank()) {
+                return workspaceManager.requirementWorkspaceKey(requirementId);
+            }
+        }
+        return workspaceKey;
     }
 
     /**

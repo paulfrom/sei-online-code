@@ -26,6 +26,14 @@ public interface RequirementDao extends BaseEntityDao<Requirement> {
     List<Requirement> findByProjectId(String projectId);
 
     /**
+     * 按项目 ID 查询需求，需求编号生成时用于取项目内最大序号。
+     *
+     * @param projectId 项目 ID
+     * @return 需求列表
+     */
+    List<Requirement> findByProjectIdOrderByCreatedDateDesc(String projectId);
+
+    /**
      * 按状态查询需求。
      *
      * @param status 状态

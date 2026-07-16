@@ -20,6 +20,9 @@ public class SaveRequirementRequest {
     @Schema(description = "所属项目 ID")
     private String projectId;
 
+    @Schema(description = "需求编号；新建时可空，由服务端自动生成")
+    private String requirementNo;
+
     @NotBlank(message = "需求标题不能为空")
     @Schema(description = "需求标题")
     private String title;

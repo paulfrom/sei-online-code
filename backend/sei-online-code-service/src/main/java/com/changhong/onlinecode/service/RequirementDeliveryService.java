@@ -290,7 +290,15 @@ public class RequirementDeliveryService {
         if (!isBlank(requirement.getDeliveryBranch())) {
             return requirement.getDeliveryBranch();
         }
+        if (!isBlank(requirement.getRequirementNo())) {
+            return "feature/" + safeBranchSegment(requirement.getRequirementNo());
+        }
         return "feature/req-" + shortId(requirement.getId()) + "-" + shortId(requirement.getActiveLoopId());
+    }
+
+    private String safeBranchSegment(String value) {
+        String safe = value == null ? "" : value.trim().replaceAll("[^a-zA-Z0-9._-]", "-");
+        return safe.isBlank() ? "unknown" : safe;
     }
 
     private String shortId(String id) {

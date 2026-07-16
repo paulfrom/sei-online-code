@@ -7,6 +7,7 @@ import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -16,6 +17,7 @@ import java.util.Date;
  * @author sei-online-code
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @Schema(description = "需求 DTO")
 public class RequirementDto extends BaseEntityDto {
 
@@ -24,6 +26,9 @@ public class RequirementDto extends BaseEntityDto {
     @NotBlank(message = "项目 ID 不能为空")
     @Schema(description = "所属项目 ID")
     private String projectId;
+
+    @Schema(description = "需求编号")
+    private String requirementNo;
 
     @NotBlank(message = "需求标题不能为空")
     @Schema(description = "需求标题")

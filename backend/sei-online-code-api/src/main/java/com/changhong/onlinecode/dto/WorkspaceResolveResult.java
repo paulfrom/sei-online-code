@@ -10,7 +10,7 @@ import java.io.Serializable;
  * 工作区解析结果（B33）。契约 Phase 5 §2 端点 33 / §3。
  *
  * <p>{@code provisioned=true} 表示目录此前已存在（clone-once 复用，不再 clone/生成）；
- * {@code source} 标记本工作区的首次 provision 来源（CLONE/SCAFFOLD）。</p>
+ * {@code source} 标记本工作区的首次 provision 来源（项目仓库/模板仓库 CLONE 或 SCAFFOLD）。</p>
  *
  * @author sei-online-code
  */
@@ -26,7 +26,7 @@ public class WorkspaceResolveResult implements Serializable {
     @Schema(description = "目录此前是否已存在（clone-once 复用）", example = "false")
     private boolean provisioned;
 
-    @Schema(description = "provision 来源：CLONE（有模板地址）/ SCAFFOLD（无模板地址）", example = "SCAFFOLD")
+    @Schema(description = "provision 来源：CLONE（项目仓库或模板仓库）/ SCAFFOLD（无仓库地址）", example = "SCAFFOLD")
     private WorkspaceSource source;
 
     public WorkspaceResolveResult() {

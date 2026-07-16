@@ -1,15 +1,18 @@
 package com.changhong.onlinecode.agent;
 
 import com.changhong.onlinecode.dao.ProjectDao;
+import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.ConfigService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.gitlab4j.api.Constants;
 import org.gitlab4j.api.GitLabApi;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -39,7 +42,8 @@ import java.util.zip.ZipInputStream;
  *
  * <p>在可配置的 Workspace Root 下解析每个项目的工作区目录，语义为 <b>clone-once + reuse</b>：
  * 目录已存在即复用（后续 Build Loop 回合原地增量编辑，绝不重复 clone/生成）；不存在则按平台配置
- * 是否设置 templateGitlabUrl 决定 provision 来源——有地址走模板仓拉取、空则走 SCAFFOLD 生成 canonical SUID 脚手架。</p>
+ * 是否设置项目 gitUrl / templateGitlabUrl 决定 provision 来源——项目 gitUrl 优先拉取真实项目仓库，
+ * 否则有模板地址走模板仓拉取，空则走 SCAFFOLD 生成 canonical SUID 脚手架。</p>
  *
  * <p>本实现不再停留在 compile-only：resolve 会真实创建项目物理工作区。平台自有运行物料统一落在
  * 工作区的 {@code .sei/} 目录，代码执行阶段写入 AGENTS.md / CLAUDE.md、技能目录和代码文件时，
@@ -74,6 +78,9 @@ public class WorkspaceManager {
     private final ConfigService configService;
     private final ScaffoldGenerator scaffoldGenerator;
 
+    @Autowired(required = false)
+    private RequirementDao requirementDao;
+
     @Value("${oc.gitlab.host:}")
     private String gitlabHost;
 
@@ -84,6 +91,10 @@ public class WorkspaceManager {
         this.projectDao = projectDao;
         this.configService = configService;
         this.scaffoldGenerator = scaffoldGenerator;
+    }
+
+    void setRequirementDao(RequirementDao requirementDao) {
+        this.requirementDao = requirementDao;
     }
 
     /**
@@ -111,8 +122,9 @@ public class WorkspaceManager {
         WorkspaceManifest manifest = readManifest(workspaceDir);
 
         if (Files.exists(workspaceDir)) {
-            WorkspaceSource source = manifest == null ? decideSource(config) : manifest.source();
+            WorkspaceSource source = manifest == null ? decideSource(config, project) : manifest.source();
             ensureManagedLayout(workspaceDir);
+            ensureGitRepository(workspaceDir);
             writeManifest(workspaceDir, new WorkspaceManifest(
                     projectId,
                     source,
@@ -124,13 +136,16 @@ public class WorkspaceManager {
             return new WorkspaceResolveResult(dir, true, source);
         }
 
-        WorkspaceSource source = decideSource(config);
-        if (source == WorkspaceSource.CLONE) {
+        WorkspaceSource source = decideSource(config, project);
+        if (hasProjectGitUrl(project)) {
+            materializeProjectWorkspace(project, workspaceDir);
+        } else if (source == WorkspaceSource.CLONE) {
             materializeTemplateWorkspace(config, project, workspaceDir);
         } else {
             scaffoldWorkspace(workspaceDir);
         }
         ensureManagedLayout(workspaceDir);
+        ensureGitRepository(workspaceDir);
         writeManifest(workspaceDir, new WorkspaceManifest(
                 projectId,
                 source,
@@ -164,11 +179,13 @@ public class WorkspaceManager {
             throw new IllegalStateException("非法隔离工作区路径: " + target);
         }
         if (Files.isDirectory(target)) {
+            ensureRequirementBranch(target, workspaceKey);
             return target;
         }
         try {
             Files.createDirectories(root);
             copyWorkspace(projectWorkspace, target);
+            ensureRequirementBranch(target, workspaceKey);
             return target;
         } catch (IOException e) {
             throw new IllegalStateException("创建隔离工作区失败: " + target, e);
@@ -203,7 +220,13 @@ public class WorkspaceManager {
     }
 
     public String requirementWorkspaceKey(String requirementId) {
-        return "requirement-" + requirementId;
+        Requirement requirement = requirementDao == null || requirementId == null || requirementId.isBlank()
+                ? null : requirementDao.findOne(requirementId);
+        String key = requirement != null && requirement.getRequirementNo() != null
+                && !requirement.getRequirementNo().isBlank()
+                ? requirement.getRequirementNo()
+                : requirementId;
+        return "requirement-" + safeSegment(key);
     }
 
     /**
@@ -213,6 +236,13 @@ public class WorkspaceManager {
      * @return CLONE 或 SCAFFOLD
      */
     public WorkspaceSource decideSource(PlatformConfig config) {
+        return decideSource(config, null);
+    }
+
+    private WorkspaceSource decideSource(PlatformConfig config, Project project) {
+        if (hasProjectGitUrl(project)) {
+            return WorkspaceSource.CLONE;
+        }
         if (config != null && config.getTemplateGitlabUrl() != null
                 && !config.getTemplateGitlabUrl().isBlank()) {
             return WorkspaceSource.CLONE;
@@ -265,6 +295,34 @@ public class WorkspaceManager {
         } catch (IOException e) {
             throw new IllegalStateException("初始化脚手架工作区失败: " + workspaceDir, e);
         }
+    }
+
+    private void materializeProjectWorkspace(Project project, Path workspaceDir) {
+        String gitUrl = project == null ? null : project.getGitUrl();
+        if (gitUrl == null || gitUrl.isBlank()) {
+            throw new IllegalStateException("项目 Git 地址为空，无法获取项目内容");
+        }
+        try {
+            Path parent = workspaceDir.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            cloneProjectRepository(gitUrl, workspaceDir);
+            log.info("workspace: 已从项目仓库生成 dir={}, gitUrl={}", workspaceDir, gitUrl);
+        } catch (RuntimeException | IOException e) {
+            deleteTree(workspaceDir);
+            throw new IllegalStateException("拉取项目仓库内容失败: " + gitUrl, e);
+        }
+    }
+
+    private void cloneProjectRepository(String gitUrl, Path workspaceDir) throws IOException {
+        Path parent = workspaceDir.getParent();
+        if (parent == null) {
+            throw new IOException("工作区缺少父目录: " + workspaceDir);
+        }
+        Files.createDirectories(parent);
+        runCommand(parent, "git", "clone", gitUrl.trim(), workspaceDir.getFileName().toString());
+        ensureLocalGitConfig(workspaceDir);
     }
 
     private void materializeTemplateWorkspace(PlatformConfig config, Project project, Path workspaceDir) {
@@ -585,6 +643,10 @@ public class WorkspaceManager {
         return normalized.isBlank() ? fallback : normalized;
     }
 
+    private boolean hasProjectGitUrl(Project project) {
+        return project != null && project.getGitUrl() != null && !project.getGitUrl().isBlank();
+    }
+
     private void ensureManagedLayout(Path workspaceDir) {
         for (String relativePath : scaffoldGenerator.managedPaths()) {
             try {
@@ -678,6 +740,50 @@ public class WorkspaceManager {
             }
         }
         return true;
+    }
+
+    private void ensureRequirementBranch(Path workspaceDir, String workspaceKey) {
+        ensureGitRepository(workspaceDir);
+        runCommand(workspaceDir, "git", "checkout", "-B", branchName(workspaceKey));
+    }
+
+    private String branchName(String workspaceKey) {
+        String key = workspaceKey == null ? "" : workspaceKey.trim();
+        if (key.startsWith("requirement-")) {
+            key = key.substring("requirement-".length());
+        }
+        return "feature/" + safeSegment(key);
+    }
+
+    private void ensureGitRepository(Path workspaceDir) {
+        if (!Files.isDirectory(workspaceDir.resolve(".git"))) {
+            runCommand(workspaceDir, "git", "init");
+        }
+        ensureLocalGitConfig(workspaceDir);
+    }
+
+    private void ensureLocalGitConfig(Path workspaceDir) {
+        runCommand(workspaceDir, "git", "config", "user.name", "sei-online-code");
+        runCommand(workspaceDir, "git", "config", "user.email", "sei-online-code@local");
+    }
+
+    private void runCommand(Path cwd, String... command) {
+        try {
+            Process process = new ProcessBuilder(command)
+                    .directory(cwd.toFile())
+                    .redirectErrorStream(true)
+                    .start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int code = process.waitFor();
+            if (code != 0) {
+                throw new IllegalStateException(String.join(" ", command) + " failed: " + output);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(String.join(" ", command) + " interrupted", e);
+        } catch (IOException e) {
+            throw new IllegalStateException(String.join(" ", command) + " failed", e);
+        }
     }
 
     private void deleteTree(Path dir) {

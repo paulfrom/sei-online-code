@@ -1,9 +1,11 @@
 package com.changhong.onlinecode.agent;
 
 import com.changhong.onlinecode.dao.ProjectDao;
+import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.ConfigService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -112,6 +114,8 @@ class WorkspaceManagerTest {
         assertTrue(Files.exists(tempDir.resolve("project-1/.sei/workspace.json")));
         assertTrue(Files.exists(tempDir.resolve("project-1/.sei/runs/.gitkeep")));
         assertTrue(Files.exists(tempDir.resolve("project-1/README.md")));
+        assertTrue(Files.exists(tempDir.resolve("project-1/.git")));
+        assertEquals("sei-online-code", runGit(tempDir.resolve("project-1"), "config", "user.name").trim());
     }
 
     @Test
@@ -168,6 +172,35 @@ class WorkspaceManagerTest {
         assertTrue(Files.exists(isolated.resolve("package.json")));
         assertFalse(Files.exists(isolated.resolve("node_modules")));
         assertFalse(Files.exists(isolated.resolve(".next")));
+    }
+
+    @Test
+    void resolveRequirementWorkspace_usesRequirementNoAsWorkspaceAndBranch(@TempDir Path tempDir)
+            throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+        workspaceManager.setRequirementDao(requirementDao);
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+
+        Project project = new Project();
+        project.setId("project-branch");
+        when(projectDao.findOne("project-branch")).thenReturn(project);
+
+        Requirement requirement = new Requirement();
+        requirement.setId("req-1");
+        requirement.setRequirementNo("REQ-0042");
+        when(requirementDao.findOne("req-1")).thenReturn(requirement);
+
+        Path isolated = workspaceManager.resolveRequirementWorkspace("project-branch", "req-1");
+
+        assertTrue(isolated.endsWith(Path.of(".sei", "workspaces", "requirement-REQ-0042")));
+        assertEquals("feature/REQ-0042", runGit(isolated, "branch", "--show-current").trim());
     }
 
     @Test
@@ -236,7 +269,7 @@ class WorkspaceManagerTest {
         project.setId("project-3");
         project.setName("库存管理台");
         project.setDesign("库存管理 mono 模板");
-        project.setGitUrl("https://gitlab.example.com/group/inventory-app.git");
+        project.setProjectCode("inventory-app");
         when(projectDao.findOne("project-3")).thenReturn(project);
 
         var result = workspaceManager.resolve("project-3");
@@ -245,11 +278,58 @@ class WorkspaceManagerTest {
         Path workspace = Path.of(result.getPath());
         assertTrue(Files.exists(workspace.resolve("frontend/package.json")));
         assertTrue(Files.exists(workspace.resolve("backend/src/main/java/com/changhong/inventory/app/App.java")));
-        assertFalse(Files.exists(workspace.resolve(".git")), "模板仓库历史不应带入目标工作区");
+        assertTrue(Files.exists(workspace.resolve(".git")), "模板生成的目标工作区应初始化本地 Git");
+        assertFalse(runGitAllowFailure(workspace, "remote", "get-url", "origin").success(), "模板仓库 origin 不应带入目标工作区");
         assertEquals("Project inventory-app", Files.readString(workspace.resolve("README.md")));
         assertTrue(Files.readString(workspace.resolve("frontend/package.json")).contains("inventory-app"));
         assertTrue(Files.readString(workspace.resolve("backend/src/main/java/com/changhong/inventory/app/App.java"))
                 .contains("package com.changhong.inventory.app;"));
+    }
+
+    @Test
+    void resolve_projectGitUrlMaterializesProjectContentBeforeTemplate(@TempDir Path tempDir) throws Exception {
+        Path projectRepo = tempDir.resolve("project-repo");
+        Files.createDirectories(projectRepo.resolve("backend/src/main/java/demo"));
+        Files.writeString(projectRepo.resolve("backend/src/main/java/demo/App.java"),
+                "class App { String literal = \"aaa_projectName_aaa\"; }", StandardCharsets.UTF_8);
+        Files.writeString(projectRepo.resolve("README.md"), "Real project repository", StandardCharsets.UTF_8);
+
+        runGit(projectRepo, "init");
+        runGit(projectRepo, "config", "user.email", "test@example.com");
+        runGit(projectRepo, "config", "user.name", "tester");
+        runGit(projectRepo, "add", ".");
+        runGit(projectRepo, "commit", "-m", "init");
+
+        Path templateDir = tempDir.resolve("template-repo");
+        Files.createDirectories(templateDir);
+        Files.writeString(templateDir.resolve("README.md"), "Template repository", StandardCharsets.UTF_8);
+
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.resolve("workspaces-project-git").toString());
+        config.setTemplateGitlabUrl(templateDir.toUri().toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(config.getWorkspaceRoot());
+
+        Project project = new Project();
+        project.setId("project-git");
+        project.setName("真实项目");
+        project.setGitUrl(projectRepo.toUri().toString());
+        when(projectDao.findOne("project-git")).thenReturn(project);
+
+        var result = workspaceManager.resolve("project-git");
+
+        assertEquals(WorkspaceSource.CLONE, result.getSource());
+        Path workspace = Path.of(result.getPath());
+        assertEquals("Real project repository", Files.readString(workspace.resolve("README.md")));
+        assertTrue(Files.exists(workspace.resolve("backend/src/main/java/demo/App.java")));
+        assertTrue(Files.readString(workspace.resolve("backend/src/main/java/demo/App.java"))
+                .contains("aaa_projectName_aaa"), "项目仓库内容应原样下载，不做模板占位替换");
+        assertTrue(Files.exists(workspace.resolve(".git")), "项目仓库应通过 git clone 建立，保留 origin");
+        assertEquals(projectRepo.toUri().toString(), runGit(workspace, "remote", "get-url", "origin").trim());
     }
 
     @Test
@@ -299,7 +379,7 @@ class WorkspaceManagerTest {
                 .contains("package com.demo.customized;"));
     }
 
-    private void runGit(Path dir, String... args) throws Exception {
+    private String runGit(Path dir, String... args) throws Exception {
         List<String> command = new java.util.ArrayList<>();
         command.add("git");
         command.addAll(List.of(args));
@@ -310,5 +390,25 @@ class WorkspaceManagerTest {
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         int code = process.waitFor();
         assertEquals(0, code, output);
+        return output;
+    }
+
+    private GitResult runGitAllowFailure(Path dir, String... args) throws Exception {
+        List<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.addAll(List.of(args));
+        Process process = new ProcessBuilder(command)
+                .directory(dir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int code = process.waitFor();
+        return new GitResult(code, output);
+    }
+
+    private record GitResult(int code, String output) {
+        boolean success() {
+            return code == 0;
+        }
     }
 }

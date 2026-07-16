@@ -71,11 +71,18 @@ public class RequirementService extends BaseEntityService<Requirement> {
             entity.setGenerationToken(GenerationTokenSupport.newToken());
         }
         boolean isNew = entity.getId() == null;
+        Requirement existing = null;
         if (!isNew) {
-            Requirement existing = dao.findOne(entity.getId());
+            existing = dao.findOne(entity.getId());
             if (existing != null && requirementChanged(existing, entity)) {
                 requirementDesignContextService.invalidate(entity.getId());
             }
+        }
+        if (entity.getRequirementNo() == null || entity.getRequirementNo().isBlank()) {
+            entity.setRequirementNo(existing != null && existing.getRequirementNo() != null
+                    && !existing.getRequirementNo().isBlank()
+                    ? existing.getRequirementNo()
+                    : nextRequirementNo(entity.getProjectId()));
         }
         if (Objects.isNull(entity.getAutomationStatus())) {
             entity.setAutomationStatus(RequirementAutomationStatus.IDLE);
@@ -87,6 +94,26 @@ public class RequirementService extends BaseEntityService<Requirement> {
             triggerPrdSpawnAfterCommit(saved.getId(), null, saved.getGenerationToken());
         }
         return result;
+    }
+
+    private synchronized String nextRequirementNo(String projectId) {
+        java.util.List<Requirement> existing = dao.findByProjectIdOrderByCreatedDateDesc(projectId);
+        int next = (existing == null ? java.util.List.<Requirement>of() : existing).stream()
+                .map(Requirement::getRequirementNo)
+                .filter(value -> value != null && value.startsWith("REQ-"))
+                .map(value -> value.substring("REQ-".length()))
+                .mapToInt(this::parseIntOrZero)
+                .max()
+                .orElse(0) + 1;
+        return "REQ-" + String.format("%04d", next);
+    }
+
+    private int parseIntOrZero(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private boolean requirementChanged(Requirement existing, Requirement updated) {
@@ -301,6 +328,7 @@ public class RequirementService extends BaseEntityService<Requirement> {
         RequirementDto dto = new RequirementDto();
         dto.setId(requirement.getId());
         dto.setProjectId(requirement.getProjectId());
+        dto.setRequirementNo(requirement.getRequirementNo());
         dto.setTitle(requirement.getTitle());
         dto.setDescription(requirement.getDescription());
         dto.setStatus(requirement.getStatus());

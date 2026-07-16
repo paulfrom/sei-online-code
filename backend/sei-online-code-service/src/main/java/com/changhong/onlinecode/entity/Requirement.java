@@ -44,6 +44,9 @@ public class Requirement extends BaseAuditableEntity {
     @Column(name = "project_id", nullable = false, length = 36)
     private String projectId;
 
+    @Column(name = "requirement_no", nullable = false, length = 32)
+    private String requirementNo;
+
     @Column(name = "title", nullable = false, length = 200)
     private String title;
 
