@@ -83,9 +83,9 @@ public class PlanAgentService {
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildPlanningPrompt(project, modifyHint);
 
-        String iterationId = projectId; // 规划阶段用 projectId 作日志键
+        String logStreamKey = projectId; // 规划阶段用 projectId 作日志键
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("planning-agent",
-                buildProjectRequest(projectId, iterationId, prompt, triggerSource));
+                buildProjectRequest(projectId, logStreamKey, prompt, triggerSource));
         future.thenApply(result -> resultOutput(result, json -> parseJson(json, PlanContent.class)))
                 .thenAccept(output -> {
                     Plan latest = planDao.findLatestByProjectId(projectId);
@@ -177,9 +177,9 @@ public class PlanAgentService {
         Plan plan = planDao.findLatestByProjectId(projectId);
         String prompt = buildFeatureDesignPrompt(plan, featureId, modifyHint);
 
-        String iterationId = projectId + ":" + featureId;
+        String logStreamKey = projectId + ":" + featureId;
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("feature-design-agent",
-                buildProjectRequest(projectId, iterationId, prompt, triggerSource));
+                buildProjectRequest(projectId, logStreamKey, prompt, triggerSource));
         final FeatureDesign target = fd;
         future.thenApply(result -> resultOutput(result, json -> {
                     // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
@@ -269,11 +269,11 @@ public class PlanAgentService {
         return current.getMessage();
     }
 
-    private AgentExecutionRequest buildProjectRequest(String projectId, String iterationId, String prompt,
+    private AgentExecutionRequest buildProjectRequest(String projectId, String logStreamKey, String prompt,
                                                       TriggerSource triggerSource) {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setProjectId(projectId);
-        request.setIterationId(iterationId);
+        request.setLogStreamKey(logStreamKey);
         request.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
         request.setPrompt(prompt);
         return request;

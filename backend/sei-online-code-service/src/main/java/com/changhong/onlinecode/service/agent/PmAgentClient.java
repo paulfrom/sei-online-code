@@ -137,7 +137,7 @@ public class PmAgentClient {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setProjectId(projectId);
         request.setRequirementId(requirementId);
-        request.setIterationId(requirementId);
+        request.setLogStreamKey(requirementId);
         request.setLoopId(loopId);
         request.setTriggerSource(TriggerSource.AUTO);
         request.setPrompt(prompt);

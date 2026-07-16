@@ -271,7 +271,7 @@ public class CodingTaskExecutionService {
         request.setRunId(run.getId());
         request.setProjectId(task.getProjectId());
         request.setRequirementId(task.getRequirementId());
-        request.setIterationId(task.getRequirementId());
+        request.setLogStreamKey(task.getRequirementId());
         request.setLoopId(task.getLoopId());
         request.setCodingTaskId(task.getId());
         request.setPrompt(prompt);

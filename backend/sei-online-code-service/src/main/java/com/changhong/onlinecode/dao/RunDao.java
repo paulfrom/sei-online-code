@@ -19,12 +19,12 @@ import java.util.Optional;
 public interface RunDao extends BaseEntityDao<Run> {
 
     /**
-     * 按迭代 id 查询运行记录（取消级联用）。
+     * 按日志流键查询运行记录（runNo 分组兜底用）。
      *
-     * @param iterationId 迭代 id
+     * @param logStreamKey 日志流键
      * @return Run 列表
      */
-    List<Run> findByIterationId(String iterationId);
+    List<Run> findByLogStreamKey(String logStreamKey);
 
     List<Run> findByTaskId(String taskId);
 

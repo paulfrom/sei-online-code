@@ -99,7 +99,7 @@ export interface RunDto {
   memoryContextId?: string | null; workspaceMemoryId?: string | null;
   userPrompt?: string | null; failureSummary?: string | null; failureReason?: string | null;
   terminalReason?: RunTerminalReason | string | null;
-  iterationId?: string | null; state?: RunState; worktreePath?: string | null;
+  logStreamKey?: string | null; state?: RunState; worktreePath?: string | null;
   exitCode?: number | null; agentId?: string | null; agentName?: string | null;
   cliTool?: string | null; model?: string | null;
   inputTokens?: number | null; outputTokens?: number | null;

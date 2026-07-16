@@ -10,7 +10,6 @@ import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import lombok.Data;
@@ -29,18 +28,13 @@ import java.util.List;
  * @author sei-online-code
  */
 @Entity
-@Table(name = "oc_task", indexes = {
-        @Index(name = "idx_task_iteration", columnList = "iteration_id")
-})
+@Table(name = "oc_task")
 @Access(AccessType.FIELD)
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class Task extends BaseAuditableEntity {
 
     private static final long serialVersionUID = 1L;
-
-    @Column(name = "iteration_id", nullable = false, length = 36)
-    private String iterationId;
 
     @Column(name = "feature_design_id", length = 36)
     private String featureDesignId;

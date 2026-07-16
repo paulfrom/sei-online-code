@@ -154,11 +154,11 @@ class RequirementAgentServiceTest {
     }
 
     @Test
-    void reviewMemory_iterationIdStaysWithinVarchar36Bound() {
-        // WHY: oc_run.iteration_id is varchar(36). A composite "reqId-memory-review-{uuid}" (~70 chars)
-        // overflowed the column and aborted the run insert. iteration_id is a stable iteration grouping
-        // key; for a requirement-scoped review it must be the requirement id (<=36), matching the other
-        // requirement-scoped agent runs.
+    void reviewMemory_logStreamKeyStaysWithinVarchar36Bound() {
+        // WHY: oc_run.log_stream_key is varchar(36). A composite "reqId-memory-review-{uuid}" (~70 chars)
+        // overflowed the column and aborted the run insert. log_stream_key is the WS log-stream key
+        // (兼作 runNo 分组兜底); for a requirement-scoped review it must be the requirement id (<=36),
+        // matching the other requirement-scoped agent runs.
         Requirement requirement = new Requirement();
         requirement.setId("req1");
         requirement.setProjectId("p1");
@@ -173,9 +173,9 @@ class RequirementAgentServiceTest {
 
         ArgumentCaptor<AgentExecutionRequest> captor = ArgumentCaptor.forClass(AgentExecutionRequest.class);
         verify(agentExecutionService).executeAsync(eq("memory-review-agent"), captor.capture());
-        String iterationId = captor.getValue().getIterationId();
-        assertTrue(iterationId.length() <= 36, "iteration_id must fit varchar(36): " + iterationId);
-        assertEquals("req1", iterationId);
+        String logStreamKey = captor.getValue().getLogStreamKey();
+        assertTrue(logStreamKey.length() <= 36, "log_stream_key must fit varchar(36): " + logStreamKey);
+        assertEquals("req1", logStreamKey);
     }
 
     private static AgentExecutionResult agentResult(String output) {

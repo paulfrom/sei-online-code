@@ -75,9 +75,9 @@ public class CodexRunner implements CliRunner {
     }
 
     @Override
-    public CompletableFuture<CliRunResult> executeDetailed(String iterationId, String taskId, String runId,
+    public CompletableFuture<CliRunResult> executeDetailed(String logStreamKey, String taskId, String runId,
                                                            String prompt, String cwd, String model, String mcpConfig) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model, mcpConfig));
+        return CompletableFuture.supplyAsync(() -> runBlocking(logStreamKey, taskId, runId, prompt, cwd, model, mcpConfig));
     }
 
     /**
@@ -86,7 +86,7 @@ public class CodexRunner implements CliRunner {
      * <p>per-run codex-home 在系统临时区建（避免污染用户 {@code ~/.codex/}），进程结束后
      * best-effort 清理。沙箱策略由 {@link CodexSandboxConfig} 按平台写入 config.toml。</p>
      */
-    private CliRunResult runBlocking(String iterationId, String taskId, String runId, String prompt,
+    private CliRunResult runBlocking(String logStreamKey, String taskId, String runId, String prompt,
                                       String cwd, String model, String mcpConfig) {
         Path codexHome = null;
         try {
@@ -101,7 +101,7 @@ public class CodexRunner implements CliRunner {
             // 覆盖 sandbox 写块 / MCP 块（mcpConfig 畸形时 writeMcpBlock 抛）。
             // codexHome 可能已部分配置（如 MCP 块未写但 sandbox 块已写）——soft-fail：仍注入 CODEX_HOME
             // 让 codex 跑（损失 MCP/sandbox 能力但不阻断任务），由 e 携带的具体消息定位根因。
-            log.warn("codex spawn 前置配置失败（sandbox/MCP），soft-fail 继续运行：iterationId={}", iterationId, e);
+            log.warn("codex spawn 前置配置失败（sandbox/MCP），soft-fail 继续运行：logStreamKey={}", logStreamKey, e);
         }
 
         List<String> args = buildArgs();
@@ -115,13 +115,13 @@ public class CodexRunner implements CliRunner {
         // 代理 env：ProcessBuilder 默认继承 JVM 环境（HTTPS_PROXY/HTTP_PROXY/NO_PROXY），
         // 无需显式复制——见类 javadoc。启动器负责 export。
         try {
-            emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
+            emit(logStreamKey, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
             if (runId != null) {
                 activeProcesses.put(runId, process);
             }
 
-            Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream());
+            Thread stderrPump = pumpStderr(logStreamKey, taskId, runId, process.getErrorStream());
             stderrPump.start();
             Thread stdoutPump = null;
 
@@ -129,9 +129,9 @@ public class CodexRunner implements CliRunner {
                 CodexAppServerEvents events = new CodexAppServerEvents();
                 CodexAppServerClient client = new CodexAppServerClient(
                         process.getOutputStream(),
-                        line -> emit(iterationId, taskId, runId, "stdout", line, null),
+                        line -> emit(logStreamKey, taskId, runId, "stdout", line, null),
                         events);
-                stdoutPump = pumpAppServerStdout(iterationId, taskId, runId, process.getInputStream(), client);
+                stdoutPump = pumpAppServerStdout(logStreamKey, taskId, runId, process.getInputStream(), client);
                 stdoutPump.start();
 
                 client.request("initialize", Map.of(
@@ -157,13 +157,13 @@ public class CodexRunner implements CliRunner {
 
                 AgentUsage usage = buildUsage(events);
                 if (events.isFailed()) {
-                    log.warn("codex app-server turn failed: iterationId={} reason={}", iterationId, events.failureReason());
-                    emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+                    log.warn("codex app-server turn failed: logStreamKey={} reason={}", logStreamKey, events.failureReason());
+                    emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
                     String output = stripFences(events.output());
                     return failedResult(events.failureReason(), output.isBlank() ? null : output, usage);
                 }
                 String output = stripFences(events.output());
-                emit(iterationId, taskId, runId, "system", "DONE", "PREVIEW");
+                emit(logStreamKey, taskId, runId, "system", "DONE", "PREVIEW");
                 return successResult(output.isBlank() ? null : output, usage);
             } finally {
                 if (runId != null) {
@@ -176,20 +176,20 @@ public class CodexRunner implements CliRunner {
                 }
             }
         } catch (IOException e) {
-            log.warn("codex spawn failed: iterationId={}", iterationId, e);
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            log.warn("codex spawn failed: logStreamKey={}", logStreamKey, e);
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } catch (TimeoutException e) {
-            log.warn("codex app-server timed out: iterationId={}", iterationId, e);
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            log.warn("codex app-server timed out: logStreamKey={}", logStreamKey, e);
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult("codex app-server timed out", null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult("interrupted", null);
         } catch (Exception e) {
-            log.warn("codex app-server failed: iterationId={}", iterationId, e);
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            log.warn("codex app-server failed: logStreamKey={}", logStreamKey, e);
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } finally {
             if (codexHome != null) {
@@ -262,36 +262,36 @@ public class CodexRunner implements CliRunner {
         return List.of(executable, "app-server", "--listen", "stdio://");
     }
 
-    private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr) {
+    private Thread pumpStderr(String logStreamKey, String taskId, String runId, InputStream stderr) {
         return new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    emit(iterationId, taskId, runId, "stderr", line, null);
+                    emit(logStreamKey, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
-                log.debug("codex stderr pump ended: iterationId={}", iterationId, e);
+                log.debug("codex stderr pump ended: logStreamKey={}", logStreamKey, e);
             }
-        }, "codex-stderr-" + iterationId);
+        }, "codex-stderr-" + logStreamKey);
     }
 
-    private Thread pumpAppServerStdout(String iterationId, String taskId, String runId,
+    private Thread pumpAppServerStdout(String logStreamKey, String taskId, String runId,
                                        InputStream stdout, CodexAppServerClient client) {
         return new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(stdout, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    emit(iterationId, taskId, runId, "stdout", line, null);
+                    emit(logStreamKey, taskId, runId, "stdout", line, null);
                     client.handleLine(line);
                 }
                 client.failPendingRequests(new IOException("codex app-server stdout closed"));
             } catch (IOException e) {
-                log.debug("codex app-server stdout pump ended: iterationId={}", iterationId, e);
+                log.debug("codex app-server stdout pump ended: logStreamKey={}", logStreamKey, e);
                 client.failPendingRequests(e);
             }
-        }, "codex-stdout-" + iterationId);
+        }, "codex-stdout-" + logStreamKey);
     }
 
     Map<String, Object> threadStartParams(String cwd, String model) {
@@ -328,8 +328,8 @@ public class CodexRunner implements CliRunner {
         }
     }
 
-    private void emit(String iterationId, String taskId, String runId, String stream, String line, String state) {
-        RunLogFrame frame = new RunLogFrame(iterationId, stream, line, LocalDateTime.now().format(TS));
+    private void emit(String logStreamKey, String taskId, String runId, String stream, String line, String state) {
+        RunLogFrame frame = new RunLogFrame(logStreamKey, stream, line, LocalDateTime.now().format(TS));
         frame.setTaskId(taskId);
         frame.setRunId(runId);
         frame.setState(state);

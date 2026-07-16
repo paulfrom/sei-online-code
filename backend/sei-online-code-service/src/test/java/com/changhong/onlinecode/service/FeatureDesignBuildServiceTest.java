@@ -212,7 +212,6 @@ class FeatureDesignBuildServiceTest {
 
         Task savedTask = new Task();
         savedTask.setId(taskId);
-        savedTask.setIterationId(fdId);
 
         Run savedRun = new Run();
         savedRun.setId(runId);

@@ -110,7 +110,7 @@ public class CliRunnerRegistry {
             throw new IllegalArgumentException("未知的 CLI 工具: " + tool);
         }
         CompletableFuture<CliRunResult> future = resolve(tool).executeDetailed(
-                context.iterationId(),
+                context.logStreamKey(),
                 context.taskId(),
                 context.runId(),
                 prompt,

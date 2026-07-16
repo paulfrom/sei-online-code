@@ -15,7 +15,7 @@ public class AgentExecutionRequest {
     private String runId;
     private String projectId;
     private String requirementId;
-    private String iterationId;
+    private String logStreamKey;
     private String loopId;
     private String codingTaskId;
     private String taskId;

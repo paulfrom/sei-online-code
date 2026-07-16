@@ -10,7 +10,7 @@ import org.springframework.cloud.openfeign.FeignClient;
  * Task 管理 API。契约 Phase 2 §2 端点 11/12。
  *
  * <ul>
- *   <li>#11 POST /task/findByPage —— FindByPageApi.findByPage（按 iterationId 过滤）</li>
+ *   <li>#11 POST /task/findByPage —— FindByPageApi.findByPage（按 featureDesignId 过滤）</li>
  *   <li>#12 GET  /task/findOne    —— BaseEntityApi.findOne</li>
  * </ul>
  *

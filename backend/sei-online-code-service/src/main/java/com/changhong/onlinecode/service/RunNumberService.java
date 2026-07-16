@@ -44,8 +44,8 @@ public class RunNumberService {
         if (hasText(run.getTaskId())) {
             return runDao.findByTaskId(run.getTaskId());
         }
-        if (hasText(run.getIterationId())) {
-            return runDao.findByIterationId(run.getIterationId());
+        if (hasText(run.getLogStreamKey())) {
+            return runDao.findByLogStreamKey(run.getLogStreamKey());
         }
         return List.of();
     }

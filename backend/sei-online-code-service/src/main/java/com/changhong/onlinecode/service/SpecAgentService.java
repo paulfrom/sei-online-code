@@ -76,9 +76,9 @@ public class SpecAgentService {
         Project project = projectLifecycleService.findById(projectId);
         String prompt = buildSpecPrompt(project, spec, modifyHint);
 
-        String iterationId = projectId; // 需求阶段用 projectId 作日志键
+        String logStreamKey = projectId; // 需求阶段用 projectId 作日志键
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync("requirement-agent",
-                buildSpecRequest(projectId, iterationId, prompt, triggerSource));
+                buildSpecRequest(projectId, logStreamKey, prompt, triggerSource));
         future.thenApply(result -> resultOutput(result, json -> {
                     // claude CLI 不可用（json==null）时走确定性 fallback（backend rule 11）。
                     if (json == null || json.isBlank()) {
@@ -265,11 +265,11 @@ public class SpecAgentService {
         return current.getMessage();
     }
 
-    private AgentExecutionRequest buildSpecRequest(String projectId, String iterationId, String prompt,
+    private AgentExecutionRequest buildSpecRequest(String projectId, String logStreamKey, String prompt,
                                                    TriggerSource triggerSource) {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setProjectId(projectId);
-        request.setIterationId(iterationId);
+        request.setLogStreamKey(logStreamKey);
         request.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
         request.setPrompt(prompt);
         return request;

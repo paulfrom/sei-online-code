@@ -20,7 +20,7 @@ public interface CliRunner {
     /**
      * 异步执行一次 CLI 运行，返回完整结果（业务输出 + token usage）。
      *
-     * @param iterationId 迭代 id（用于日志帧路由）
+     * @param logStreamKey 日志流键（用于日志帧路由）
      * @param taskId      任务 id（日志帧路由）
      * @param runId       运行 id（日志帧路由）
      * @param prompt      提示词
@@ -30,7 +30,7 @@ public interface CliRunner {
      *                    codex 经 {@code CODEX_HOME/config.toml} [mcp_servers.*] 托管块注入；claude 当前忽略，TODO）
      * @return 完成后携带 {@link CliRunResult} 的 future
      */
-    CompletableFuture<CliRunResult> executeDetailed(String iterationId, String taskId, String runId,
+    CompletableFuture<CliRunResult> executeDetailed(String logStreamKey, String taskId, String runId,
                                                     String prompt, String cwd, String model, String mcpConfig);
 
     /** Best-effort cancellation for a process associated with the Run id. */

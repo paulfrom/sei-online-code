@@ -17,7 +17,7 @@ import java.util.List;
  * Run 管理 API。契约 Phase 2 §2 端点 13/14。
  *
  * <ul>
- *   <li>#13 POST /run/findByPage —— FindByPageApi.findByPage（按 iterationId / taskId 过滤）</li>
+ *   <li>#13 POST /run/findByPage —— FindByPageApi.findByPage（按 logStreamKey / taskId 过滤）</li>
  *   <li>#14 GET  /run/findOne    —— BaseEntityApi.findOne（轮询状态/exitCode）</li>
  *   <li>GET /run/findUsage —— 查询单次 Run 的 token usage 详情（含原始 usage JSON）</li>
  * </ul>

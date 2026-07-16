@@ -71,7 +71,7 @@ public class ValidationLoopService {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setProjectId(projectId);
         request.setRequirementId(requirementId);
-        request.setIterationId(requirementId);
+        request.setLogStreamKey(requirementId);
         request.setLoopId(loopId);
         request.setCodingTaskId(codingTaskId);
         request.setTriggerSource(TriggerSource.AUTO);

@@ -9,7 +9,7 @@ import java.io.Serializable;
  * 运行日志帧。契约 §3.1 —— server→browser 的 newline-delimited JSON。
  *
  * <pre>
- * { "iterationId": "ITER0001", "stream": "stdout", "line": "vite v5 building…", "ts": "2026-07-01T10:10:03" }
+ * { "logStreamKey": "ITER0001", "stream": "stdout", "line": "vite v5 building…", "ts": "2026-07-01T10:10:03" }
  * </pre>
  *
  * <p>终帧携带 state：{ "stream": "system", "line": "DONE", "state": "PREVIEW" }。</p>
@@ -23,7 +23,7 @@ public class RunLogFrame implements Serializable {
     private static final long serialVersionUID = 1L;
 
     @Schema(description = "迭代 id")
-    private String iterationId;
+    private String logStreamKey;
 
     @Schema(description = "任务 id（Phase 2 多 agent fan-out）；无归属时为 null")
     private String taskId;
@@ -46,8 +46,8 @@ public class RunLogFrame implements Serializable {
     public RunLogFrame() {
     }
 
-    public RunLogFrame(String iterationId, String stream, String line, String ts) {
-        this.iterationId = iterationId;
+    public RunLogFrame(String logStreamKey, String stream, String line, String ts) {
+        this.logStreamKey = logStreamKey;
         this.stream = stream;
         this.line = line;
         this.ts = ts;

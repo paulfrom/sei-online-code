@@ -96,7 +96,6 @@ public class FeatureDesignBuildService {
 
         // 5. 创建 Task（D8：task.featureDesignId = featureDesignId）
         Task task = new Task();
-        task.setIterationId(featureDesignId); // 临时用 featureDesignId 作为 iterationId
         task.setFeatureDesignId(featureDesignId);
         task.setTitle("编码实现：" + fd.getFeatureId());
         task.setDescription(buildTaskDescription(fd));
@@ -118,7 +117,7 @@ public class FeatureDesignBuildService {
         AgentWorkspace workspace = agentExecutionService.workspace(fd.getProjectId());
         Run run = new Run();
         run.setTaskId(savedTask.getId());
-        run.setIterationId(savedTask.getIterationId());
+        run.setLogStreamKey(featureDesignId);
         run.setState(RunState.RUNNING);
         run.setAgentId(devAgent.getId());
         run.setAgentName(devAgent.getName());
@@ -141,7 +140,7 @@ public class FeatureDesignBuildService {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setRunId(savedRun.getId());
         request.setProjectId(fd.getProjectId());
-        request.setIterationId(savedTask.getIterationId());
+        request.setLogStreamKey(featureDesignId);
         request.setTaskId(savedTask.getId());
         request.setPrompt(prompt);
         request.setTriggerSource(triggerSource);

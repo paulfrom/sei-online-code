@@ -120,7 +120,7 @@ export interface RunDto {
   failureSummary?: string | null;
   failureReason?: string | null;
   terminalReason?: RunTerminalReason | string | null;
-  iterationId?: string | null;
+  logStreamKey?: string | null;
   worktreePath?: string | null;
   exitCode?: number | null;
   agentId?: string | null;

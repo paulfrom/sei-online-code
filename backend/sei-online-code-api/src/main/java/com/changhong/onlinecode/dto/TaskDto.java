@@ -19,9 +19,6 @@ public class TaskDto extends BaseEntityDto {
 
     private static final long serialVersionUID = 1L;
 
-    @Schema(description = "所属迭代 id")
-    private String iterationId;
-
     @Schema(description = "任务标题", example = "库存列表页")
     private String title;
 

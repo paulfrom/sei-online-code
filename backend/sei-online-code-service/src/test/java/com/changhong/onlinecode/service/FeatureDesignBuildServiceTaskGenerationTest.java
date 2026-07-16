@@ -94,7 +94,6 @@ class FeatureDesignBuildServiceTaskGenerationTest {
 
         Task savedTask = new Task();
         savedTask.setId("task1");
-        savedTask.setIterationId("fd1");
 
         Run savedRun = new Run();
         savedRun.setId("run1");
@@ -123,7 +122,6 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         ArgumentCaptor<Task> taskCaptor = ArgumentCaptor.forClass(Task.class);
         verify(taskService).save(taskCaptor.capture());
         Task generatedTask = taskCaptor.getValue();
-        assertEquals("fd1", generatedTask.getIterationId());
         assertEquals("fd1", generatedTask.getFeatureDesignId());
         assertEquals(List.of("src/pages/inventory/index.tsx", "src/mocks/inventory.ts"),
                 generatedTask.getFileScope());

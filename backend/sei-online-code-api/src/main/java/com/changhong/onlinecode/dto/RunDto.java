@@ -80,8 +80,8 @@ public class RunDto extends BaseEntityDto {
     @Schema(description = "终止原因")
     private RunTerminalReason terminalReason;
 
-    @Schema(description = "所属迭代 id")
-    private String iterationId;
+    @Schema(description = "日志流键")
+    private String logStreamKey;
 
     @Schema(description = "运行状态", example = "RUNNING")
     private RunState state;

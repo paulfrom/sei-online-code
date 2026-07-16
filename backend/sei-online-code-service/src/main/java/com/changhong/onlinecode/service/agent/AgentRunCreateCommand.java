@@ -15,7 +15,7 @@ public class AgentRunCreateCommand {
     private String taskId;
     private String codingTaskId;
     private String requirementId;
-    private String iterationId;
+    private String logStreamKey;
     private String loopId;
     private RunType runType;
     private String parentRunId;

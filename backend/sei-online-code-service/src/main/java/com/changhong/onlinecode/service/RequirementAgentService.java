@@ -298,7 +298,7 @@ public class RequirementAgentService {
         AgentExecutionRequest request = new AgentExecutionRequest();
         request.setProjectId(requirement.getProjectId());
         request.setRequirementId(requirement.getId());
-        request.setIterationId(requirement.getId());
+        request.setLogStreamKey(requirement.getId());
         request.setTriggerSource(TriggerSource.AUTO);
         request.setPrompt(prompt);
         request.setMemoryContextId(context == null ? null : context.getId());

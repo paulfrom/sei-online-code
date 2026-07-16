@@ -30,7 +30,7 @@ import java.util.Date;
  */
 @Entity
 @Table(name = "oc_run", indexes = {
-        @Index(name = "idx_run_iteration", columnList = "iteration_id"),
+        @Index(name = "idx_run_log_stream", columnList = "log_stream_key"),
         @Index(name = "idx_run_task", columnList = "task_id"),
         @Index(name = "idx_run_coding_task", columnList = "coding_task_id")
 })
@@ -98,8 +98,11 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "terminal_reason", length = 32)
     private RunTerminalReason terminalReason;
 
-    @Column(name = "iteration_id", length = 36)
-    private String iterationId;
+    /**
+     * WS 日志流订阅键（/ws/run/{logStreamKey}）；对 spec/plan/feature-design 等无更细 FK 的 run，兼作 runNo 分组键。
+     */
+    @Column(name = "log_stream_key", length = 36)
+    private String logStreamKey;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "state", nullable = false, length = 20)

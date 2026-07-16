@@ -1,6 +1,6 @@
 /**
- * RunLog drawer: streams run log lines via WebSocket (per iterationId),
- * falls back to a static hint when no iterationId is available.
+ * RunLog drawer: streams run log lines via WebSocket (per logStreamKey),
+ * falls back to a static hint when no logStreamKey is available.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
@@ -79,13 +79,13 @@ const RunLogDrawer = ({ open, run, onClose }) => {
       }
     });
 
-    const iterationId = run.iterationId;
-    if (!iterationId) {
+    const logStreamKey = run.logStreamKey;
+    if (!logStreamKey) {
       return undefined;
     }
 
     const socket = subscribeRunLog({
-      iterationId,
+      logStreamKey,
       runId: run.id,
       onLine: (frame) => {
         setLines((prev) => [...prev, frame.line]);
@@ -146,7 +146,7 @@ const RunLogDrawer = ({ open, run, onClose }) => {
             <Descriptions.Item label="退出码">{run.exitCode ?? '-'}</Descriptions.Item>
           </Descriptions>
 
-          {run.iterationId ? (
+          {run.logStreamKey ? (
             <pre className={styles.logArea}>
               {lines.length === 0 && !terminated
                 ? '等待日志…'

@@ -66,15 +66,15 @@ public class ClaudeRunner implements CliRunner {
      * 异步执行一次 claude 运行，返回完整结果。
      */
     @Override
-    public CompletableFuture<CliRunResult> executeDetailed(String iterationId, String taskId, String runId,
+    public CompletableFuture<CliRunResult> executeDetailed(String logStreamKey, String taskId, String runId,
                                                            String prompt, String cwd, String model, String mcpConfig) {
-        return CompletableFuture.supplyAsync(() -> runBlocking(iterationId, taskId, runId, prompt, cwd, model, mcpConfig));
+        return CompletableFuture.supplyAsync(() -> runBlocking(logStreamKey, taskId, runId, prompt, cwd, model, mcpConfig));
     }
 
     /**
      * 阻塞执行 claude 进程并逐行流式回传（供 {@link #executeDetailed} 在独立线程调用）。
      *
-     * @param iterationId 迭代 id
+     * @param logStreamKey 迭代 id
      * @param taskId      任务 id（可为 null）
      * @param runId       运行 id（可为 null）
      * @param prompt      提示词
@@ -83,7 +83,7 @@ public class ClaudeRunner implements CliRunner {
      * @param mcpConfig   MCP server 配置 JSON（可为 null/blank）
      * @return 单次运行结果
      */
-    private CliRunResult runBlocking(String iterationId, String taskId, String runId, String prompt,
+    private CliRunResult runBlocking(String logStreamKey, String taskId, String runId, String prompt,
                                       String cwd, String model, String mcpConfig) {
         Path mcpConfigFile = null;
         StringBuilder output = new StringBuilder();
@@ -95,14 +95,14 @@ public class ClaudeRunner implements CliRunner {
             if (cwd != null && !cwd.isBlank()) {
                 pb.directory(new java.io.File(cwd));
             }
-            emit(iterationId, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
+            emit(logStreamKey, taskId, runId, "system", "spawning: " + String.join(" ", args), null);
             Process process = pb.start();
             if (runId != null) {
                 activeProcesses.put(runId, process);
             }
 
             // stderr 独立线程读取，避免与 stdout 相互阻塞（参考 claude.go 的双 goroutine）。
-            Thread stderrPump = pumpStderr(iterationId, taskId, runId, process.getErrorStream(), errorOutput);
+            Thread stderrPump = pumpStderr(logStreamKey, taskId, runId, process.getErrorStream(), errorOutput);
             stderrPump.start();
 
             try (BufferedReader reader = new BufferedReader(
@@ -110,17 +110,17 @@ public class ClaudeRunner implements CliRunner {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append('\n');
-                    emit(iterationId, taskId, runId, "stdout", line, null);
+                    emit(logStreamKey, taskId, runId, "stdout", line, null);
                 }
             }
 
             int code = process.waitFor();
             stderrPump.join();
             String stdout = output.toString();
-            Envelope envelope = parseEnvelope(stdout, iterationId);
+            Envelope envelope = parseEnvelope(stdout, logStreamKey);
             AgentUsage usage = envelope.usage();
             String finalState = code == 0 ? "PREVIEW" : "FAILED";
-            emit(iterationId, taskId, runId, "system", "DONE", finalState);
+            emit(logStreamKey, taskId, runId, "system", "DONE", finalState);
             if (code == 0) {
                 return successResult(envelope.result(), usage);
             }
@@ -128,12 +128,12 @@ public class ClaudeRunner implements CliRunner {
             return failedResult("claude exited with code " + code,
                     firstNonBlank(envelope.result(), errorOutput.toString(), stdout), usage);
         } catch (IOException e) {
-            log.warn("claude spawn failed: iterationId={}", iterationId, e);
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            log.warn("claude spawn failed: logStreamKey={}", logStreamKey, e);
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            emit(iterationId, taskId, runId, "system", "DONE", "FAILED");
+            emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult("interrupted", null);
         } finally {
             if (runId != null) {
@@ -143,8 +143,8 @@ public class ClaudeRunner implements CliRunner {
                 try {
                     Files.deleteIfExists(mcpConfigFile);
                 } catch (IOException e) {
-                    log.debug("claude mcp config temp file cleanup failed: iterationId={}, path={}",
-                            iterationId, mcpConfigFile, e);
+                    log.debug("claude mcp config temp file cleanup failed: logStreamKey={}, path={}",
+                            logStreamKey, mcpConfigFile, e);
                 }
             }
         }
@@ -190,15 +190,15 @@ public class ClaudeRunner implements CliRunner {
      * <p>从 {@code result} 提取业务输出并剥离 markdown 围栏；从 {@code usage} 提取 token 并归一化。
      * envelope 表示错误但包含 usage 时，仍保存 usage。</p>
      */
-    private Envelope parseEnvelope(String stdout, String iterationId) {
+    private Envelope parseEnvelope(String stdout, String logStreamKey) {
         try {
             JsonNode node = JsonUtils.mapper().readTree(stdout);
             String result = extractResultText(node);
             AgentUsage usage = extractUsage(node);
             return new Envelope(result, usage);
         } catch (Exception e) {
-            log.warn("claude result envelope parse failed, iterationId={}, rawHead={}",
-                    iterationId, stdout.substring(0, Math.min(stdout.length(), 200)));
+            log.warn("claude result envelope parse failed, logStreamKey={}, rawHead={}",
+                    logStreamKey, stdout.substring(0, Math.min(stdout.length(), 200)));
             AgentUsage unavailable = new AgentUsage();
             unavailable.setStatus(UsageStatus.UNAVAILABLE);
             return new Envelope(null, unavailable);
@@ -311,7 +311,7 @@ public class ClaudeRunner implements CliRunner {
         return file;
     }
 
-    private Thread pumpStderr(String iterationId, String taskId, String runId, InputStream stderr,
+    private Thread pumpStderr(String logStreamKey, String taskId, String runId, InputStream stderr,
                               StringBuilder sink) {
         return new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
@@ -321,16 +321,16 @@ public class ClaudeRunner implements CliRunner {
                     synchronized (sink) {
                         sink.append(line).append('\n');
                     }
-                    emit(iterationId, taskId, runId, "stderr", line, null);
+                    emit(logStreamKey, taskId, runId, "stderr", line, null);
                 }
             } catch (IOException e) {
-                log.debug("claude stderr pump ended: iterationId={}", iterationId, e);
+                log.debug("claude stderr pump ended: logStreamKey={}", logStreamKey, e);
             }
-        }, "claude-stderr-" + iterationId);
+        }, "claude-stderr-" + logStreamKey);
     }
 
-    private void emit(String iterationId, String taskId, String runId, String stream, String line, String state) {
-        RunLogFrame frame = new RunLogFrame(iterationId, stream, line, LocalDateTime.now().format(TS));
+    private void emit(String logStreamKey, String taskId, String runId, String stream, String line, String state) {
+        RunLogFrame frame = new RunLogFrame(logStreamKey, stream, line, LocalDateTime.now().format(TS));
         frame.setTaskId(taskId);
         frame.setRunId(runId);
         frame.setState(state);

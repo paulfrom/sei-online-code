@@ -54,7 +54,7 @@ public class AgentRunRecorder {
         run.setTaskId(command.getTaskId());
         run.setCodingTaskId(command.getCodingTaskId());
         run.setRequirementId(command.getRequirementId());
-        run.setIterationId(command.getIterationId());
+        run.setLogStreamKey(command.getLogStreamKey());
         run.setLoopId(command.getLoopId());
         run.setRunType(command.getRunType() == null ? RunType.AGENT : command.getRunType());
         bindAttemptLineage(run, command);

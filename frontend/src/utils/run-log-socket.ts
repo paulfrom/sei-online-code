@@ -1,10 +1,10 @@
 /**
  * RunLog WebSocket client for P2: D4 WS client
- * Connects to /ws/run/{iterationId}, parses NDJSON frames, filters by runId.
+ * Connects to /ws/run/{logStreamKey}, parses NDJSON frames, filters by runId.
  */
 
 export interface RunLogFrame {
-  iterationId: string;
+  logStreamKey: string;
   taskId?: string | null;
   runId?: string | null;
   stream: string;
@@ -14,7 +14,7 @@ export interface RunLogFrame {
 }
 
 export interface RunLogSocketOptions {
-  iterationId: string;
+  logStreamKey: string;
   runId: string;
   onLine: (frame: RunLogFrame) => void;
   onTerminal: (state: string) => void;
@@ -50,20 +50,20 @@ function parseNDJSON(data: string): RunLogFrame[] {
  * Returns close() function to clean up connection
  */
 export function subscribeRunLog({
-  iterationId,
+  logStreamKey,
   runId,
   onLine,
   onTerminal,
   onError,
 }: RunLogSocketOptions): RunLogSocket {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws/run/${iterationId}`;
+  const wsUrl = `${protocol}//${window.location.host}/ws/run/${logStreamKey}`;
   const ws = new WebSocket(wsUrl);
 
   ws.onmessage = (event) => {
     const frames = parseNDJSON(event.data);
     for (const frame of frames) {
-      // runId empty: return all frames for this iterationId;
+      // runId empty: return all frames for this logStreamKey;
       // runId non-empty: only frames matching this runId
       if (!runId || frame.runId === runId) {
         onLine(frame);

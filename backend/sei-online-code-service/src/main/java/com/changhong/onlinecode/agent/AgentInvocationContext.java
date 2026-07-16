@@ -15,7 +15,7 @@ package com.changhong.onlinecode.agent;
  */
 public record AgentInvocationContext(
         String runId,
-        String iterationId,
+        String logStreamKey,
         String taskId,
         String agentId,
         String agentName,

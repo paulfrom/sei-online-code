@@ -98,7 +98,7 @@ public class AgentExecutionService {
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
             String prompt = composePrompt(agent, request.getPrompt());
             CompletableFuture<CliRunResult> future = cliRunnerRegistry.executeDetailed(workspace,
-                    new AgentInvocationContext(run.getId(), iterationId(request), request.getCodingTaskId(),
+                    new AgentInvocationContext(run.getId(), logStreamKey(request), request.getCodingTaskId(),
                             agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
                     prompt, agent.getMcpConfig());
             CliRunResult result = future.get(timeoutSeconds(request), TimeUnit.SECONDS);
@@ -137,7 +137,7 @@ public class AgentExecutionService {
         command.setTaskId(request.getTaskId());
         command.setCodingTaskId(request.getCodingTaskId());
         command.setRequirementId(request.getRequirementId());
-        command.setIterationId(iterationId(request));
+        command.setLogStreamKey(logStreamKey(request));
         command.setLoopId(request.getLoopId());
         command.setTriggerSource(request.getTriggerSource() == null ? TriggerSource.AUTO : request.getTriggerSource());
         command.setUserPrompt(composePrompt(agent, request.getPrompt()));
@@ -160,9 +160,9 @@ public class AgentExecutionService {
         return runDao.findOne(request.getRunId());
     }
 
-    private String iterationId(AgentExecutionRequest request) {
-        if (request.getIterationId() != null && !request.getIterationId().isBlank()) {
-            return request.getIterationId();
+    private String logStreamKey(AgentExecutionRequest request) {
+        if (request.getLogStreamKey() != null && !request.getLogStreamKey().isBlank()) {
+            return request.getLogStreamKey();
         }
         return request.getRequirementId();
     }

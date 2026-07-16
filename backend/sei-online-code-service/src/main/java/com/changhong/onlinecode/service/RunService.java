@@ -27,16 +27,6 @@ public class RunService extends BaseEntityService<Run> {
     }
 
     /**
-     * 按迭代 id 取运行记录（取消级联用）。
-     *
-     * @param iterationId 迭代 id
-     * @return Run 列表
-     */
-    public List<Run> findByIteration(String iterationId) {
-        return dao.findByIterationId(iterationId);
-    }
-
-    /**
      * 按编码任务 id 取运行记录。
      *
      * @param codingTaskId 编码任务 id
