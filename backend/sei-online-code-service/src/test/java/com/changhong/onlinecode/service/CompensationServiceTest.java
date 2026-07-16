@@ -135,6 +135,32 @@ class CompensationServiceTest {
     }
 
     @Test
+    void runningPrdGeneration_isNotRetriedByPreLoopCompensation() {
+        Date now = new Date();
+        Requirement requirement = new Requirement();
+        requirement.setId("req-running-prd");
+        requirement.setStatus(RequirementStatus.PRD_GENERATING);
+        requirement.setLastEditedDate(new Date(now.getTime() - 31 * 60_000L));
+        Run runningRun = new Run();
+        runningRun.setId("run-running-prd");
+        runningRun.setRequirementId("req-running-prd");
+        runningRun.setState(RunState.RUNNING);
+        when(requirementDao.findByStatus(RequirementStatus.FAILED)).thenReturn(List.of());
+        when(requirementDao.findByStatus(RequirementStatus.PRD_GENERATING)).thenReturn(List.of(requirement));
+        when(runDao.findByRequirementIdAndState("req-running-prd", RunState.RUNNING))
+                .thenReturn(List.of(runningRun));
+        when(failureInfoSupport.canRetry(eq(requirement), any(Date.class))).thenReturn(true);
+
+        service.compensatePrdGeneration(now);
+
+        verify(requirementDao, never()).updateStatusIfMatch(eq("req-running-prd"), any(), any());
+        verify(requirementDao, never()).save(requirement);
+        verify(requirementAgentService, never()).spawnPrd(eq("req-running-prd"), any(), any());
+        verify(failureInfoSupport, never()).markRetrying(eq(requirement),
+                eq(TriggerSource.SCHEDULED_COMPENSATION), any(Date.class));
+    }
+
+    @Test
     void stalePrdContext_generatesNextPrdVersionWithoutConsumingFailureRetry() {
         Date now = new Date();
         Requirement requirement = new Requirement();

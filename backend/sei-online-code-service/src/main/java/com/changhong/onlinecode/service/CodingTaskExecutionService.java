@@ -38,7 +38,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -108,7 +107,6 @@ public class CodingTaskExecutionService {
 
         Agent agent = agentService.findByName(task.getAssignedAgent());
         Run run = new Run();
-        run.setId(UUID.randomUUID().toString());
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
         run.setTriggerSource(prompt == null ? TriggerSource.AUTO : TriggerSource.USER_ACTION);
@@ -126,7 +124,7 @@ public class CodingTaskExecutionService {
             run.setModel(agent.getModel());
         }
         runNumberService.assign(run);
-        runDao.save(run);
+        run = runDao.save(run);
 
         String fullPrompt = buildExecutionPrompt(task, prompt);
 
@@ -191,7 +189,6 @@ public class CodingTaskExecutionService {
         codingTaskDao.save(task);
 
         Run run = new Run();
-        run.setId(UUID.randomUUID().toString());
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
         run.setLoopId(task.getLoopId());
@@ -215,7 +212,7 @@ public class CodingTaskExecutionService {
         run.setCliTool(agent.getCliTool());
         run.setModel(agent.getModel());
         runNumberService.assign(run);
-        runDao.save(run);
+        run = runDao.save(run);
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 

@@ -180,6 +180,7 @@ public class CompensationService {
         List<Requirement> candidates = new java.util.ArrayList<>(requirementDao.findByStatus(RequirementStatus.FAILED));
         requirementDao.findByStatus(RequirementStatus.PRD_GENERATING).stream()
                 .filter(requirement -> isStale(requirement.getLastEditedDate(), now))
+                .filter(requirement -> !hasActiveRun(requirement))
                 .forEach(candidates::add);
         for (Requirement requirement : candidates) {
             if (!failureInfoSupport.canRetry(requirement, now)) {

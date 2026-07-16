@@ -32,6 +32,7 @@ import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -78,6 +79,8 @@ class CodingTaskExecutionServiceTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
         executionPlanDao = mock(ExecutionPlanDao.class);
         workspaceManager = mock(WorkspaceManager.class);
+        when(workspaceManager.requirementWorkspaceKey(anyString()))
+                .thenAnswer(invocation -> "requirement-" + invocation.getArgument(0));
         agentExecutionService = mock(AgentExecutionService.class);
         runNumberService = mock(RunNumberService.class);
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -352,6 +355,47 @@ class CodingTaskExecutionServiceTest {
         Run developmentRun = captor.getAllValues().get(0);
         assertEquals("context-1", developmentRun.getMemoryContextId());
         assertEquals("memory-1", developmentRun.getWorkspaceMemoryId());
+    }
+
+    @Test
+    void executePlanTask_createsDevelopmentRunWithoutPresetId() {
+        CodingTask task = new CodingTask();
+        task.setId("task-new-run");
+        task.setRequirementId("req-new-run");
+        task.setProjectId("project-new-run");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-new-run")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-new-run")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            assertNull(run.getId(), "new Run must let sei-core generate id during insert");
+            run.setId("run-generated");
+            savedRun.set(run);
+            return run;
+        });
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(workspaceManager.requirementWorkspaceKey("req-new-run")).thenReturn("requirement-req-new-run");
+        when(agentExecutionService.workspace(eq("project-new-run"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-new-run");
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task-new-run", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals("run-generated", savedRun.get().getId());
     }
 
     @Test
