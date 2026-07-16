@@ -22,8 +22,6 @@ import java.io.Serializable;
 @Schema(description = "保存平台配置请求")
 public class SavePlatformConfigRequest implements Serializable {
 
-    @Pattern(regexp = "^\\s*$|^/.*|^[A-Za-z]:\\\\.*",
-            message = "工作区根目录必须为空或绝对路径")
     @Schema(description = "工作区根目录；空则默认 ${java.io.tmpdir}/sei-online-code", example = "/tmp/sei-online-code")
     private String workspaceRoot;
 
