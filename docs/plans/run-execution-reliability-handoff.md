@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-006`（EXE-005 已 DONE；EXE-006 依赖 EXE-002+EXE-005 已满足） |
-| 任务状态 | EXE-005 `DONE`；EXE-006 `READY` |
-| 当前 owner | 未分配（EXE-005 已交付） |
-| 已观察分支 | `feature/run-execution-reliability-exe005`（自 `main` `701eb82` 切出） |
-| 已观察 HEAD | `2972873`（EXE-005 checkpoint commit） |
+| 当前计划任务 | `EXE-007`（EXE-006 已 DONE；EXE-007 依赖 EXE-004+005+006 已满足） |
+| 任务状态 | EXE-006 `DONE`；EXE-007 `READY` |
+| 当前 owner | 未分配（EXE-006 已交付） |
+| 已观察分支 | `feature/run-execution-reliability-exe005` |
+| 已观察 HEAD | `c2a8108`（EXE-006 checkpoint commit） |
 | Requirement feature branch | `feature/run-execution-reliability-exe005` |
 | Requirement worktree | 当前检出 `/home/paul/project/sei-online-code` |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108` |
 | eadp-backend skill | 可用 |
-| 最近完成验证 | EXE-005 DONE：compileJava/compileTestJava 通过；17/17 WorkspaceLeaseServiceTest 通过 |
-| 下一动作 | EXE-006（Effect ledger 与 MR 交付改造）READY |
+| 最近完成验证 | EXE-006 DONE：compileJava/compileTestJava 通过；15/15 EffectServiceTest 通过 |
+| 下一动作 | EXE-007（ProgressReconciler 与补偿器切换）READY |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -217,8 +217,8 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-003 | `DONE` | backend-agent/claude | `7db9593` | 查询/事件/API 已交付；鉴权/WS/automation-mrStatus/测试延后 |
 | EXE-004 | `DONE` | backend-agent/claude | `122f9a2` | 核心集成完成；Runner threadId/turnId 填充 + 测试延后 |
 | EXE-005 | `DONE` | backend-agent/claude | `2972873` | WorkspaceLeaseService+Git方法+DAO CAS+接线+GC安全+17测试通过 |
-| EXE-006 | `READY` | - | - | 依赖 EXE-002+EXE-005 已 DONE，可 claim |
-| EXE-007 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-004、EXE-005、EXE-006 |
+| EXE-006 | `DONE` | backend-agent/claude | `c2a8108` | EffectService+DAO CAS+delivery 改造+fetch-merge+15测试通过 |
+| EXE-007 | `READY` | - | - | 依赖 EXE-004+005+006 已 DONE，可 claim |
 | EXE-008 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003 契约冻结 |
 | EXE-009 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003/004/006/007 |
 | ACC-001 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
@@ -472,6 +472,43 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - (3) Git commit 失败回滚为 best-effort（DB CAS 失败后 git reset HEAD~1；若 reset 也失败需人工对账）
   - (4) push/MR 属 EXE-006，patch artifact 持久化属 EXE-007
 - nextAction：EXE-005 DONE；EXE-006（依赖 EXE-002+EXE-005 已满足）→ READY，可 claim。
+
+### OBS-014 — CLAIM
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-006
+- state：`IN_PROGRESS`
+- baseHead：`4540c45`
+- currentHead：`4540c45`
+- owner：backend-agent / claude
+- claim依据：EXE-002 `DONE` + EXE-005 `DONE`；无其他 `IN_PROGRESS`；HEAD `4540c45`。
+- nextAction：调研现有 RequirementDeliveryService、GitLabApi 适配层、effect ledger 表结构；按 EXE-006 scope 设计并分批实施 Effect 注册/执行/对账框架、push/MR effect、交付前合入+验证。
+
+### OBS-015 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-006
+- state：`DONE`
+- baseHead：`4540c45`
+- currentHead：`c2a8108`
+- changedFiles：5 文件（ExecutionEffectDao +3 CAS Query + EffectService 新建 + RequirementDeliveryService 接入 effect ledger+fetch-merge target + EffectServiceTest 15 测试 + RequirementDeliveryServiceTest 构造器更新）
+- verification：
+  - compileJava 通过 ✅
+  - compileTestJava 通过 ✅
+  - 15/15 EffectServiceTest 通过（findOrPrepare×4 + markApplied×3 + markConfirmed×2 + markUnknown×2 + findByKey×2 + reconcile×2）
+  - git diff --check 无空白错误 ✅
+- 已交付：
+  - EffectService：findOrPrepare / markApplied / markConfirmed / markUnknown / findByKey / reconcile（AD-001 §5 幂等模型）
+  - ExecutionEffectDao：applyEffect / confirmEffect / markEffectUnknown（CAS 状态迁移）
+  - RequirementDeliveryService：push+MR 接入 effect ledger（幂等复用）；交付前 fetch+merge target（ff-only）防止冲突与基线漂移
+  - MR effect 复用已有 URL；push effect 复用已有 commitHash
+- 延后缺口（不掩盖）：
+  - (1) comment/memory job effect 注册未接入（仅提供 EffectService 框架，调用方自行使用）
+  - (2) UNKNOWN effect reconcile 对外部查询的完整 handler 注册（仅提供 reconcile 框架+回调函数模式）
+  - (3) MR source SHA 校验（需 EXE-005 workspace fencing + VERIFIED step checkpoint gitHead，当前 doDeliver 以当前 HEAD 为准）
+- nextAction：EXE-006 DONE；EXE-007（依赖 EXE-004+005+006 已满足）→ READY，可 claim。
 
 ### 后续备注模板
 
