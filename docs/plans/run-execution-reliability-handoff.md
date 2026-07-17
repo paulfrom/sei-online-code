@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-003` |
-| 任务状态 | EXE-002 `DONE`；EXE-003 `IN_PROGRESS`（已 claim） |
+| 当前计划任务 | `EXE-004` |
+| 任务状态 | EXE-003 `DONE`；EXE-004 `IN_PROGRESS`（已 claim） |
 | 当前 owner | backend-agent / claude |
 | 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
-| 已观察 HEAD | `e233612`（EXE-002 impl commit；EXE-003 base） |
+| 已观察 HEAD | `7db9593`（EXE-003 进度事件 commit；EXE-004 base） |
 | Requirement feature branch | `feature/run-execution-reliability` |
 | Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593` |
 | eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
-| 最近完成验证 | EXE-002 DONE：compileJava/compileTestJava 通过；8 单测已写未跑（用户暂停 test）；JPQL 待 CI |
-| 下一动作 | EXE-003：冻结 HTTP/WS DTO 契约 + 聚合查询 + 进度事件 |
+| 最近完成验证 | EXE-003 DONE：compileJava/compileTestJava 通过；缺口（鉴权/WS/automation-mrStatus/测试）延后 |
+| 下一动作 | EXE-004：Runner preflight + Run 绑定 + 自动 checkpoint |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -214,8 +214,8 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 |---|---|---|---|---|
 | EXE-001 | `DONE` | backend-agent/claude | `97153b9` | 数据层已交付（V7/V8+enum+entity+dao+测试）；并发/迁移 testcontainer 验收待 CI |
 | EXE-002 | `DONE` | backend-agent/claude | `e233612` | 核心原子协议已交付；测试已写未跑、JPQL 待 CI |
-| EXE-003 | `IN_PROGRESS` | backend-agent/claude | base `e233612` | 已 claim；冻结 DTO 契约 + 聚合查询 + 进度事件 |
-| EXE-004 | `READY` | - | - | 依赖 EXE-002 已 DONE，可 claim |
+| EXE-003 | `DONE` | backend-agent/claude | `7db9593` | 查询/事件/API 已交付；鉴权/WS/automation-mrStatus/测试延后 |
+| EXE-004 | `IN_PROGRESS` | backend-agent/claude | base `7db9593` | 已 claim；Runner preflight + Run 绑定 + 自动 checkpoint |
 | EXE-005 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-004 |
 | EXE-006 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-005 |
 | EXE-007 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-004、EXE-005、EXE-006 |
@@ -401,6 +401,32 @@ APPLIED / UNKNOWN / BLOCKED / DONE
 - owner：backend-agent / claude
 - claim依据：EXE-002 `DONE`；无其他 `IN_PROGRESS`；HEAD `e233612`。
 - nextAction：冻结第 3 节 HTTP/WS DTO 契约（overview + step/checkpoint/effect/observation 查询 + appendManual）；实现 overview 聚合与分页查询；受控人工 observation；after-commit 进度事件；DTO 映射前证据授权/脱敏。
+
+### OBS-010 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-003
+- state：`DONE`（功能闭环；鉴权/WS/状态字段/测试延后，见缺口）
+- baseHead：`e233612`
+- currentHead：`7db9593`
+- changedFiles：9 DTO + QueryService + DAO 查询扩展 + 2 Feign API + 2 Controller + 进度事件 + listener（commits `99a7e4e`/`e301208`/`7db9593`）
+- verification：compileJava/compileTestJava 通过；git diff --check 干净。JPQL 运行期、Feign 同名 bean、测试待 CI。
+- 已交付：冻结 DTO 契约；overview 聚合 + 分页查询 + 脱敏；2 Feign API + 2 Controller（PageResult）；可观测写 after-commit 进度事件（AFTER_COMMIT）。
+- 延后缺口（不掩盖）：(1) appendManual 鉴权未实现（需项目权限/会话模型）；(2) WS broker 转发未接（listener 仅 log，待 EXE-008/WS 基建）；(3) overview automationStatus/mrStatus 置 null（需 Requirement + MR effect，EXE-006/009）；(4) 查询/Controller 测试未写（用户暂停 test 运行）。
+- nextAction：EXE-003 DONE；EXE-004 依赖 EXE-002 已满足 → claim。
+
+### OBS-011 — CLAIM
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-004
+- state：`IN_PROGRESS`
+- baseHead：`7db9593`
+- currentHead：`7db9593`
+- owner：backend-agent / claude
+- claim依据：EXE-002 `DONE`；无其他 `IN_PROGRESS`（EXE-003 刚 DONE）；HEAD `7db9593`。
+- nextAction：调度入口用 invocation key 创建/复用 Run 并绑定稳定 Execution；Agent 启动前强制读 progress snapshot（已完成 Execution 不跳过模型启动）；注入 progress.json/nextActions 到 brief；自动采集 accepted/工具/文件/Git HEAD/测试/terminal/heartbeat；保存 threadId/turnId/resumeFromCheckpointId；Run 终态只更新 Run/observation 不判 Execution 完成。需先读 CodingTaskExecutionService/AgentExecution/agent 包理解既有 Runner 模型。
 
 ### 后续备注模板
 
