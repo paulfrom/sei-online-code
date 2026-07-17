@@ -129,7 +129,7 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog
     {
       title: '失败原因',
       dataIndex: 'failureReason',
-      render: (v) => v || '-',
+      render: (v) => (v ? `${v.slice(0, 10)}${v.length > 10 ? '...' : ''}` : '-'),
     },
   ];
 
@@ -158,6 +158,7 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog
         pagination={false}
         dataSource={filteredRuns}
         columns={columns}
+        scroll={{ x: 'max-content' }}
         onRow={(record) => ({
           onClick: () => onOpenLog && onOpenLog(record),
           style: { cursor: 'pointer' },

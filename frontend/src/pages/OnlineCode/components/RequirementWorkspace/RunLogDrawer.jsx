@@ -112,7 +112,7 @@ const RunLogDrawer = ({ open, run, onClose }) => {
       title="运行日志"
       open={open}
       onClose={onClose}
-      width={720}
+      width={820}
       destroyOnClose
     >
       {run ? (
@@ -144,6 +144,9 @@ const RunLogDrawer = ({ open, run, onClose }) => {
             <Descriptions.Item label="开始时间">{formatDateTime(run.startedDate)}</Descriptions.Item>
             <Descriptions.Item label="结束时间">{formatDateTime(run.finishedDate)}</Descriptions.Item>
             <Descriptions.Item label="退出码">{run.exitCode ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="失败原因" span={2}>
+              {run.failureReason || '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="摘要" span={2}>
               {run.summary || run.failureSummary || '-'}
             </Descriptions.Item>

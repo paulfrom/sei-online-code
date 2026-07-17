@@ -334,14 +334,16 @@ const TaskTab = ({
     {
       title: '失败摘要',
       dataIndex: 'failureSummary',
-      render: (v) => v || '-',
+      render: (v) => (v ? <Tooltip title={v}>{`${v.slice(0, 10)}${v.length > 10 ? '...' : ''}`}</Tooltip> : '-'),
     },
     {
       title: '最新开发结果',
       width: 180,
       render: (_v, record) => {
         const comment = resultsByTask.get(record.id)?.development;
-        return comment ? <Tooltip title={comment.content}>{comment.content}</Tooltip> : '-';
+        if (!comment) return '-';
+        const text = comment.content || '';
+        return text ? <Tooltip title={text}>{`${text.slice(0, 10)}${text.length > 10 ? '...' : ''}`}</Tooltip> : '-';
       },
     },
     {
