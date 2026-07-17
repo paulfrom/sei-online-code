@@ -89,6 +89,13 @@ class CodingTaskExecutionServiceTest {
         changeCollector = mock(CodingTaskChangeCollector.class);
         workspaceChangeDetector = new WorkspaceChangeDetector();
         requirementService = mock(RequirementService.class);
+        com.changhong.onlinecode.dao.RequirementWorkspaceDao requirementWorkspaceDao =
+                mock(com.changhong.onlinecode.dao.RequirementWorkspaceDao.class);
+        com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator codingTaskProgressIntegrator =
+                mock(com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.class);
+        org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
+                        null, null, null, false, "inv-test", null));
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
@@ -106,7 +113,9 @@ class CodingTaskExecutionServiceTest {
                 workspaceMemoryService,
                 changeCollector,
                 workspaceChangeDetector,
-                eventPublisher
+                eventPublisher,
+                codingTaskProgressIntegrator,
+                requirementWorkspaceDao
         );
     }
 

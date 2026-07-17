@@ -5,9 +5,11 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.TaskExecutionType;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RunState;
@@ -20,6 +22,7 @@ import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
@@ -27,6 +30,7 @@ import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
+import com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
@@ -72,6 +76,8 @@ public class CodingTaskExecutionService {
     private final CodingTaskChangeCollector codingTaskChangeCollector;
     private final WorkspaceChangeDetector workspaceChangeDetector;
     private final ApplicationEventPublisher eventPublisher;
+    private final CodingTaskProgressIntegrator codingTaskProgressIntegrator;
+    private final RequirementWorkspaceDao requirementWorkspaceDao;
 
     /**
      * Requests logical cancellation and best-effort process termination.
@@ -124,6 +130,7 @@ public class CodingTaskExecutionService {
             run.setCliTool(agent.getCliTool());
             run.setModel(agent.getModel());
         }
+        bindProgress(run, id, task.getRequirementId(), null, prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
 
@@ -203,6 +210,7 @@ public class CodingTaskExecutionService {
         run.setAgentName(agent.getName());
         run.setCliTool(agent.getCliTool());
         run.setModel(agent.getModel());
+        bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
 
@@ -290,6 +298,22 @@ public class CodingTaskExecutionService {
 
         static CompletionDecision failed(String summary, String failureReason) {
             return new CompletionDecision(false, summary, failureReason);
+        }
+    }
+
+    /**
+     * 把 Run 绑定到进度账本（EXE-004）：解析 invocationKey + 在 RequirementWorkspace 就绪时绑定 Execution。
+     * workspace/loop 未就绪时仅记录 invocationKey，保持既有调度行为（Execution 绑定待 EXE-005）。
+     */
+    private void bindProgress(Run run, String codingTaskId, String requirementId, String loopId,
+                              String prompt, String baseCommit) {
+        String workspaceId = requirementWorkspaceDao.findByRequirementId(requirementId)
+                .map(RequirementWorkspace::getId).orElse(null);
+        CodingTaskProgressIntegrator.ProgressPreflight preflight = codingTaskProgressIntegrator.preflight(
+                codingTaskId, requirementId, TaskExecutionType.CODING_TASK, loopId, 1, prompt, workspaceId, baseCommit);
+        run.setInvocationKey(preflight.invocationKey());
+        if (preflight.executionId() != null) {
+            run.setExecutionId(preflight.executionId());
         }
     }
 

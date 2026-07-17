@@ -61,6 +61,11 @@ public class CodingTaskProgressIntegrator {
     public ProgressPreflight preflight(String codingTaskId, String requirementId, TaskExecutionType taskType,
                                        String loopId, Integer planVersion, String prompt,
                                        String requirementWorkspaceId, String baseCommit) {
+        InvocationResolution invocation = resolveInvocation(codingTaskId);
+        if (requirementWorkspaceId == null || loopId == null) {
+            // RequirementWorkspace（EXE-005）或 loop 未就绪：延迟 Execution 绑定，仅记录 invocationKey，保持既有调度行为
+            return new ProgressPreflight(null, null, null, false, invocation.invocationKey(), invocation.reusedRunId());
+        }
         int effectivePlanVersion = planVersion == null ? 1 : planVersion;
         String inputHash = sha256(prompt == null ? "" : prompt);
         String executionKey = computeExecutionKey(taskType, codingTaskId, loopId, effectivePlanVersion, inputHash);
@@ -69,7 +74,6 @@ public class CodingTaskProgressIntegrator {
                 null, requirementId, loopId, inputHash, effectivePlanVersion, requirementWorkspaceId, baseCommit);
         ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(execution.getId());
 
-        InvocationResolution invocation = resolveInvocation(codingTaskId);
         boolean shouldSkip = shouldSkipExecution(snapshot);
         if (shouldSkip) {
             log.info("coding-task progress preflight: execution {} all required steps verified, skip model start. taskId={}",
