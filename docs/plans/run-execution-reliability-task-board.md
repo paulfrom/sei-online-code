@@ -10,6 +10,7 @@
 - [ADR-001](../architecture/adr-001-run-execution-progress-ledger.md)
 - [数据模型](../architecture/run-execution-progress-data-model.md)
 - [完整评审记录](../architecture/run-execution-reliability-design-draft.md)
+- [详细验收方案](../acceptance/run-execution-reliability-acceptance-plan.md)
 
 ## 1. 交付目标
 

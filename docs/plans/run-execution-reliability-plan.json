@@ -22,8 +22,10 @@
   "source_documents": [
     "docs/architecture/adr-001-run-execution-progress-ledger.md",
     "docs/architecture/run-execution-progress-data-model.md",
-    "docs/plans/run-execution-reliability-task-board.md"
+    "docs/plans/run-execution-reliability-task-board.md",
+    "docs/acceptance/run-execution-reliability-acceptance-plan.md"
   ],
+  "acceptance_document": "docs/acceptance/run-execution-reliability-acceptance-plan.md",
   "tech_stack": {
     "frontend": "React + UmiJS + @ead/suid",
     "backend": "Java + Spring Boot + sei-core",
