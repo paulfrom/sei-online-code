@@ -4,6 +4,8 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dto.enums.ExecutionEffectStatus;
+import com.changhong.onlinecode.dto.enums.ExecutionEffectType;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
@@ -13,12 +15,14 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.entity.ExecutionEffect;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.service.progress.EffectService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.AllArgsConstructor;
@@ -34,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -58,6 +64,7 @@ public class RequirementDeliveryService {
     private final RequirementCommentService requirementCommentService;
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
+    private final EffectService effectService;
 
     @Transactional(rollbackFor = Exception.class)
     public void deliver(String requirementId, String executionPlanId) {
@@ -144,6 +151,15 @@ public class RequirementDeliveryService {
         String branch = branchName(requirement);
         String targetBranch = isBlank(config.getGitlabTargetBranch()) ? "main" : config.getGitlabTargetBranch();
 
+        // EXE-006: 交付前合入最新目标分支，避免冲突与基线漂移（ADR-001 §6）
+        runCommand(workspace, "git", "fetch", "origin", targetBranch);
+        try {
+            runCommand(workspace, "git", "merge", "--ff-only", "origin/" + targetBranch);
+        } catch (Exception e) {
+            log.warn("doDeliver: 快进合并目标分支失败 branch={}, target={}", branch, targetBranch, e);
+            throw new IllegalStateException("无法快进合并目标分支 " + targetBranch + "，存在冲突需人工解决", e);
+        }
+
         runCommand(workspace, "git", "checkout", "-B", branch);
         runCommand(workspace, "git", "add", ".");
         if (!runCommand(workspace, "git", "diff", "--cached", "--quiet").success()) {
@@ -152,7 +168,25 @@ public class RequirementDeliveryService {
         String commitHash = runCommand(workspace, "git", "rev-parse", "HEAD").stdout().trim();
         List<String> changedFiles = runCommand(workspace, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
                 .stdout().lines().filter(line -> !line.isBlank()).toList();
-        runCommand(workspace, "git", "push", "-u", "origin", branch);
+
+        // EXE-006: push effect ledger（ADR-001 §5 幂等）
+        String pushEffectKey = "push:" + config.getGitlabProjectId().trim() + ":" + branch;
+        String pushHash = sha256(commitHash);
+        ExecutionEffect pushEffect = effectService.findOrPrepare(
+                pushEffectKey, ExecutionEffectType.PUSH, pushHash, requirement.getId(), "deliver", 0L);
+        if (pushEffect.getStatus() == ExecutionEffectStatus.PREPARED) {
+            try {
+                runCommand(workspace, "git", "push", "-u", "origin", branch);
+                effectService.markApplied(pushEffect.getId(), toJson(Map.of("branch", branch, "commitHash", commitHash)),
+                        branch + "@" + commitHash);
+            } catch (Exception e) {
+                effectService.markUnknown(pushEffect.getId());
+                throw e;
+            }
+        } else if (pushEffect.getStatus() != ExecutionEffectStatus.APPLIED
+                && pushEffect.getStatus() != ExecutionEffectStatus.CONFIRMED) {
+            throw new IllegalStateException("push effect 状态异常: key=" + pushEffectKey + " status=" + pushEffect.getStatus());
+        }
 
         GitLabApi gitLabApi = new GitLabApi(config.getGitlabApiBaseUrl().trim(), config.getGitlabToken().trim());
         Object projectId = config.getGitlabProjectId().trim();
@@ -161,6 +195,17 @@ public class RequirementDeliveryService {
                 + "\n\nExecutionPlan: " + plan.getId()
                 + "\nLoop: " + requirement.getActiveLoopId()
                 + "\nCommit: " + commitHash;
+
+        // EXE-006: MR effect ledger（ADR-001 §5 幂等：相同 key+hash 复用 MR；不同 hash 冲突）
+        String mrEffectKey = "mr:" + config.getGitlabProjectId().trim() + ":" + branch;
+        String mrHash = sha256(title + "|" + description + "|" + targetBranch);
+        ExecutionEffect mrEffect = effectService.findOrPrepare(
+                mrEffectKey, ExecutionEffectType.MR, mrHash, requirement.getId(), "deliver", 0L);
+        if (mrEffect.getStatus() == ExecutionEffectStatus.APPLIED
+                || mrEffect.getStatus() == ExecutionEffectStatus.CONFIRMED) {
+            // 幂等复用已有 MR URL
+            return new DeliveryResult(branch, commitHash, targetBranch, mrEffect.getResultSnapshot(), false, changedFiles);
+        }
 
         List<MergeRequest> opened = gitLabApi.getMergeRequestApi()
                 .getMergeRequests(projectId, Constants.MergeRequestState.OPENED).stream()
@@ -174,6 +219,7 @@ public class RequirementDeliveryService {
                     .withTargetBranch(targetBranch);
             MergeRequest updated = gitLabApi.getMergeRequestApi()
                     .updateMergeRequest(projectId, mr.getIid(), params);
+            effectService.markApplied(mrEffect.getId(), updated.getWebUrl(), String.valueOf(mr.getIid()));
             return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(), false, changedFiles);
         }
 
@@ -186,6 +232,7 @@ public class RequirementDeliveryService {
 
         MergeRequest created = gitLabApi.getMergeRequestApi()
                 .createMergeRequest(projectId, branch, targetBranch, title, description, null);
+        effectService.markApplied(mrEffect.getId(), created.getWebUrl(), String.valueOf(created.getIid()));
         return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true, changedFiles);
     }
 
@@ -310,6 +357,21 @@ public class RequirementDeliveryService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /** EXE-006: SHA-256 哈希，用于 effect requestHash。 */
+    private static String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     private record DeliveryResult(String branch, String commitHash, String targetBranch, String mrUrl,

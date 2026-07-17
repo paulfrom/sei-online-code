@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.service.progress.EffectService;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -23,7 +24,7 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class));
         Requirement requirement = new Requirement();
         requirement.setId("requirement-12345678");
         requirement.setActiveLoopId("new-loop-12345678");
@@ -41,7 +42,7 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class));
         Method method = RequirementDeliveryService.class.getDeclaredMethod("buildSuccessMetadata",
                 String.class, String.class, String.class, String.class, String.class, String.class);
         method.setAccessible(true);
