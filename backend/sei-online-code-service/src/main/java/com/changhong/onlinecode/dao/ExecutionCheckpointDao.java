@@ -2,6 +2,8 @@ package com.changhong.onlinecode.dao;
 
 import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.sei.core.dao.BaseEntityDao;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -30,4 +32,9 @@ public interface ExecutionCheckpointDao extends BaseEntityDao<ExecutionCheckpoin
      * @return checkpoint 列表
      */
     List<ExecutionCheckpoint> findByRunIdOrderBySequenceNoAsc(String runId);
+
+    /**
+     * 某步骤的 checkpoint 分页（按序号倒序，最近在前）。
+     */
+    Page<ExecutionCheckpoint> findByStepIdOrderBySequenceNoDesc(String stepId, Pageable pageable);
 }

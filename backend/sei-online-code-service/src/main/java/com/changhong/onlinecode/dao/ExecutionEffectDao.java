@@ -3,6 +3,8 @@ package com.changhong.onlinecode.dao;
 import com.changhong.onlinecode.dto.enums.ExecutionEffectStatus;
 import com.changhong.onlinecode.entity.ExecutionEffect;
 import com.changhong.sei.core.dao.BaseEntityDao;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -34,4 +36,16 @@ public interface ExecutionEffectDao extends BaseEntityDao<ExecutionEffect> {
      * @return effect 列表
      */
     List<ExecutionEffect> findByExecutionIdAndStatus(String executionId, ExecutionEffectStatus status);
+
+    /**
+     * 某 Execution 的 effect 分页（按 preparedAt 倒序）。
+     */
+    Page<ExecutionEffect> findByExecutionIdOrderByPreparedAtDesc(String executionId, Pageable pageable);
+
+    /**
+     * 某 Execution 某状态的 effect 分页（按 preparedAt 倒序）。
+     */
+    Page<ExecutionEffect> findByExecutionIdAndStatusOrderByPreparedAtDesc(String executionId,
+                                                                          ExecutionEffectStatus status,
+                                                                          Pageable pageable);
 }

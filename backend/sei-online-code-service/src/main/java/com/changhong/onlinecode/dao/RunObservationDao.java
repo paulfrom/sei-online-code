@@ -2,6 +2,8 @@ package com.changhong.onlinecode.dao;
 
 import com.changhong.onlinecode.entity.RunObservation;
 import com.changhong.sei.core.dao.BaseEntityDao;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -30,4 +32,9 @@ public interface RunObservationDao extends BaseEntityDao<RunObservation> {
      * @return observation 列表
      */
     List<RunObservation> findByRunIdOrderBySequenceNoDesc(String runId);
+
+    /**
+     * 某 Run 的 observation 分页（按 observedAt 倒序）。
+     */
+    Page<RunObservation> findByRunIdOrderByObservedAtDesc(String runId, Pageable pageable);
 }

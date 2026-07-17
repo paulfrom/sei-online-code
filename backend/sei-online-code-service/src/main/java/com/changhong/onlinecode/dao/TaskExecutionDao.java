@@ -6,6 +6,8 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 
+// (paged/derived queries below)
+
 /**
  * TaskExecution DAO。分页 findByPage 由 BaseEntityDao 继承提供。
  *
@@ -31,4 +33,9 @@ public interface TaskExecutionDao extends BaseEntityDao<TaskExecution> {
      * @return Execution（存在时）
      */
     Optional<TaskExecution> findBySettlementKey(String settlementKey);
+
+    /**
+     * 某需求最近一次 Execution（按创建时间倒序）。
+     */
+    Optional<TaskExecution> findFirstByRequirementIdOrderByCreatedDateDesc(String requirementId);
 }

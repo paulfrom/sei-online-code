@@ -30,6 +30,14 @@ public interface RequirementWorkspaceDao extends BaseEntityDao<RequirementWorksp
     Optional<RequirementWorkspace> findByProjectIdAndRequirementId(String projectId, String requirementId);
 
     /**
+     * 按需求查找唯一工作区（一个 Requirement 只有一个 workspace）。
+     *
+     * @param requirementId 需求 ID
+     * @return 工作区（存在时）
+     */
+    Optional<RequirementWorkspace> findByRequirementId(String requirementId);
+
+    /**
      * 按项目 + 分支名唯一查找（uk_req_ws_project_branch）。
      *
      * @param projectId  项目 ID
