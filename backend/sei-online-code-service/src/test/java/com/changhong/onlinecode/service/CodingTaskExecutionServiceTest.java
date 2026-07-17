@@ -96,6 +96,8 @@ class CodingTaskExecutionServiceTest {
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
                         null, null, null, false, "inv-test", null));
+        com.changhong.onlinecode.service.progress.WorkspaceLeaseService workspaceLeaseService =
+                mock(com.changhong.onlinecode.service.progress.WorkspaceLeaseService.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
@@ -115,6 +117,7 @@ class CodingTaskExecutionServiceTest {
                 workspaceChangeDetector,
                 eventPublisher,
                 codingTaskProgressIntegrator,
+                workspaceLeaseService,
                 requirementWorkspaceDao
         );
     }

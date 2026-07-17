@@ -436,6 +436,20 @@ public class ProgressService {
                 && Objects.equals(step.getClaimToken(), auth.getClaimToken());
     }
 
+    /**
+     * 递增 requirement snapshotVersion（ADR-001 §10.6）：直接按 workspaceId 递增并发布事件。
+     * 供 WorkspaceLeaseService 等工作区级调用方使用，避免反查 Execution。
+     *
+     * @param workspaceId 工作区 ID
+     */
+    public void bumpSnapshotForWorkspace(String workspaceId) {
+        requirementWorkspaceDao.incrementSnapshotVersion(workspaceId);
+        RequirementWorkspace workspace = requirementWorkspaceDao.findOne(workspaceId);
+        if (workspace != null) {
+            publishProgressEvent(workspace.getRequirementId(), workspaceId);
+        }
+    }
+
     /** 递增 requirement snapshotVersion（ADR-001 §10.6）：经 Execution 反查 workspace。 */
     private void bumpSnapshot(String executionId) {
         TaskExecution execution = taskExecutionDao.findOne(executionId);

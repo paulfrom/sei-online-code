@@ -31,6 +31,7 @@ import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator;
+import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
@@ -77,6 +78,7 @@ public class CodingTaskExecutionService {
     private final WorkspaceChangeDetector workspaceChangeDetector;
     private final ApplicationEventPublisher eventPublisher;
     private final CodingTaskProgressIntegrator codingTaskProgressIntegrator;
+    private final WorkspaceLeaseService workspaceLeaseService;
     private final RequirementWorkspaceDao requirementWorkspaceDao;
 
     /**
@@ -305,13 +307,24 @@ public class CodingTaskExecutionService {
     }
 
     /**
-     * 把 Run 绑定到进度账本（EXE-004）：解析 invocationKey + 在 RequirementWorkspace 就绪时绑定 Execution。
-     * workspace/loop 未就绪时仅记录 invocationKey，保持既有调度行为（Execution 绑定待 EXE-005）。
+     * 把 Run 绑定到进度账本（EXE-004+EXE-005）：解析 invocationKey + 在 RequirementWorkspace 就绪时绑定 Execution。
+     * workspace 不存在时通过 WorkspaceLeaseService 创建（EXE-005：bindOrResolveWorkspace）。
      */
     private void bindProgress(Run run, String codingTaskId, String requirementId, String loopId,
                               String prompt, String baseCommit) {
         String workspaceId = requirementWorkspaceDao.findByRequirementId(requirementId)
                 .map(RequirementWorkspace::getId).orElse(null);
+        // EXE-005: workspace 不存在时自动创建（bindOrResolve 保证同一需求只有一个 workspace）
+        if (workspaceId == null) {
+            Requirement requirement = requirementService.findOne(requirementId);
+            String projectId = requirement != null ? requirement.getProjectId() : null;
+            if (projectId != null) {
+                RequirementWorkspace ws = workspaceLeaseService.bindOrResolveWorkspace(projectId, requirementId);
+                if (ws != null) {
+                    workspaceId = ws.getId();
+                }
+            }
+        }
         CodingTaskProgressIntegrator.ProgressPreflight preflight = codingTaskProgressIntegrator.preflight(
                 codingTaskId, requirementId, TaskExecutionType.CODING_TASK, loopId, 1, prompt, workspaceId, baseCommit);
         run.setInvocationKey(preflight.invocationKey());

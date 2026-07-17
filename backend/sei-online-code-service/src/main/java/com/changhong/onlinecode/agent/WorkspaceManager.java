@@ -2,7 +2,9 @@ package com.changhong.onlinecode.agent;
 
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
+import com.changhong.onlinecode.dto.enums.RequirementWorkspaceState;
 import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
@@ -89,6 +91,9 @@ public class WorkspaceManager {
     @Autowired(required = false)
     private RequirementDao requirementDao;
 
+    @Autowired(required = false)
+    private RequirementWorkspaceDao requirementWorkspaceDao;
+
     @Value("${oc.gitlab.host:}")
     private String gitlabHost;
 
@@ -103,6 +108,10 @@ public class WorkspaceManager {
 
     void setRequirementDao(RequirementDao requirementDao) {
         this.requirementDao = requirementDao;
+    }
+
+    void setRequirementWorkspaceDao(RequirementWorkspaceDao requirementWorkspaceDao) {
+        this.requirementWorkspaceDao = requirementWorkspaceDao;
     }
 
     /**
@@ -216,7 +225,32 @@ public class WorkspaceManager {
         return resolveIsolatedWorkspace(projectId, requirementWorkspaceKey(requirementId));
     }
 
+    /**
+     * 删除需求工作区（EXE-005 GC 安全：ACTIVE/UNKNOWN/BLOCKED/DELIVERING 或 retention 未到期时拒绝）。
+     */
     public void deleteRequirementWorkspace(String projectId, String requirementId) {
+        // GC 安全检查（ADR-001 §12）：禁止清理活跃/阻塞/交付中的工作区
+        if (requirementWorkspaceDao != null) {
+            var wsOpt = requirementWorkspaceDao.findByProjectIdAndRequirementId(projectId, requirementId);
+            if (wsOpt.isPresent()) {
+                var ws = wsOpt.get();
+                RequirementWorkspaceState state = ws.getState();
+                if (state == RequirementWorkspaceState.ACTIVE
+                        || state == RequirementWorkspaceState.BLOCKED
+                        || state == RequirementWorkspaceState.DELIVERING) {
+                    log.warn("deleteRequirementWorkspace: 工作区 state={} 禁止 GC, project={} requirement={}",
+                            state, projectId, requirementId);
+                    return;
+                }
+                if (state == RequirementWorkspaceState.COMPLETED
+                        && ws.getRetentionUntil() != null
+                        && ws.getRetentionUntil().after(new java.util.Date())) {
+                    log.info("deleteRequirementWorkspace: 工作区 COMPLETED 但 retention 未到期, project={} requirement={}",
+                            projectId, requirementId);
+                    return;
+                }
+            }
+        }
         WorkspaceResolveResult resolved = resolve(projectId);
         if (resolved == null || resolved.getPath() == null || resolved.getPath().isBlank()) {
             return;
@@ -234,6 +268,134 @@ public class WorkspaceManager {
         } finally {
             lock.unlock();
         }
+    }
+
+    // ========== Git introspection & commit methods (EXE-005) ==========
+
+    /**
+     * 读取工作区当前 HEAD SHA。仓库无提交时返回全 0 占位。
+     *
+     * @param workspaceDir 工作区目录
+     * @return HEAD commit SHA
+     */
+    public String getCurrentHead(Path workspaceDir) {
+        try {
+            String head = runCommandOutput(workspaceDir, "git", "rev-parse", "HEAD").trim();
+            return head.isBlank() ? "0000000000000000000000000000000000000000" : head;
+        } catch (IllegalStateException e) {
+            log.warn("getCurrentHead: 无法获取 HEAD path={}", workspaceDir, e);
+            return "0000000000000000000000000000000000000000";
+        }
+    }
+
+    /**
+     * 读取工作区当前分支名。
+     *
+     * @param workspaceDir 工作区目录
+     * @return 分支名
+     */
+    public String getCurrentBranch(Path workspaceDir) {
+        try {
+            return runCommandOutput(workspaceDir, "git", "branch", "--show-current").trim();
+        } catch (IllegalStateException e) {
+            log.warn("getCurrentBranch: 无法获取分支名 path={}", workspaceDir, e);
+            return "";
+        }
+    }
+
+    /**
+     * 检查工作区是否有未提交变更（含未跟踪文件）。
+     *
+     * @param workspaceDir 工作区目录
+     * @return 有未提交变更或未跟踪文件时为 true
+     */
+    public boolean hasUncommittedChanges(Path workspaceDir) {
+        try {
+            String status = runCommandOutput(workspaceDir, "git", "status", "--porcelain").trim();
+            return !status.isEmpty();
+        } catch (IllegalStateException e) {
+            log.warn("hasUncommittedChanges: git status 失败 path={}", workspaceDir, e);
+            return true; // 失败时保守处置：认为有变更
+        }
+    }
+
+    /**
+     * 获取 git diff 摘要（--stat），用于对账。
+     *
+     * @param workspaceDir 工作区目录
+     * @return diff --stat 输出；失败返回空串
+     */
+    public String getGitDiff(Path workspaceDir) {
+        try {
+            return runCommandOutput(workspaceDir, "git", "diff", "--stat").trim();
+        } catch (IllegalStateException e) {
+            log.warn("getGitDiff: 失败 path={}", workspaceDir, e);
+            return "";
+        }
+    }
+
+    /**
+     * 提交工作区所有变更（git add -A + git commit）。
+     *
+     * <p>返回新 HEAD SHA。工作区无变更时直接返回当前 HEAD（不做空提交）。
+     * 不处理 push（push 属 EXE-006）。</p>
+     *
+     * @param workspaceDir 工作区目录
+     * @param message      提交信息（会作为 checkpoint commit）
+     * @return 新 HEAD SHA；无变更时返回当前 HEAD
+     * @throws IllegalStateException 提交失败
+     */
+    public String commitAll(Path workspaceDir, String message) {
+        if (!hasUncommittedChanges(workspaceDir)) {
+            return getCurrentHead(workspaceDir);
+        }
+        runCommand(workspaceDir, "git", "add", "-A");
+        String safeMessage = message == null || message.isBlank() ? "checkpoint" : message;
+        runCommand(workspaceDir, "git", "commit", "-m", safeMessage);
+        String newHead = getCurrentHead(workspaceDir);
+        log.info("commitAll: committed path={}, head={}, message={}", workspaceDir, newHead, safeMessage);
+        return newHead;
+    }
+
+    /**
+     * 获取工作区物理文件锁（已在 resolveIsolatedWorkspace 中创建）。
+     * 调用方 acquireOwnership 在获取 DB lease 之后 lock，releaseOwnership 时 unlock。
+     *
+     * @param workspaceDir 工作区目录
+     * @return 该工作区的 ReentrantLock
+     */
+    public ReentrantLock getFileLock(Path workspaceDir) {
+        return workspaceLock(workspaceDir);
+    }
+
+    /**
+     * 回滚最近一次提交（git reset --soft HEAD~1），用于 DB CAS 失败时的回滚。
+     * Best-effort：失败仅记录日志，由 reconcile 兜底。
+     *
+     * @param workspaceDir 工作区目录
+     */
+    public void resetSoftHead(Path workspaceDir) {
+        try {
+            runCommand(workspaceDir, "git", "reset", "--soft", "HEAD~1");
+            log.info("resetSoftHead: 已回滚 path={}", workspaceDir);
+        } catch (IllegalStateException e) {
+            log.warn("resetSoftHead: 回滚失败（需人工对账）path={}", workspaceDir, e);
+        }
+    }
+
+    /**
+     * 确保工作区在指定分支上。已在目标分支上时跳过；否则 checkout -B 创建/切换。
+     *
+     * @param workspaceDir 工作区目录
+     * @param branchName   目标分支名
+     */
+    public void ensureOnBranch(Path workspaceDir, String branchName) {
+        String currentBranch = getCurrentBranch(workspaceDir);
+        if (branchName.equals(currentBranch)) {
+            return;
+        }
+        runCommand(workspaceDir, "git", "checkout", "-B", branchName);
+        log.info("ensureOnBranch: checkout -B {} in {}", branchName, workspaceDir);
     }
 
     public boolean isManagedWorkspacePath(Path projectWorkspace, Path candidate) {

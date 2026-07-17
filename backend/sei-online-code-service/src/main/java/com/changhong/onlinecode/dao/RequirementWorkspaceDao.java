@@ -80,4 +80,41 @@ public interface RequirementWorkspaceDao extends BaseEntityDao<RequirementWorksp
     @Query("UPDATE RequirementWorkspace w SET w.snapshotVersion = w.snapshotVersion + 1, "
             + "w.lastEditedDate = CURRENT_TIMESTAMP WHERE w.id = :workspaceId")
     int incrementSnapshotVersion(@Param("workspaceId") String workspaceId);
+
+    /**
+     * CAS 推进 workspace currentHead（ADR-001 §10.5）。同时校验 owner、fencingToken 和期望 HEAD。
+     * 返回 0 表示 HEAD/parent/token 不匹配 → 进入 UNKNOWN/BLOCKED 对账，不得强制覆盖。
+     *
+     * @param workspaceId   工作区 ID
+     * @param expectedHead  期望当前 HEAD
+     * @param newHead       新 HEAD
+     * @param runId         写 owner Run ID
+     * @param fencingToken  工作区 fencing token
+     * @return 更新条数（1=成功推进，0=HEAD/owner/token 不匹配）
+     */
+    @Modifying
+    @Query("UPDATE RequirementWorkspace w SET w.currentHead = :newHead, "
+            + "w.lastProgressAt = CURRENT_TIMESTAMP, w.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE w.id = :workspaceId AND w.currentHead = :expectedHead "
+            + "AND w.ownerRunId = :runId AND w.fencingToken = :fencingToken")
+    int advanceCurrentHead(@Param("workspaceId") String workspaceId,
+                           @Param("expectedHead") String expectedHead,
+                           @Param("newHead") String newHead,
+                           @Param("runId") String runId,
+                           @Param("fencingToken") Long fencingToken);
+
+    /**
+     * 释放 workspace lease（ADR-001 §10.2 对端）。仅 owner 匹配时清空 owner/lease。
+     *
+     * @param workspaceId 工作区 ID
+     * @param runId       当前 owner Run ID
+     * @return 更新条数
+     */
+    @Modifying
+    @Query("UPDATE RequirementWorkspace w SET w.ownerRunId = NULL, "
+            + "w.ownerExecutionId = NULL, w.leaseExpiresAt = NULL, "
+            + "w.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE w.id = :workspaceId AND w.ownerRunId = :runId")
+    int releaseLease(@Param("workspaceId") String workspaceId,
+                     @Param("runId") String runId);
 }
