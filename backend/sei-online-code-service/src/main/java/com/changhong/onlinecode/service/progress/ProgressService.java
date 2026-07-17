@@ -16,6 +16,7 @@ import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ExecutionProgressSnapshot;
 import com.changhong.onlinecode.dto.progress.CurrentStepView;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
+import com.changhong.onlinecode.dto.progress.RequirementProgressEvent;
 import com.changhong.onlinecode.dto.progress.StepSummary;
 import com.changhong.onlinecode.dto.progress.WriteAuthorization;
 import com.changhong.onlinecode.entity.ExecutionCheckpoint;
@@ -24,6 +25,7 @@ import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.RunObservation;
 import com.changhong.onlinecode.entity.TaskExecution;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -65,17 +67,20 @@ public class ProgressService {
     private final ExecutionStepDao executionStepDao;
     private final ExecutionCheckpointDao executionCheckpointDao;
     private final RunObservationDao runObservationDao;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ProgressService(TaskExecutionDao taskExecutionDao,
                            RequirementWorkspaceDao requirementWorkspaceDao,
                            ExecutionStepDao executionStepDao,
                            ExecutionCheckpointDao executionCheckpointDao,
-                           RunObservationDao runObservationDao) {
+                           RunObservationDao runObservationDao,
+                           ApplicationEventPublisher eventPublisher) {
         this.taskExecutionDao = taskExecutionDao;
         this.requirementWorkspaceDao = requirementWorkspaceDao;
         this.executionStepDao = executionStepDao;
         this.executionCheckpointDao = executionCheckpointDao;
         this.runObservationDao = runObservationDao;
+        this.eventPublisher = eventPublisher;
     }
 
     // ============================ Execution ============================
@@ -438,6 +443,21 @@ public class ProgressService {
             return;
         }
         requirementWorkspaceDao.incrementSnapshotVersion(execution.getRequirementWorkspaceId());
+        publishProgressEvent(execution.getRequirementId(), execution.getRequirementWorkspaceId());
+    }
+
+    /**
+     * 发布进度刷新事件（ADR-001 §10.6）。事件在事务提交后由 {@link RequirementProgressEventListener}
+     * 消费；事件不承担权威状态，只通知前端重新查询 overview。snapshotVersion 为尽力读取，以前端权威聚合为准。
+     */
+    private void publishProgressEvent(String requirementId, String workspaceId) {
+        RequirementWorkspace workspace = requirementWorkspaceDao.findOne(workspaceId);
+        RequirementProgressEvent event = new RequirementProgressEvent();
+        event.setEventType("progress.updated");
+        event.setRequirementId(requirementId);
+        event.setSnapshotVersion(workspace == null ? null : workspace.getSnapshotVersion());
+        event.setOccurredAt(new Date());
+        eventPublisher.publishEvent(event);
     }
 
     private TaskExecution buildExecution(String executionKey, TaskExecutionType taskType, String businessTaskId,
