@@ -95,7 +95,8 @@ public class RequirementAgentService {
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
-                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管");
+                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管",
+                                RunTerminalReason.SUPERSEDED);
                         return;
                     }
                     try {
@@ -400,13 +401,17 @@ public class RequirementAgentService {
      * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
      */
     private void settleRun(String runId, RunState state, String reason) {
+        settleRun(runId, state, reason, terminalReason(state));
+    }
+
+    private void settleRun(String runId, RunState state, String reason, RunTerminalReason terminalReason) {
         try {
             Run current = runDao.findOne(runId);
             if (current == null || current.getState() != RunState.RUNNING) {
                 return;
             }
             current.setState(state);
-            current.setTerminalReason(terminalReason(state, reason));
+            current.setTerminalReason(terminalReason);
             current.setFinishedDate(new Date());
             if (state == RunState.FAILED) {
                 current.setFailureReason(reason);
@@ -417,15 +422,12 @@ public class RequirementAgentService {
         }
     }
 
-    private RunTerminalReason terminalReason(RunState state, String reason) {
+    private RunTerminalReason terminalReason(RunState state) {
         if (state == RunState.SUCCEEDED) {
             return RunTerminalReason.SUCCEEDED;
         }
         if (state == RunState.CANCELLED) {
             return RunTerminalReason.CANCELLED;
-        }
-        if (reason != null && reason.contains("新一轮生成接管")) {
-            return RunTerminalReason.SUPERSEDED;
         }
         return RunTerminalReason.FAILED;
     }

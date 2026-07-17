@@ -4,6 +4,8 @@ import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Run;
@@ -15,7 +17,6 @@ import com.changhong.sei.core.context.ApplicationContextHolder;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -36,7 +37,6 @@ import static org.mockito.Mockito.*;
  *
  * <p>验证互斥抢占 409、批量跳过 BUILDING、回调 BUILT/BUILD_FAILED。
  */
-@Disabled("deferred: 测试用 TaskDao 但 service 注入 TaskService（API 不匹配）+ build success 路径涉 Task/Run/async 复杂桩；待与 T8/T9/T10 success 一并入测试基建专项")
 @ExtendWith(MockitoExtension.class)
 class FeatureDesignBuildServiceTest {
 
@@ -76,7 +76,8 @@ class FeatureDesignBuildServiceTest {
                 agentExecutionService,
                 failureInfoSupport
         );
-        when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(runNumberService.assign(any(Run.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -191,9 +192,8 @@ class FeatureDesignBuildServiceTest {
         // 这里主要验证过滤逻辑是否正确应用
     }
 
-    @Disabled("super.save → BaseService.validateUniqueCode 需 @SpringBootTest；rejection 路径已验证，success 落库待集成测试")
     @Test
-    void build_success_createsTaskAndRunAndReturnsRunId() {
+    void build_successSummaryContainingFailedWord_marksBuildAndRunSucceeded() {
         // 准备
         String fdId = "fd1";
         String projId = "proj1";
@@ -215,20 +215,24 @@ class FeatureDesignBuildServiceTest {
 
         Run savedRun = new Run();
         savedRun.setId(runId);
+        savedRun.setState(RunState.RUNNING);
 
         com.changhong.onlinecode.agent.AgentWorkspace workspace =
                 mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
-        when(workspace.path()).thenReturn(java.nio.file.Path.of("/tmp/workspace"));
         when(workspace.pathString()).thenReturn("/tmp/workspace");
 
         when(featureDesignDao.findLatestById(fdId)).thenReturn(fd);
         when(featureDesignDao.tryAcquireBuildLock(eq(fdId), eq(FeatureDesignBuildStatus.BUILDING))).thenReturn(1);
         when(agentService.findByName("dev-agent")).thenReturn(devAgent);
-        when(taskService.save(any(Task.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedTask));
+        OperateResultWithData<Task> taskSaveResult = OperateResultWithData.operationSuccessWithData(savedTask);
+        OperateResultWithData<Run> runSaveResult = OperateResultWithData.operationSuccessWithData(savedRun);
+        when(taskService.save(any(Task.class))).thenReturn(taskSaveResult);
         when(agentExecutionService.workspace(projId)).thenReturn(workspace);
-        when(runService.save(any(Run.class))).thenReturn(OperateResultWithData.operationSuccessWithData(savedRun));
+        when(runService.save(any(Run.class))).thenReturn(runSaveResult);
+        when(runService.findOne(runId)).thenReturn(savedRun);
         when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(runId, "success", true, null)));
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(runId,
+                        "Supported outcomes: ENROLLED/WAITLISTED/FAILED", true, null)));
 
         // 执行
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);
@@ -246,7 +250,58 @@ class FeatureDesignBuildServiceTest {
 
         // 验证 Run 创建正确
         ArgumentCaptor<Run> runCaptor = ArgumentCaptor.forClass(Run.class);
-        verify(runService).save(runCaptor.capture());
-        assertEquals(taskId, runCaptor.getValue().getTaskId());
+        verify(runService, times(2)).save(runCaptor.capture());
+        assertEquals(taskId, runCaptor.getAllValues().get(0).getTaskId());
+        assertEquals(FeatureDesignBuildStatus.BUILT, fd.getBuildStatus());
+        assertEquals(RunState.SUCCEEDED, savedRun.getState());
+        assertEquals(RunTerminalReason.SUCCEEDED, savedRun.getTerminalReason());
+        assertNotNull(savedRun.getFinishedDate());
+    }
+
+    @Test
+    void build_failedAgentResultWithoutFailedWord_marksBuildAndRunFailed() {
+        String fdId = "fd-failed";
+        String projectId = "project-failed";
+        String runId = "run-failed";
+
+        FeatureDesign fd = new FeatureDesign();
+        fd.setId(fdId);
+        fd.setProjectId(projectId);
+        fd.setFeatureId("feature-failed");
+        fd.setStatus(FeatureDesignStatus.CONFIRMED);
+        fd.setBuildStatus(FeatureDesignBuildStatus.IDLE);
+
+        Agent devAgent = new Agent();
+        devAgent.setName("dev-agent");
+        Task savedTask = new Task();
+        savedTask.setId("task-failed");
+        Run savedRun = new Run();
+        savedRun.setId(runId);
+        savedRun.setState(RunState.RUNNING);
+
+        com.changhong.onlinecode.agent.AgentWorkspace workspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(workspace.pathString()).thenReturn("/tmp/workspace-failed");
+        when(featureDesignDao.findLatestById(fdId)).thenReturn(fd);
+        when(featureDesignDao.tryAcquireBuildLock(fdId, FeatureDesignBuildStatus.BUILDING)).thenReturn(1);
+        when(agentService.findByName("dev-agent")).thenReturn(devAgent);
+        OperateResultWithData<Task> taskSaveResult = OperateResultWithData.operationSuccessWithData(savedTask);
+        OperateResultWithData<Run> runSaveResult = OperateResultWithData.operationSuccessWithData(savedRun);
+        when(taskService.save(any(Task.class))).thenReturn(taskSaveResult);
+        when(agentExecutionService.workspace(projectId)).thenReturn(workspace);
+        when(runService.save(any(Run.class))).thenReturn(runSaveResult);
+        when(runService.findOne(runId)).thenReturn(savedRun);
+        when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(
+                        runId, "compiler diagnostics", false, "network failed")));
+
+        OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);
+
+        assertTrue(result.successful());
+        assertEquals(FeatureDesignBuildStatus.BUILD_FAILED, fd.getBuildStatus());
+        assertEquals(RunState.FAILED, savedRun.getState());
+        assertEquals(RunTerminalReason.FAILED, savedRun.getTerminalReason());
+        assertEquals("network failed", savedRun.getFailureReason());
+        assertNotNull(savedRun.getFinishedDate());
     }
 }
