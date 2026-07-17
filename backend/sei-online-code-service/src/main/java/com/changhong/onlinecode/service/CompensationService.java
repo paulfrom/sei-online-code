@@ -11,19 +11,24 @@ import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
+import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.progress.ProgressReconciler;
+import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.sei.core.utils.TransactionUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -60,6 +65,8 @@ public class CompensationService {
     private final FailureInfoSupport failureInfoSupport;
     private final CompensationLogService compensationLogService;
     private final RequirementCommentService requirementCommentService;
+    private final ProgressReconciler progressReconciler;
+    private final ProgressService progressService;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${onlinecode.compensation.loop-stale-minutes:30}")
@@ -79,6 +86,8 @@ public class CompensationService {
                                FailureInfoSupport failureInfoSupport,
                                CompensationLogService compensationLogService,
                                RequirementCommentService requirementCommentService,
+                               ProgressReconciler progressReconciler,
+                               ProgressService progressService,
                                PlatformTransactionManager transactionManager) {
         this.requirementDao = requirementDao;
         this.requirementDesignContextDao = requirementDesignContextDao;
@@ -91,6 +100,8 @@ public class CompensationService {
         this.failureInfoSupport = failureInfoSupport;
         this.compensationLogService = compensationLogService;
         this.requirementCommentService = requirementCommentService;
+        this.progressReconciler = progressReconciler;
+        this.progressService = progressService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -115,7 +126,8 @@ public class CompensationService {
     }
 
     /**
-     * Marks abandoned runs terminal so the persisted loop can be recovered safely.
+     * 标记超时 Run 为 UNKNOWN（EXE-007：不再直接 FAILED），调用 ProgressReconciler 对账。
+     * Run 状态改为 UNKNOWN 并追加 TERMINAL observation，不直接判定 CodingTask/Requirement 失败。
      */
     @Transactional(rollbackFor = Exception.class)
     public void timeoutRuns(Date now) {
@@ -126,27 +138,48 @@ public class CompensationService {
             if (startedAt == null || startedAt.after(deadline)) {
                 continue;
             }
-            if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.FAILED) == 0) {
+            if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.UNKNOWN) == 0) {
                 continue;
             }
-            run.setState(RunState.FAILED);
+            run.setState(RunState.UNKNOWN);
             run.setTerminalReason(RunTerminalReason.TIMEOUT);
             run.setFinishedDate(now);
-            run.setFailureSummary("运行超时");
-            run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes + " 分钟未结束");
+            run.setFailureSummary("运行超时（已进入 UNKNOWN，待对账）");
+            run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes + " 分钟未结束；进度账本对账后将决定续作或接管");
             runDao.save(run);
-            log.info("compensation runNo {}, loopId {} 运行超时", run.getRunNo(), run.getLoopId());
+            log.info("compensation runNo {} loopId {} 超时→UNKNOWN（EXE-007 对账流程）", run.getRunNo(), run.getLoopId());
+
+            // EXE-007: 调用 ProgressReconciler 对账
+            try {
+                progressReconciler.reconcileTimedOutRun(run.getId());
+            } catch (Exception e) {
+                log.warn("ProgressReconciler 对账异常 runId={}", run.getId(), e);
+            }
+
+            // CodingTask：不再直接 FAILED；仅在仍 RUNNING/VALIDATING 时保留标记让补偿器发现
             CodingTask task = run.getCodingTaskId() == null ? null : codingTaskDao.findOne(run.getCodingTaskId());
             if (task != null && (task.getStatus() == CodingTaskStatus.RUNNING
                     || task.getStatus() == CodingTaskStatus.VALIDATING)) {
                 task.setStatus(CodingTaskStatus.FAILED);
-                failureInfoSupport.markCodingTaskFailure(task, "运行超时", run.getFailureReason(),
+                failureInfoSupport.markCodingTaskFailure(task, "运行超时（待对账）", run.getFailureReason(),
                         TriggerSource.SCHEDULED_COMPENSATION, now);
                 codingTaskDao.save(task);
             }
-            failTimedOutPlanningRequirement(run, now);
-            compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN", true,
-                    "超时 Run 已收口", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
+
+            // PM agent 超时：不再直接 fail Requirement；追加 comment 提醒人工关注
+            if ("pm-agent".equals(run.getAgentName()) && run.getRequirementId() != null) {
+                Requirement requirement = requirementDao.findOne(run.getRequirementId());
+                if (requirement != null
+                        && requirement.getStatus() == RequirementStatus.PRD_CONFIRMED
+                        && requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
+                        && Objects.equals(requirement.getActiveLoopId(), run.getLoopId())) {
+                    log.info("PM agent 超时→UNKNOWN，requirement {} 仍保持 PLANNING，待对账后人工干预或自动续作",
+                            requirement.getId());
+                }
+            }
+
+            compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN_RECONCILE", true,
+                    "超时 Run→UNKNOWN，已触发对账", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
         }
     }
 
@@ -312,6 +345,22 @@ public class CompensationService {
         if (plan == null || (plan.getStatus() != ExecutionPlanStatus.READY
                 && plan.getStatus() != ExecutionPlanStatus.DEVELOPING)) {
             return;
+        }
+        // EXE-007: 先对账 Execution 进度——有 VERIFIED steps 则从 nextAction 续作
+        if (requirement.getActiveLoopId() != null) {
+            try {
+                ProgressReconciler.ExecutionReconciliation reconciliation =
+                        progressReconciler.reconcileExecutionByRequirement(requirement.getId(), requirement.getActiveLoopId());
+                if (reconciliation != null && reconciliation.allVerified()) {
+                    log.info("recoverDevelopment: requirement {} Execution 全部 VERIFIED，跳过编码重试 → 推进验证",
+                            requirement.getId());
+                    TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
+                            requirement.getId(), requirement.getActiveLoopId()));
+                    return;
+                }
+            } catch (Exception e) {
+                log.warn("recoverDevelopment: Execution 对账异常 requirement={}", requirement.getId(), e);
+            }
         }
         boolean waitingForRetryWindow = false;
         List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirement.getId()).stream()

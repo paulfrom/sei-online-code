@@ -21,6 +21,8 @@ import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.progress.ProgressReconciler;
+import com.changhong.onlinecode.service.progress.ProgressService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -50,6 +52,8 @@ class CompensationServiceTest {
     private FailureInfoSupport failureInfoSupport;
     private CompensationLogService compensationLogService;
     private RequirementCommentService requirementCommentService;
+    private ProgressReconciler progressReconciler;
+    private ProgressService progressService;
     private PlatformTransactionManager transactionManager;
     private CompensationService service;
 
@@ -66,12 +70,14 @@ class CompensationServiceTest {
         failureInfoSupport = mock(FailureInfoSupport.class);
         compensationLogService = mock(CompensationLogService.class);
         requirementCommentService = mock(RequirementCommentService.class);
+        progressReconciler = mock(ProgressReconciler.class);
+        progressService = mock(ProgressService.class);
         transactionManager = mock(PlatformTransactionManager.class);
         service = new CompensationService(requirementDao, requirementDesignContextDao,
                 executionPlanDao, codingTaskDao, runDao,
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
-                requirementCommentService, transactionManager);
+                requirementCommentService, progressReconciler, progressService, transactionManager);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
