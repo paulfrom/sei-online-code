@@ -1,0 +1,471 @@
+{
+  "project_name": "Run / Execution 进度账本与幂等续作",
+  "status": "ready-for-handoff",
+  "description": "允许 Run at-least-once 重复调用，通过 Requirement 单写、Execution/Step 账本、checkpoint、effect 和 observation 实现进度发现、安全续作与前端可观测。",
+  "handoff_document": "docs/plans/run-execution-reliability-handoff.md",
+  "runtime_state": {
+    "plan_version": 1,
+    "implementation_started": false,
+    "next_task": "EXE-001",
+    "next_task_status": "BLOCKED_PRECHECK",
+    "repository_branch_observed": "main",
+    "repository_head_observed": "6751eb1",
+    "requirement_branch": null,
+    "requirement_worktree": null,
+    "blockers": [
+      "Required eadp-backend skill is not available",
+      "Required suid skill is not available",
+      "Eight existing uncommitted backend files must be classified and preserved",
+      "A dedicated Requirement branch/worktree has not been recorded"
+    ]
+  },
+  "source_documents": [
+    "docs/architecture/adr-001-run-execution-progress-ledger.md",
+    "docs/architecture/run-execution-progress-data-model.md",
+    "docs/plans/run-execution-reliability-task-board.md"
+  ],
+  "tech_stack": {
+    "frontend": "React + UmiJS + @ead/suid",
+    "backend": "Java + Spring Boot + sei-core",
+    "database": "PostgreSQL",
+    "build": "Gradle / pnpm",
+    "delivery": "single requirement feature branch + GitLab MR, no automatic merge"
+  },
+  "execution_policy": {
+    "worktree_scope": "requirement",
+    "single_worktree_per_requirement": true,
+    "single_writer_per_requirement": true,
+    "checkpoint_commit_per_task": true,
+    "automatic_merge": false,
+    "required_skills": {
+      "backend": "eadp-backend",
+      "frontend": "suid"
+    }
+  },
+  "architecture_decisions": [
+    {
+      "decision": "At-least-once Run with shared Execution progress ledger",
+      "rationale": "Repeated invocation cannot be eliminated reliably; durable progress prevents repeated work.",
+      "alternatives_considered": [
+        "prevent all repeated calls",
+        "restore session/worktree only",
+        "fixed coarse phase state machine"
+      ]
+    },
+    {
+      "decision": "One worktree and one writer per Requirement",
+      "rationale": "Keeps file and Git history linear across multi-step work.",
+      "alternatives_considered": [
+        "worktree per Run",
+        "worktree per Execution"
+      ]
+    },
+    {
+      "decision": "Authoritative aggregate snapshot plus version notification and polling fallback",
+      "rationale": "Separates correctness from transport timeliness and gives the frontend an observable canonical state.",
+      "alternatives_considered": [
+        "polling only",
+        "derive state from Run log WebSocket"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "EXE-001",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "数据库、实体和 DAO 基线",
+      "priority": 0,
+      "dependencies": [],
+      "estimated_complexity": "high",
+      "scope": [
+        "docs/db/",
+        "backend/sei-online-code-api/src/main/java/com/changhong/onlinecode/dto/enums/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/"
+      ],
+      "acceptance_criteria": [
+        "PostgreSQL migration and JPA mappings validate",
+        "All approved uniqueness and sequence constraints exist",
+        "Historical Run rows remain readable",
+        "Concurrent insert conflict returns the unique business record"
+      ]
+    },
+    {
+      "id": "EXE-002",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "ProgressService 核心原子协议",
+      "priority": 1,
+      "dependencies": [
+        "EXE-001"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-api/src/main/java/com/changhong/onlinecode/dto/progress/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/progress/"
+      ],
+      "acceptance_criteria": [
+        "Execution find-or-create and step claim are atomic",
+        "Old claim or fencing token is rejected",
+        "Critical checkpoint failure rolls back state",
+        "VERIFIED cannot be downgraded by ordinary commands",
+        "Requirement snapshotVersion is monotonic"
+      ]
+    },
+    {
+      "id": "EXE-003",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "聚合查询、人工 Observation 与进度事件",
+      "priority": 2,
+      "dependencies": [
+        "EXE-002"
+      ],
+      "estimated_complexity": "high",
+      "scope": [
+        "backend/sei-online-code-api/src/main/java/com/changhong/onlinecode/api/",
+        "backend/sei-online-code-api/src/main/java/com/changhong/onlinecode/dto/progress/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/controller/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/ws/"
+      ],
+      "acceptance_criteria": [
+        "Overview returns backend-derived canonical status",
+        "Detail APIs are paginated and authorized",
+        "Progress events are emitted after commit",
+        "Sensitive evidence is redacted before DTO mapping"
+      ]
+    },
+    {
+      "id": "EXE-004",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "Runner preflight、Run 绑定和自动 checkpoint",
+      "priority": 2,
+      "dependencies": [
+        "EXE-002"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CodingTaskExecutionService.java"
+      ],
+      "acceptance_criteria": [
+        "Same invocation key returns the same Run",
+        "Repeated Run reads shared progress and skips VERIFIED steps",
+        "Progress snapshot and nextActions are injected before Agent start",
+        "Thread, turn, heartbeat, Git and terminal evidence are persisted",
+        "Run terminal state does not directly settle Execution"
+      ]
+    },
+    {
+      "id": "EXE-005",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "Requirement worktree lease、Git checkpoint 与接管",
+      "priority": 3,
+      "dependencies": [
+        "EXE-002",
+        "EXE-004"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/agent/WorkspaceManager.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/agent/WorktreeManager.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/progress/"
+      ],
+      "acceptance_criteria": [
+        "One physical worktree and branch per Requirement",
+        "Lease, local file lock and fencing token are all required for writes",
+        "APPLIED creates a checkpoint commit and CAS advances currentHead",
+        "Unknown uncommitted changes are reconciled, never overwritten",
+        "Different Requirements remain parallel"
+      ]
+    },
+    {
+      "id": "EXE-006",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "Effect ledger 与 MR 交付改造",
+      "priority": 4,
+      "dependencies": [
+        "EXE-002",
+        "EXE-005"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/progress/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/RequirementDeliveryService.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/memory/"
+      ],
+      "acceptance_criteria": [
+        "Same effect key and hash replays the first result",
+        "UNKNOWN effect is queried before retry",
+        "Repeated delivery updates one MR",
+        "MR source SHA equals verified workspace HEAD",
+        "No GitLab merge API is called"
+      ]
+    },
+    {
+      "id": "EXE-007",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "ProgressReconciler 与补偿器切换",
+      "priority": 5,
+      "dependencies": [
+        "EXE-004",
+        "EXE-005",
+        "EXE-006"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CompensationService.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CompensationScheduler.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/progress/"
+      ],
+      "acceptance_criteria": [
+        "Timed-out Run becomes UNKNOWN before reconciliation",
+        "Completed effects and VERIFIED steps are not repeated",
+        "Partial execution resumes from nextAction",
+        "Late old-Run terminal events cannot overwrite new owner state",
+        "Repeated compensation cycles are idempotent"
+      ]
+    },
+    {
+      "id": "EXE-008",
+      "agent": "frontend-agent",
+      "required_skill": "suid",
+      "title": "RequirementWorkspace 前端可观测视图",
+      "priority": 3,
+      "dependencies": [
+        "EXE-003"
+      ],
+      "estimated_complexity": "high",
+      "scope": [
+        "frontend/src/services/",
+        "frontend/src/utils/requirement-progress-socket.ts",
+        "frontend/src/pages/OnlineCode/components/RequirementWorkspace/"
+      ],
+      "acceptance_criteria": [
+        "Execution progress tab shows steps, owner, lease, checkpoint and next action",
+        "Run observations, raw logs and evidence are separately viewable",
+        "Automation completion and MR merge status are distinct",
+        "Snapshot version prevents UI rollback",
+        "WebSocket disconnect falls back to polling and shows stale state"
+      ]
+    },
+    {
+      "id": "EXE-009",
+      "agent": "backend-agent",
+      "required_skill": "eadp-backend",
+      "title": "兼容迁移、开关和旧逻辑退场",
+      "priority": 6,
+      "dependencies": [
+        "EXE-003",
+        "EXE-004",
+        "EXE-006",
+        "EXE-007"
+      ],
+      "estimated_complexity": "high",
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/config/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/",
+        "docs/db/"
+      ],
+      "acceptance_criteria": [
+        "Shadow-read, new-write and authoritative-ledger stages are switchable",
+        "Legacy Run remains visible without fabricated verification",
+        "New and old status differences are observable",
+        "Rollback preserves all audit records",
+        "Old hasActiveRun logic no longer blocks valid repeated Runs after cutover"
+      ]
+    },
+    {
+      "id": "ACC-001",
+      "agent": "test-agent",
+      "title": "原子性与并发独立验收",
+      "priority": 7,
+      "dependencies": [
+        "EXE-001",
+        "EXE-002",
+        "EXE-004",
+        "EXE-005",
+        "EXE-009"
+      ],
+      "estimated_complexity": "high",
+      "scope": [
+        "backend/sei-online-code-service/src/test/",
+        "docs/test-reports/"
+      ],
+      "acceptance_criteria": [
+        "Fifty concurrent Runs produce exactly one step owner",
+        "Expired lease takeover rejects late old-token writes",
+        "Sequence and unique-key races are deterministic",
+        "Transaction fault injection produces no partial state"
+      ]
+    },
+    {
+      "id": "ACC-002",
+      "agent": "test-agent",
+      "title": "三类失败、Effect 与 MR 恢复独立验收",
+      "priority": 7,
+      "dependencies": [
+        "EXE-006",
+        "EXE-007",
+        "EXE-009"
+      ],
+      "estimated_complexity": "very-high",
+      "scope": [
+        "backend/sei-online-code-service/src/test/",
+        "docs/test-reports/"
+      ],
+      "acceptance_criteria": [
+        "Pre-start failure resumes from the first pending step",
+        "Partial failure skips VERIFIED and verifies APPLIED",
+        "Completed-but-timed-out Run reconciles without repeating Agent work",
+        "Lost push or MR response is queried before retry",
+        "Delivery never invokes merge API"
+      ]
+    },
+    {
+      "id": "ACC-003",
+      "agent": "test-agent",
+      "title": "前端可观测与断线独立验收",
+      "priority": 7,
+      "dependencies": [
+        "EXE-003",
+        "EXE-008",
+        "EXE-009"
+      ],
+      "estimated_complexity": "high",
+      "scope": [
+        "frontend/",
+        "docs/test-reports/"
+      ],
+      "acceptance_criteria": [
+        "Normal progress event is visible within three seconds",
+        "Duplicate, reordered and missing events cannot roll back state",
+        "Disconnected WebSocket falls back to polling",
+        "Run, Execution, Requirement and MR states remain distinct",
+        "Evidence authorization and redaction are enforced"
+      ]
+    },
+    {
+      "id": "DEL-001",
+      "agent": "scm-agent",
+      "title": "创建或更新唯一 MR",
+      "priority": 8,
+      "dependencies": [
+        "ACC-001",
+        "ACC-002",
+        "ACC-003"
+      ],
+      "estimated_complexity": "medium",
+      "scope": [],
+      "acceptance_criteria": [
+        "All work is in one requirement feature branch",
+        "MR source SHA equals the accepted SHA",
+        "MR documents migration, validation and rollback",
+        "CODEOWNERS review is requested",
+        "MR is not automatically merged"
+      ]
+    }
+  ],
+  "api_contracts": [
+    {
+      "endpoint": "/executionProgress/findOverview",
+      "method": "GET",
+      "request": {
+        "requirementId": "string"
+      },
+      "response": "ResultData<RequirementExecutionOverviewDto>"
+    },
+    {
+      "endpoint": "/executionProgress/findSteps",
+      "method": "GET",
+      "request": {
+        "executionId": "string"
+      },
+      "response": "ResultData<List<ExecutionStepDto>>"
+    },
+    {
+      "endpoint": "/executionProgress/findCheckpoints",
+      "method": "GET",
+      "request": {
+        "stepId": "string",
+        "page": "integer",
+        "rows": "integer"
+      },
+      "response": "ResultData<Page<ExecutionCheckpointDto>>"
+    },
+    {
+      "endpoint": "/executionProgress/findEffects",
+      "method": "GET",
+      "request": {
+        "executionId": "string",
+        "status": "optional enum",
+        "page": "integer",
+        "rows": "integer"
+      },
+      "response": "ResultData<Page<ExecutionEffectDto>>"
+    },
+    {
+      "endpoint": "/runObservation/findByRun",
+      "method": "GET",
+      "request": {
+        "runId": "string",
+        "page": "integer",
+        "rows": "integer"
+      },
+      "response": "ResultData<Page<RunObservationDto>>"
+    },
+    {
+      "endpoint": "/runObservation/appendManual",
+      "method": "POST",
+      "request": "AppendManualRunObservationRequest",
+      "response": "ResultData<RunObservationDto>"
+    },
+    {
+      "endpoint": "/ws/requirement/{requirementId}/progress",
+      "method": "WEBSOCKET",
+      "request": {},
+      "response": "RequirementProgressEvent"
+    }
+  ],
+  "non_functional_requirements": {
+    "security": [
+      "Evidence fields require backend authorization and redaction",
+      "Manual observations are append-only and audited",
+      "No direct CRUD updates for ownership, step or effect states"
+    ],
+    "performance": [
+      "Normal WebSocket progress is visible within three seconds",
+      "Active polling is five seconds and inactive polling is thirty seconds",
+      "Overview query does not expand full journals or logs",
+      "Details are paginated and lazy-loaded"
+    ],
+    "reliability": [
+      "At-least-once invocation is safe",
+      "Claim and fencing protect all writes",
+      "UNKNOWN is reconciled before retry",
+      "WebSocket loss converges through authoritative polling"
+    ]
+  },
+  "testing_strategy": {
+    "developer_tests": "Each implementation task adds focused unit and integration tests within its scope.",
+    "acceptance_tests": "ACC-001, ACC-002 and ACC-003 are explicit independent test-agent tasks.",
+    "concurrency_tests": "Use real PostgreSQL semantics for unique-key and CAS races.",
+    "e2e_tests": "Exercise RequirementWorkspace, WebSocket reorder/disconnect, observations and MR status separation."
+  },
+  "startup_gates": [
+    "Enable required eadp-backend and suid skills before coding",
+    "Classify and preserve the existing dirty worktree changes",
+    "Record the one Requirement feature branch and worktree before claiming EXE-001"
+  ],
+  "fixed_decisions": [
+    "Requirement-level single writer",
+    "One worktree and feature branch per Requirement",
+    "Create or update one MR without automatic merge"
+  ]
+}
