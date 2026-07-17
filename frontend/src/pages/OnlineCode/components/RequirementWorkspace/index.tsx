@@ -298,6 +298,13 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
         open={drawerOpen}
         run={drawerRun}
         onClose={handleRunLogClose}
+        executionId={
+          drawerRun?.id
+            ? overview?.recentRuns?.find(
+                (r: { runId?: string; executionId?: string | null }) => r.runId === drawerRun.id,
+              )?.executionId ?? null
+            : null
+        }
       />
     </PageContainer>
   );

@@ -214,4 +214,6 @@ export interface RunLogDrawerProps {
   open: boolean;
   run: RunDto | null;
   onClose: () => void;
+  /** Execution id for the effects view; resolved from overview.recentRuns. Null when the caller has no overview (CodingTaskTab). */
+  executionId?: string | null;
 }
