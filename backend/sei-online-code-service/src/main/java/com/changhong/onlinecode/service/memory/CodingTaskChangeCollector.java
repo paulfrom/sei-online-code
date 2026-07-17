@@ -48,7 +48,7 @@ public class CodingTaskChangeCollector {
         if (root == null || !Files.exists(root) || !Files.exists(root.resolve(".git"))) {
             return null;
         }
-        String head = execGit(root, List.of("git", "rev-parse", "HEAD"));
+        String head = execGit(root, List.of("git", "rev-parse", "--verify", "HEAD"), false);
         return head == null || head.isBlank() ? null : head.trim();
     }
 
@@ -68,7 +68,7 @@ public class CodingTaskChangeCollector {
             return CodingTaskChangeResult.failure("工作区不是 git 仓库: " + worktreePath);
         }
 
-        String headCommit = execGit(root, List.of("git", "rev-parse", "HEAD"));
+        String headCommit = execGit(root, List.of("git", "rev-parse", "--verify", "HEAD"), false);
         boolean unbornHead = headCommit == null || headCommit.isBlank();
         if (unbornHead) {
             headCommit = "UNBORN";
@@ -76,10 +76,13 @@ public class CodingTaskChangeCollector {
 
         String diffRange = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit + "..HEAD";
         // 使用 --name-status 解析 A/M/D/R，供回写时清理删除与重命名产生的旧 source。
-        List<String> diffNameStatusCommand = unbornHead
-                ? List.of("git", "diff", "--name-status")
-                : List.of("git", "diff", "--name-status", diffRange);
-        List<StatusEntry> trackedEntries = parseNameStatus(execGit(root, diffNameStatusCommand));
+        List<StatusEntry> trackedEntries = new ArrayList<>();
+        if (unbornHead) {
+            trackedEntries.addAll(parseNameStatus(execGit(root, List.of("git", "diff", "--cached", "--name-status"))));
+            trackedEntries.addAll(parseNameStatus(execGit(root, List.of("git", "diff", "--name-status"))));
+        } else {
+            trackedEntries.addAll(parseNameStatus(execGit(root, List.of("git", "diff", "--name-status", diffRange))));
+        }
         List<String> untrackedFiles = parseLines(execGit(root, List.of("git", "ls-files", "--others", "--exclude-standard")));
 
         List<String> changedFiles = new ArrayList<>();
@@ -91,14 +94,19 @@ public class CodingTaskChangeCollector {
             applyStatus(changeStatuses, changedFiles, new StatusEntry(untracked, "A"));
         }
 
-        List<String> diffStatCommand = unbornHead
-                ? List.of("git", "diff", "--stat")
-                : List.of("git", "diff", "--stat", diffRange);
-        List<String> diffCommand = unbornHead
-                ? List.of("git", "diff", "--no-color")
-                : List.of("git", "diff", "--no-color", diffRange);
-        String diffStat = execGit(root, diffStatCommand);
-        String trackedDiffSummary = truncate(execGit(root, diffCommand), 96 * 1024);
+        String diffStat;
+        String trackedDiffSummary;
+        if (unbornHead) {
+            diffStat = concatDiffSummary(
+                    execGit(root, List.of("git", "diff", "--cached", "--stat")),
+                    execGit(root, List.of("git", "diff", "--stat")));
+            trackedDiffSummary = truncate(concatDiffSummary(
+                    execGit(root, List.of("git", "diff", "--cached", "--no-color")),
+                    execGit(root, List.of("git", "diff", "--no-color"))), 96 * 1024);
+        } else {
+            diffStat = execGit(root, List.of("git", "diff", "--stat", diffRange));
+            trackedDiffSummary = truncate(execGit(root, List.of("git", "diff", "--no-color", diffRange)), 96 * 1024);
+        }
         String untrackedSummary = buildUntrackedSummary(root, untrackedFiles);
         String diffSummary = concatDiffSummary(trackedDiffSummary, untrackedSummary);
 
@@ -138,26 +146,43 @@ public class CodingTaskChangeCollector {
         }
         switch (entry.code) {
             case "D":
-                changeStatuses.put(entry.newPath, CodingTaskChangeResult.ChangeStatus.DELETED);
-                changedFiles.add(entry.oldPath != null ? entry.oldPath : entry.newPath);
+                putStatus(changeStatuses, entry.newPath, CodingTaskChangeResult.ChangeStatus.DELETED);
+                addChangedFile(changedFiles, entry.oldPath != null ? entry.oldPath : entry.newPath);
                 break;
             case "A", "M", "T":
-                changeStatuses.put(entry.newPath, mapCode(entry.code));
-                changedFiles.add(entry.newPath);
+                putStatus(changeStatuses, entry.newPath, mapCode(entry.code));
+                addChangedFile(changedFiles, entry.newPath);
                 break;
             case "R", "C":
                 // 重命名/复制：旧路径记 DELETED 用于清理，新路径记 RENAMED。
                 if (entry.oldPath != null && !entry.oldPath.isBlank()) {
-                    changeStatuses.put(entry.oldPath, CodingTaskChangeResult.ChangeStatus.DELETED);
-                    changedFiles.add(entry.oldPath);
+                    putStatus(changeStatuses, entry.oldPath, CodingTaskChangeResult.ChangeStatus.DELETED);
+                    addChangedFile(changedFiles, entry.oldPath);
                 }
-                changeStatuses.put(entry.newPath, CodingTaskChangeResult.ChangeStatus.RENAMED);
-                changedFiles.add(entry.newPath);
+                putStatus(changeStatuses, entry.newPath, CodingTaskChangeResult.ChangeStatus.RENAMED);
+                addChangedFile(changedFiles, entry.newPath);
                 break;
             default:
                 // X 等未知合并标记退化为 MODIFIED，保持向后兼容。
-                changeStatuses.put(entry.newPath, CodingTaskChangeResult.ChangeStatus.MODIFIED);
-                changedFiles.add(entry.newPath);
+                putStatus(changeStatuses, entry.newPath, CodingTaskChangeResult.ChangeStatus.MODIFIED);
+                addChangedFile(changedFiles, entry.newPath);
+        }
+    }
+
+    private void putStatus(Map<String, CodingTaskChangeResult.ChangeStatus> changeStatuses,
+                           String path,
+                           CodingTaskChangeResult.ChangeStatus status) {
+        CodingTaskChangeResult.ChangeStatus existing = changeStatuses.get(path);
+        if (existing == CodingTaskChangeResult.ChangeStatus.ADDED
+                && status == CodingTaskChangeResult.ChangeStatus.MODIFIED) {
+            return;
+        }
+        changeStatuses.put(path, status);
+    }
+
+    private void addChangedFile(List<String> changedFiles, String path) {
+        if (path != null && !path.isBlank() && !changedFiles.contains(path)) {
+            changedFiles.add(path);
         }
     }
 
@@ -222,6 +247,10 @@ public class CodingTaskChangeCollector {
     }
 
     private String execGit(Path worktree, List<String> command) {
+        return execGit(worktree, command, true);
+    }
+
+    private String execGit(Path worktree, List<String> command, boolean warnOnFailure) {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(worktree.toFile());
         pb.redirectErrorStream(true);
@@ -235,8 +264,10 @@ public class CodingTaskChangeCollector {
             }
             if (process.exitValue() != 0) {
                 String error = readStream(process);
-                log.warn("coding-task-memory: git 命令失败 command={}, exit={}, output={}",
-                        command, process.exitValue(), error);
+                if (warnOnFailure) {
+                    log.warn("coding-task-memory: git 命令失败 command={}, exit={}, output={}",
+                            command, process.exitValue(), error);
+                }
                 return null;
             }
             return readStream(process).trim();

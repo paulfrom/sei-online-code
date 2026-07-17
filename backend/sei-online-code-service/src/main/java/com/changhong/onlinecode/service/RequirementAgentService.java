@@ -48,6 +48,7 @@ public class RequirementAgentService {
     private static final String PRD_AGENT_NAME = "prd-agent";
     private static final String MEMORY_REVIEW_AGENT_NAME = "memory-review-agent";
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
+    private static final Pattern JSON_FENCE = Pattern.compile("(?s)```(?:json)?\\s*(\\{.*?})\\s*```");
 
     private final RequirementDao requirementDao;
     private final ProjectService projectService;
@@ -154,8 +155,8 @@ public class RequirementAgentService {
                     persistMemoryReview(requirementId, content, output.content());
                 })
                 .exceptionally(e -> {
-                    log.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响",
-                            requirementId, e);
+                    log.warn("memory-review-agent: requirement {} 异步审阅失败，流程不受影响: {}",
+                            requirementId, rootMessage(e));
                     return null;
                 });
     }
@@ -173,7 +174,7 @@ public class RequirementAgentService {
 
     private DesignMemoryValidationService.ValidationResult parseMemoryReview(String raw) {
         try {
-            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(raw));
+            JsonNode root = readMemoryReviewJson(raw);
             DesignMemoryValidationService.ValidationResult result =
                     new DesignMemoryValidationService.ValidationResult();
             JsonNode findings = root.path("findings");
@@ -196,6 +197,25 @@ public class RequirementAgentService {
             result.setStatus(result.getFindings().isEmpty()
                     ? MemoryValidationStatus.PASSED : MemoryValidationStatus.WARNING);
             return result;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("记忆审阅 agent 未返回合法 JSON", e);
+        }
+    }
+
+    private JsonNode readMemoryReviewJson(String raw) {
+        for (String candidate : jsonCandidates(raw)) {
+            try {
+                JsonNode root = JsonUtils.mapper().readTree(candidate);
+                if (root != null && root.isObject() && root.has("findings")) {
+                    return root;
+                }
+            } catch (Exception ignored) {
+                // Try the next candidate; LLM output often contains examples before the real JSON.
+            }
+        }
+        String extracted = extractJsonObject(raw);
+        try {
+            return JsonUtils.mapper().readTree(extracted);
         } catch (Exception e) {
             throw new IllegalArgumentException("记忆审阅 agent 未返回合法 JSON", e);
         }
@@ -225,15 +245,59 @@ public class RequirementAgentService {
     }
 
     private static String extractJsonObject(String raw) {
-        if (raw == null) {
-            throw new IllegalArgumentException("记忆审阅 agent 输出为空");
+        java.util.List<String> candidates = jsonCandidates(raw);
+        if (candidates.isEmpty()) {
+            throw new IllegalArgumentException(raw == null || raw.isBlank()
+                    ? "记忆审阅 agent 输出为空"
+                    : "记忆审阅 agent 输出不包含 JSON 对象");
         }
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        if (start < 0 || end < start) {
-            throw new IllegalArgumentException("记忆审阅 agent 输出不包含 JSON 对象");
+        return candidates.get(0);
+    }
+
+    private static java.util.List<String> jsonCandidates(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return java.util.List.of();
         }
-        return raw.substring(start, end + 1);
+        java.util.List<String> candidates = new java.util.ArrayList<>();
+        java.util.regex.Matcher fence = JSON_FENCE.matcher(raw);
+        while (fence.find()) {
+            candidates.add(fence.group(1).trim());
+        }
+
+        int depth = 0;
+        int start = -1;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '{') {
+                if (depth == 0) {
+                    start = i;
+                }
+                depth++;
+            } else if (c == '}' && depth > 0) {
+                depth--;
+                if (depth == 0 && start >= 0) {
+                    candidates.add(raw.substring(start, i + 1).trim());
+                    start = -1;
+                }
+            }
+        }
+        return candidates;
     }
 
     private String buildPrdPrompt(Project project, Requirement requirement, String modifyHint,

@@ -13,7 +13,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -201,6 +207,85 @@ class WorkspaceManagerTest {
 
         assertTrue(isolated.endsWith(Path.of(".sei", "workspaces", "requirement-REQ-0042")));
         assertEquals("feature/REQ-0042", runGit(isolated, "branch", "--show-current").trim());
+    }
+
+    @Test
+    void resolveRequirementWorkspace_serializesConcurrentInitialization(@TempDir Path tempDir)
+            throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+
+        Project project = new Project();
+        project.setId("project-concurrent");
+        when(projectDao.findOne("project-concurrent")).thenReturn(project);
+
+        int workerCount = 8;
+        CountDownLatch ready = new CountDownLatch(workerCount);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
+        List<CompletableFuture<Path>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < workerCount; i++) {
+                futures.add(CompletableFuture.supplyAsync(() -> {
+                    ready.countDown();
+                    try {
+                        assertTrue(start.await(5, TimeUnit.SECONDS));
+                        return workspaceManager.resolveRequirementWorkspace("project-concurrent", "REQ-0001");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                }, executor));
+            }
+
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            Path expected = tempDir.resolve("project-concurrent/.sei/workspaces/requirement-REQ-0001")
+                    .toAbsolutePath().normalize();
+            for (CompletableFuture<Path> future : futures) {
+                assertEquals(expected, future.get(15, TimeUnit.SECONDS));
+            }
+            assertEquals("feature/REQ-0001", runGit(expected, "branch", "--show-current").trim());
+            assertFalse(Files.exists(expected.resolve(".git/index.lock")));
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void resolveRequirementWorkspace_doesNotCheckoutAgainWhenAlreadyOnTargetBranch(@TempDir Path tempDir)
+            throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+
+        Project project = new Project();
+        project.setId("project-existing-branch");
+        when(projectDao.findOne("project-existing-branch")).thenReturn(project);
+
+        Path isolated = workspaceManager.resolveRequirementWorkspace("project-existing-branch", "REQ-0001");
+        Path indexLock = isolated.resolve(".git/index.lock");
+        Files.createFile(indexLock);
+        try {
+            assertEquals(isolated,
+                    workspaceManager.resolveRequirementWorkspace("project-existing-branch", "REQ-0001"));
+            assertEquals("feature/REQ-0001", runGit(isolated, "branch", "--show-current").trim());
+        } finally {
+            Files.deleteIfExists(indexLock);
+        }
     }
 
     @Test

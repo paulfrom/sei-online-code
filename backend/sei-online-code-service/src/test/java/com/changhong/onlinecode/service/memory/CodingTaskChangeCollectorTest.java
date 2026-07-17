@@ -65,6 +65,23 @@ class CodingTaskChangeCollectorTest {
     }
 
     @Test
+    void collect_unbornHeadWithStagedChange_detectsFile() throws Exception {
+        initRepo();
+        Path file = tempDir.resolve("Staged.java");
+        Files.writeString(file, "class Staged {}", StandardCharsets.UTF_8);
+        exec("git", "add", ".");
+
+        CodingTaskChangeResult result = collector.collect(tempDir.toString(), null);
+
+        assertTrue(result.isSuccess());
+        assertEquals("UNBORN", result.getHeadCommit());
+        assertEquals(List.of("Staged.java"), result.getChangedFiles());
+        assertEquals(CodingTaskChangeResult.ChangeStatus.ADDED,
+                result.getChangeStatuses().get("Staged.java"));
+        assertTrue(result.getFileSnippets().containsKey("Staged.java"));
+    }
+
+    @Test
     void collect_trackedModifiedChange_detectsFile() throws Exception {
         initRepo();
         Path file = tempDir.resolve("tracked.java");
@@ -110,6 +127,15 @@ class CodingTaskChangeCollectorTest {
         String head = collector.resolveHead(tempDir.toString());
 
         assertEquals(exec("git", "rev-parse", "HEAD").trim(), head);
+    }
+
+    @Test
+    void resolveHead_unbornRepository_returnsNull() throws Exception {
+        initRepo();
+
+        String head = collector.resolveHead(tempDir.toString());
+
+        assertNull(head);
     }
 
     @Test

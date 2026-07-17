@@ -97,7 +97,8 @@ export interface RunDto {
   triggerSource?: TriggerSource | string | null; loopId?: string | null;
   cancelRequested?: boolean | null; invalidatedByCommentId?: string | null;
   memoryContextId?: string | null; workspaceMemoryId?: string | null;
-  userPrompt?: string | null; failureSummary?: string | null; failureReason?: string | null;
+  userPrompt?: string | null; summary?: string | null;
+  failureSummary?: string | null; failureReason?: string | null;
   terminalReason?: RunTerminalReason | string | null;
   logStreamKey?: string | null; state?: RunState; worktreePath?: string | null;
   exitCode?: number | null; agentId?: string | null; agentName?: string | null;

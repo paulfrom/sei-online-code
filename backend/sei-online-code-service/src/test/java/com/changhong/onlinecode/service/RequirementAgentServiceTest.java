@@ -131,6 +131,59 @@ class RequirementAgentServiceTest {
     }
 
     @Test
+    void reviewMemory_recoversJson_whenAgentEmitsPreambleAndExampleObject() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("p1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
+        when(agentExecutionService.executeAsync(eq("memory-review-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult("""
+                        我将按这个格式返回：{"example":true}
+
+                        ```json
+                        {"findings":[{"severity":"INFO","message":"PRD 引入新审批节点",
+                        "suggestedAction":"后续沉淀到模块说明"}]}
+                        ```
+                        """)));
+
+        service.reviewMemory("req1", "# PRD", context);
+
+        assertEquals(MemoryValidationStatus.WARNING, requirement.getMemoryValidationStatus());
+        verify(requirementDao).save(requirement);
+        verify(requirementCommentService).append(eq("req1"), any(), any(), eq("记忆审阅 agent"), any(),
+                org.mockito.ArgumentMatchers.contains("PRD 引入新审批节点"),
+                org.mockito.ArgumentMatchers.contains("\"status\":\"WARNING\""));
+    }
+
+    @Test
+    void reviewMemory_invalidJsonMarksRunFailedWithoutThrowingToCaller() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("p1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        Run run = new Run();
+        run.setId("run-1");
+        run.setState(com.changhong.onlinecode.dto.enums.RunState.RUNNING);
+        when(requirementDao.findOne("req1")).thenReturn(requirement);
+        when(runDao.findOne("run-1")).thenReturn(run);
+        when(agentExecutionService.executeAsync(eq("memory-review-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult("不是 JSON")));
+
+        service.reviewMemory("req1", "# PRD", context);
+
+        assertEquals(com.changhong.onlinecode.dto.enums.RunState.FAILED, run.getState());
+        verify(runDao).save(run);
+        verify(requirementDao, never()).save(any(Requirement.class));
+    }
+
+    @Test
     void reviewMemory_newerPrdDiscardsLateAgentResult() {
         Requirement reviewed = new Requirement();
         reviewed.setId("req1");

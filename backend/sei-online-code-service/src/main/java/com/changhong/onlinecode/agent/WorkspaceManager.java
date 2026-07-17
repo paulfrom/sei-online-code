@@ -32,6 +32,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
@@ -77,6 +80,11 @@ public class WorkspaceManager {
     private final ProjectDao projectDao;
     private final ConfigService configService;
     private final ScaffoldGenerator scaffoldGenerator;
+    /**
+     * Git 会用 index.lock/config.lock 保护仓库写操作；同一 JVM 内必须先按物理路径串行化工作区初始化，
+     * 否则多个 worker 会在业务执行槽登记前同时进入 git init/checkout。
+     */
+    private final ConcurrentMap<Path, ReentrantLock> workspaceLocks = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private RequirementDao requirementDao;
@@ -119,10 +127,34 @@ public class WorkspaceManager {
         ensureSafeWorkspacePath(dir);
 
         Path workspaceDir = Path.of(dir);
-        WorkspaceManifest manifest = readManifest(workspaceDir);
+        ReentrantLock lock = workspaceLock(workspaceDir);
+        lock.lock();
+        try {
+            WorkspaceManifest manifest = readManifest(workspaceDir);
 
-        if (Files.exists(workspaceDir)) {
-            WorkspaceSource source = manifest == null ? decideSource(config, project) : manifest.source();
+            if (Files.exists(workspaceDir)) {
+                WorkspaceSource source = manifest == null ? decideSource(config, project) : manifest.source();
+                ensureManagedLayout(workspaceDir);
+                ensureGitRepository(workspaceDir);
+                writeManifest(workspaceDir, new WorkspaceManifest(
+                        projectId,
+                        source,
+                        project == null ? null : project.getName(),
+                        config == null ? null : config.getTemplateGitlabUrl(),
+                        workspaceDir.toString(),
+                        manifest == null ? OffsetDateTime.now().toString() : manifest.createdAt()
+                ));
+                return new WorkspaceResolveResult(dir, true, source);
+            }
+
+            WorkspaceSource source = decideSource(config, project);
+            if (hasProjectGitUrl(project)) {
+                materializeProjectWorkspace(project, workspaceDir);
+            } else if (source == WorkspaceSource.CLONE) {
+                materializeTemplateWorkspace(config, project, workspaceDir);
+            } else {
+                scaffoldWorkspace(workspaceDir);
+            }
             ensureManagedLayout(workspaceDir);
             ensureGitRepository(workspaceDir);
             writeManifest(workspaceDir, new WorkspaceManifest(
@@ -131,30 +163,12 @@ public class WorkspaceManager {
                     project == null ? null : project.getName(),
                     config == null ? null : config.getTemplateGitlabUrl(),
                     workspaceDir.toString(),
-                    manifest == null ? OffsetDateTime.now().toString() : manifest.createdAt()
+                    OffsetDateTime.now().toString()
             ));
-            return new WorkspaceResolveResult(dir, true, source);
+            return new WorkspaceResolveResult(dir, false, source);
+        } finally {
+            lock.unlock();
         }
-
-        WorkspaceSource source = decideSource(config, project);
-        if (hasProjectGitUrl(project)) {
-            materializeProjectWorkspace(project, workspaceDir);
-        } else if (source == WorkspaceSource.CLONE) {
-            materializeTemplateWorkspace(config, project, workspaceDir);
-        } else {
-            scaffoldWorkspace(workspaceDir);
-        }
-        ensureManagedLayout(workspaceDir);
-        ensureGitRepository(workspaceDir);
-        writeManifest(workspaceDir, new WorkspaceManifest(
-                projectId,
-                source,
-                project == null ? null : project.getName(),
-                config == null ? null : config.getTemplateGitlabUrl(),
-                workspaceDir.toString(),
-                OffsetDateTime.now().toString()
-        ));
-        return new WorkspaceResolveResult(dir, false, source);
     }
 
     /**
@@ -178,17 +192,23 @@ public class WorkspaceManager {
         if (!target.startsWith(root)) {
             throw new IllegalStateException("非法隔离工作区路径: " + target);
         }
-        if (Files.isDirectory(target)) {
-            ensureRequirementBranch(target, workspaceKey);
-            return target;
-        }
+        ReentrantLock lock = workspaceLock(target);
+        lock.lock();
         try {
-            Files.createDirectories(root);
-            copyWorkspace(projectWorkspace, target);
-            ensureRequirementBranch(target, workspaceKey);
-            return target;
-        } catch (IOException e) {
-            throw new IllegalStateException("创建隔离工作区失败: " + target, e);
+            if (Files.isDirectory(target)) {
+                ensureRequirementBranch(target, workspaceKey);
+                return target;
+            }
+            try {
+                Files.createDirectories(root);
+                copyWorkspace(projectWorkspace, target);
+                ensureRequirementBranch(target, workspaceKey);
+                return target;
+            } catch (IOException e) {
+                throw new IllegalStateException("创建隔离工作区失败: " + target, e);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -207,7 +227,13 @@ public class WorkspaceManager {
         if (!target.startsWith(root)) {
             throw new IllegalStateException("非法需求工作区路径: " + target);
         }
-        deleteTree(target);
+        ReentrantLock lock = workspaceLock(target);
+        lock.lock();
+        try {
+            deleteTree(target);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public boolean isManagedWorkspacePath(Path projectWorkspace, Path candidate) {
@@ -744,7 +770,11 @@ public class WorkspaceManager {
 
     private void ensureRequirementBranch(Path workspaceDir, String workspaceKey) {
         ensureGitRepository(workspaceDir);
-        runCommand(workspaceDir, "git", "checkout", "-B", branchName(workspaceKey));
+        String targetBranch = branchName(workspaceKey);
+        String currentBranch = runCommandOutput(workspaceDir, "git", "branch", "--show-current").trim();
+        if (!targetBranch.equals(currentBranch)) {
+            runCommand(workspaceDir, "git", "checkout", "-B", targetBranch);
+        }
     }
 
     private String branchName(String workspaceKey) {
@@ -768,6 +798,10 @@ public class WorkspaceManager {
     }
 
     private void runCommand(Path cwd, String... command) {
+        runCommandOutput(cwd, command);
+    }
+
+    private String runCommandOutput(Path cwd, String... command) {
         try {
             Process process = new ProcessBuilder(command)
                     .directory(cwd.toFile())
@@ -778,12 +812,21 @@ public class WorkspaceManager {
             if (code != 0) {
                 throw new IllegalStateException(String.join(" ", command) + " failed: " + output);
             }
+            return output;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(String.join(" ", command) + " interrupted", e);
         } catch (IOException e) {
             throw new IllegalStateException(String.join(" ", command) + " failed", e);
         }
+    }
+
+    private ReentrantLock workspaceLock(Path workspaceDir) {
+        return workspaceLocks.computeIfAbsent(lockKey(workspaceDir), ignored -> new ReentrantLock());
+    }
+
+    private Path lockKey(Path workspaceDir) {
+        return workspaceDir.toAbsolutePath().normalize();
     }
 
     private void deleteTree(Path dir) {

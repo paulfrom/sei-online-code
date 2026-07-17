@@ -144,17 +144,13 @@ const RunLogDrawer = ({ open, run, onClose }) => {
             <Descriptions.Item label="开始时间">{formatDateTime(run.startedDate)}</Descriptions.Item>
             <Descriptions.Item label="结束时间">{formatDateTime(run.finishedDate)}</Descriptions.Item>
             <Descriptions.Item label="退出码">{run.exitCode ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="摘要" span={2}>
+              {run.summary || run.failureSummary || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="用户提示词" span={2}>
+              {run.userPrompt || '-'}
+            </Descriptions.Item>
           </Descriptions>
-
-          {run.logStreamKey ? (
-            <pre className={styles.logArea}>
-              {lines.length === 0 && !terminated
-                ? '等待日志…'
-                : lines.join('\n')}
-            </pre>
-          ) : (
-            <div className={styles.hint}>无运行日志通道</div>
-          )}
         </React.Fragment>
       ) : (
         <div className={styles.hint}>未选择运行</div>
