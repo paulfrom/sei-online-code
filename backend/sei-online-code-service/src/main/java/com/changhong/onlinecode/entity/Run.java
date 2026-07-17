@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
 import jakarta.persistence.Access;
 import jakarta.persistence.AccessType;
@@ -156,6 +157,43 @@ public class Run extends BaseAuditableEntity {
 
     @Column(name = "finished_date")
     private Date finishedDate;
+
+    // ---- ADR-001 / V8：Execution 绑定、invocation 幂等、thread/turn、heartbeat、恢复点与验证 ----
+
+    /** 关联 TaskExecution；迁移期可空，新 Run 必填（数据模型 §5/§13）。 */
+    @Column(name = "execution_id", length = 36)
+    private String executionId;
+
+    /** 调度调用幂等键；相同 key 重入返回同一 Run。 */
+    @Column(name = "invocation_key", length = 128)
+    private String invocationKey;
+
+    @Column(name = "executor_id", length = 100)
+    private String executorId;
+
+    /** Codex/session thread。 */
+    @Column(name = "thread_id", length = 128)
+    private String threadId;
+
+    @Column(name = "turn_id", length = 128)
+    private String turnId;
+
+    @Column(name = "heartbeat_at")
+    private Date heartbeatAt;
+
+    @Column(name = "observed_plan_version")
+    private Integer observedPlanVersion;
+
+    /** 本次恢复点。 */
+    @Column(name = "resume_from_checkpoint_id", length = 36)
+    private String resumeFromCheckpointId;
+
+    @Column(name = "latest_observation_id", length = 36)
+    private String latestObservationId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", length = 32)
+    private VerificationStatus verificationStatus;
 
     @Override
     @Transient
