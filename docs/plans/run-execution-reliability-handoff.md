@@ -44,14 +44,14 @@
 | 任务状态 | EXE-008 `IN_PROGRESS`（batch1 checkpoint `0576e9b`） |
 | 当前 owner | frontend-agent / claude |
 | 已观察分支 | `main`（实际工作分支；远程 `feature/run-execution-reliability-exe005` 仍在但落后） |
-| 已观察 HEAD | `0576e9b`（EXE-008 batch1 checkpoint） |
+| 已观察 HEAD | `4f4cec8`（EXE-008 batch2 checkpoint） |
 | Requirement feature branch | 实际 `main`（与 ADR“唯一 feature branch”约定偏离；历史 EXE-001~007 均落在 main，见 OBS-016） |
 | Requirement worktree | 当前检出 `D:\project\monorepo\sei-online-code`（Windows / `lin`） |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108`；其后 main 另有 `ff64c91`（reconciler，EXE-007 scope）+`014efbf`（progress-ledger 开关，EXE-009 scope）—git 实存但 ledger 未经验证登记，见 OBS-016；EXE-008 batch1 `0576e9b` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108`；其后 main 另有 `ff64c91`（reconciler，EXE-007 scope）+`014efbf`（progress-ledger 开关，EXE-009 scope）—git 实存但 ledger 未经验证登记，见 OBS-016；EXE-008 batch1 `0576e9b`；EXE-008 batch2 `4f4cec8` |
 | eadp-backend skill | 不可用（本机 `~/.claude/skills/` 无；与 OBS-002 声称冲突，见 OBS-016） |
 | suid skill | 不可用（本机同上；经用户授权按 frontend/CLAUDE.md 内联规范 + 既有实现推进，见 OBS-016） |
-| 最近完成验证 | EXE-008 batch1：tsc（改动 .ts/.tsx 零错误；项目全量 tsc 有既有噪音，非本次引入）+ eslint（6 文件干净）+ git diff --check 干净 |
-| 下一动作 | EXE-008 后续批次：执行进度页签（findSteps/findCheckpoints）→ Run 列表扩展（execution/attempt/恢复点/observation）→ RunLogDrawer 三视图（执行记录/原始日志/证据）→ 证据分页 |
+| 最近完成验证 | EXE-008 batch2：tsc（index.tsx 零错误；项目全量 tsc 有既有噪音，非本次引入）+ eslint（4 文件干净）+ git diff --check 干净 |
+| 下一动作 | EXE-008 batch3：Run 列表扩展（execution/attempt/恢复点/最新 observation/验证状态）→ batch4 RunLogDrawer 三视图（执行记录/原始日志/证据）+ 证据分页 |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -220,7 +220,7 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-005 | `DONE` | backend-agent/claude | `2972873` | WorkspaceLeaseService+Git方法+DAO CAS+接线+GC安全+17测试通过 |
 | EXE-006 | `DONE` | backend-agent/claude | `c2a8108` | EffectService+DAO CAS+delivery 改造+fetch-merge+15测试通过 |
 | EXE-007 | `READY` | - | - | 依赖 EXE-004+005+006 已 DONE，可 claim |
-| EXE-008 | `IN_PROGRESS` | frontend-agent/claude | `0576e9b` | 基础批次 DONE：executionProgress/runObservation service + requirement-progress-socket.ts + OverviewPanel MR 状态分离 + findOverview 接入 hook（snapshotVersion 门控 refetch + stale）；执行进度页签 / Run 列表扩展 / RunLogDrawer 三视图 / 证据分页待后续批次 |
+| EXE-008 | `IN_PROGRESS` | frontend-agent/claude | `4f4cec8` | batch1 DONE（service+socket+MR 状态分离+overview 接入，`0576e9b`）+ batch2 DONE（ExecutionProgressTab 执行进度页签：步骤列表+状态视觉区分+checkpoint 分页，`4f4cec8`）；Run 列表扩展 / RunLogDrawer 三视图 / 证据分页待 batch3+ |
 | EXE-009 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003/004/006/007 |
 | ACC-001 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
 | ACC-002 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
@@ -543,6 +543,30 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - overview.automationStatus/mrStatus 在 EXE-003 时曾为 null（OBS-010）；EXE-006 后是否填充未验证，前端按 null 容错（MR tag 不渲染、不伪造）。
   - 未连 WS broker 转发（后端 listener 仅 log，OBS-010 延后项）；前端 socket 已就绪，后端推送上线即生效。
 - nextAction：EXE-008 batch2 实现执行进度页签（findSteps + findCheckpoints 分页 + 步骤状态视觉区分 APPLIED/VERIFIED/UNKNOWN/BLOCKED）。
+
+### OBS-017 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：frontend-agent / claude
+- task：EXE-008（batch 2/N：执行进度页签）
+- state：`IN_PROGRESS`（batch2 `DONE`，后续批次待续）
+- baseHead：`0576e9b`
+- currentHead：`4f4cec8`
+- changedFiles（batch2，commit `4f4cec8`，4 文件 +411）：
+  - 新增 `ExecutionProgressTab.jsx`：渲染 overview（workspace/lease/stale + stepSummary + currentStep + latestCheckpoint + nextAction）+ findSteps 步骤列表（按 phase 排序，状态视觉区分 PENDING/IN_PROGRESS/APPLIED/VERIFIED/UNKNOWN/BLOCKED/FAILED/SUPERSEDED，未知枚举原值透传）；CheckpointList 子组件按需 findCheckpoints 分页（hasMore 由满页推断，不依赖 PageResult.total）
+  - 改 `OverviewPanel.jsx`：新增“执行进度”卡片（verified/required + APPLIED/UNKNOWN/BLOCKED 异常计数）；onOpenPanel 联合类型加 'progress'
+  - 改 `OverviewDrawer.jsx`：TITLE_BY_PANEL/panelKey/renderPanel 加 'progress'；透传 overview
+  - 改 `index.tsx`：detailPanel/handleOpenPanel 联合类型加 'progress'；给 OverviewDrawer 传 overview
+- executionId 来源：`overview.workspace.ownerExecutionId`（无活跃 Execution 时步骤区显示空态，不伪造）。
+- verification：
+  - `eslint`（4 文件）：clean，exit 0。
+  - `tsc --noEmit -p tsconfig.json --ignoreDeprecations 5.0`：改动 .tsx（index.tsx）零错误（.jsx 不参与 tsc，符合 CLAUDE.md）。
+  - `git diff --check`：clean。
+- 组件选型说明（不掩盖，供 suid 审阅）：步骤区用基础 div+Tag+Button 构建的展开式“步骤树”，未用 ExtTable。依据：scope 明确要求“步骤树”、嵌入 Drawer 的只读结构化小列表、含展开行；符合 CLAUDE.md 的 Table/列表降级条件。suid skill 缺失（OBS-016），此选型未经 SKILL.md 确认。
+- 已知缺口/待续（不掩盖）：
+  - Run 列表扩展、RunLogDrawer 三视图（执行记录/原始日志/证据）、证据分页 → batch3/4。
+  - overview 工作区/steps 字段在 backend 是否填充未端到端验证（OBS-010 曾记 null）；前端全程 null 容错。
+- nextAction：EXE-008 batch3 扩展 Run 列表（execution/attempt/恢复点/最新 observation/验证状态）。
 
 ### 后续备注模板
 
