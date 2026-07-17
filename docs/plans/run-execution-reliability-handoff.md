@@ -41,16 +41,16 @@
 | 项目 | 当前值 |
 |---|---|
 | 当前计划任务 | `EXE-001` |
-| 任务状态 | `BLOCKED_PRECHECK` |
-| 当前 owner | 未分配 |
-| 已观察分支 | `main` |
-| 已观察 HEAD | `6751eb1` |
-| Requirement feature branch | 尚未创建/记录 |
-| Requirement worktree | 尚未创建/记录 |
-| 实施 checkpoint commit | 无 |
-| eadp-backend skill | 可用（环境已变更；`~/.claude/skills/eadp-backend/SKILL.md` 已完整读取；`suid` 同样可用） |
-| 最近完成验证 | preflight：git HEAD/status 与交接一致；eadp-backend 已可用并读取；8 文件 diff 已归类为 FAILED-keyword/supersede 连贯修复 |
-| 下一动作 | 解除门禁 2（8 文件归属确认 + 可恢复基线）与门禁 3（本 Requirement 分支/worktree）后 claim `EXE-001` |
+| 任务状态 | `IN_PROGRESS`（实施中，分批 checkpoint） |
+| 当前 owner | backend-agent / claude |
+| 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
+| 已观察 HEAD | `46a0657`（EXE-001 schema 契约 commit） |
+| Requirement feature branch | `feature/run-execution-reliability` |
+| Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 step1 `46a0657`（enums+V7+V8） |
+| eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
+| 最近完成验证 | 门禁 1–5 解除；EXE-001 step1：11 enum + RunState 扩展 + V7/V8 已落 `46a0657`；api 模块 compileJava 通过；无 RunState 穷举 switch |
+| 下一动作 | EXE-001 step2：6 个新 entity + Run 实体扩展（匹配 V7/V8）；step3 DAO；step4 测试 |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -212,7 +212,7 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 
 | 任务 | 状态 | Owner | Base/Checkpoint | Next action |
 |---|---|---|---|---|
-| EXE-001 | `BLOCKED_PRECHECK` | - | `6751eb1` | skill 门禁已解除；待解除 dirty-worktree 归属+基线（门禁 2）与 Requirement 分支/worktree（门禁 3） |
+| EXE-001 | `IN_PROGRESS` | backend-agent/claude | `46a0657` | step1 enums+schema 已落；下一步 entity→DAO→test |
 | EXE-002 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-001 |
 | EXE-003 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
 | EXE-004 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
@@ -280,6 +280,62 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - 门禁 2 未解除：8 文件归属尚未由用户确认；`docs/bugs/...` 只明确覆盖 4 个 service 中的 `CodingTaskExecutionService`，其余 3 个无任务记录佐证归属；可恢复基线 commit 尚未形成（提交需用户授权，遵守 commit 规范不用 `git add -A/.`）；
   - 门禁 3 未解除：本 Requirement 的唯一 feature branch/worktree 尚未创建/记录。
 - nextAction：等待用户 (a) 确认 8 文件归属（前序 FAILED-keyword/supersede 修复）并授权形成基线 commit；(b) 指定或同意创建本 Requirement 唯一 feature branch/worktree 并写入第 3 节。两者解除后再 claim EXE-001；当前不编码。
+
+### OBS-003 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：baseline（用户授权 commit）
+- state：`CONFIRMED`
+- baseHead：`6751eb1`
+- currentHead：`4e291ce`
+- changedFiles：8 backend（fix）+ 7 planning docs（docs）
+- verification：用户确认 8 文件归属并授权基线；`git checkout -b feature/run-execution-reliability`；2 commits；`git status --short` 干净；`git diff --check` 无空白错误。
+- evidence：
+  - `fix: stop deriving run terminal reason from natural-language keywords` = `d49366f07272e0ea87761a10c106e02af158a44d`；
+  - `docs: add run execution reliability plan, adr and data model` = `4e291ceb6b12bb73f760289acd295c5e38ab3376`；
+  - 门禁 2、3 据此解除。
+- nextAction：claim 并调研 EXE-001。
+
+### OBS-004 — INVESTIGATION
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-001（调研，未修改业务文件）
+- state：`BLOCKED`（启动门禁 1–5 已解除；新增 base-schema 阻塞）
+- baseHead：`4e291ce`
+- currentHead：`4e291ce`
+- verification（调研结论）：
+  - DB 方言：PostgreSQL（application.yaml / 另一 profile / application-test.yml 均为 `jdbc:postgresql` + `PostgreSQLDialect`；testcontainers `postgresql:15`；`ddl-auto: validate`）。gradle 的 `mysqlVersion` 未启用，设计文档正确。
+  - DDL 约定：BaseAuditableEntity 列 = id(varchar36) + creator_id/creator_account/creator_name/created_date + last_editor_id/last_editor_account/last_editor_name/last_edited_date；ISoftDelete = deleted_date(BIGINT epoch ms)+deleted_by；部分唯一索引 `CREATE UNIQUE INDEX ... WHERE col IS NOT NULL`；CHECK 约束；`COMMENT ON`（见 V1__create_student.sql）。
+  - entity 约定：lombok `@Data`+`@EqualsAndHashCode(callSuper=true)`+`@Access(FIELD)`，`extends BaseAuditableEntity`，枚举 `@Enumerated(STRING)`（见 Run.java）。
+  - DAO 约定：`extends BaseEntityDao<T>`，`@Repository`，派生查询 + `@Modifying @Query` CAS（见 RunDao.java）。
+  - enum 约定：简单 enum + `@Schema`（见 RunTerminalReason.java）。
+- blocker（base-schema）：
+  - `main`/本分支 `db/migration/` 仅 `V1__create_student.sql`；`oc_run`/`oc_task`/`oc_requirement` 等基表 DDL 不在任何已跟踪 migration。
+  - 完整链 V1–V20（`V2__task_run.sql` 内 `CREATE TABLE oc_run`）仅在未合并分支 `worktree-compensation-migration` / origin `feat/compensation-logging`。
+  - 影响：EXE-001 新表（workspace/execution/step/checkpoint/effect/observation）自洽可建；但 `oc_run` ALTER、Run 实体新增列的 `validate` 与并发测试，在全新 testcontainers DB（仅 V1）下 oc_run 不存在 → Spring 上下文校验 Run 实体失败 → DB 类测试无法运行。
+- changedFiles：无（仅调研与文档追加）。
+- nextAction：等待用户裁决 base-schema 来源（A 先把基线 schema 迁移并入本分支；B EXE-001 假定基表存在、测试仅限新表并显式记录缺口；或 C 拆前置任务）。裁决后按 EXE-001 scope 生成 enums/DDL/entity/dao/测试，分批 checkpoint。
+
+### OBS-005 — PROGRESS
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-001（step 1/N：schema 契约）
+- state：`IN_PROGRESS`
+- baseHead：`4e291ce`
+- currentHead：`46a0657`
+- changedFiles：dto/enums 11 新增 + RunState 扩展（QUEUED/UNKNOWN）；db/migration V7（6 表）+ V8（oc_run 扩展）
+- verification：
+  - 方言决策：依用户指示“根据 entity 确认可用表/字段”，以实体为真相；DB=PostgreSQL 不变。base-schema 文件来源不再追查，V8 的 oc_run ALTER 假定基表存在（与 Run 实体一致）。
+  - `./gradlew :sei-online-code-api:compileJava` 通过（exit 0；RunDto 警告为既有，无关）。
+  - 无 `switch(RunState)` 穷举分支，QUEUED/UNKNOWN 加入安全。
+  - validate-safe：本批未新增实体映射，V7 新表/V8 新列不破坏既有实体 ddl-auto=validate。
+- evidence：commit `46a06577b2e7a8058332101cfe6f781b4d8077d3`；`git diff --cached --name-only` 14 文件；`git status --short` 干净。
+- scope 决策：EXE-001 的 `docs/db/` 范围由权威 Flyway 迁移 `db/migration/V7、V8` 承载（项目 schema 实际由 db/migration 管理，见 application.yaml），不在 docs/db 重复，避免双写漂移。
+- 待验证风险：oc_run 基线 DDL 不可见；若其 `state` 列有 CHECK 约束限制旧枚举集合，需在基表可用时放宽以容纳 QUEUED/UNKNOWN（实体层无 CHECK，不影响编译）。
+- nextAction：EXE-001 step2 生成 6 个新 entity + 扩展 Run 实体（列与 V7/V8 严格一致），再 step3 DAO、step4 测试；各步 checkpoint。
 
 ### 后续备注模板
 
