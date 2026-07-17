@@ -15,6 +15,7 @@ import ExecutionPlanTab from './ExecutionPlanTab';
 import TaskTab from './TaskTab';
 import RunTab from './RunTab';
 import DeliveryTab from './DeliveryTab';
+import ExecutionProgressTab from './ExecutionProgressTab';
 
 const useStyles = createStyles(({ token, css }) => ({
   body: css`
@@ -30,14 +31,16 @@ const TITLE_BY_PANEL = {
   task: '编码任务',
   run: '运行',
   delivery: '交付',
+  progress: '执行进度',
 };
 
 /**
  * @param {{
- *   panelKey: 'plan'|'task'|'run'|'delivery'|null,
+ *   panelKey: 'plan'|'task'|'run'|'delivery'|'progress'|null,
  *   onClose: () => void,
  *   titleOverride?: string,
  *   width?: number,
+ *   overview?: any,
  *   plan: any, tasks: any[], runs: any[], delivery: any, comments: any[],
  *   taskFilterId?: string|null,
  *   onClearTaskFilter?: () => void,
@@ -60,6 +63,7 @@ const OverviewDrawer = ({
   onClose,
   titleOverride,
   width = 960,
+  overview,
   plan,
   tasks,
   runs,
@@ -115,6 +119,8 @@ const OverviewDrawer = ({
         );
       case 'delivery':
         return <DeliveryTab delivery={delivery} comments={comments} onRetryMr={onRetryMr} />;
+      case 'progress':
+        return <ExecutionProgressTab overview={overview} />;
       default:
         return null;
     }

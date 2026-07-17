@@ -167,7 +167,7 @@ const planProgress = (tasks) => {
  *   autoStopEnabled: boolean,
  *   stopping?: boolean,
  *   onStop?: () => void,
- *   onOpenPanel?: (key: 'plan'|'task'|'run'|'delivery') => void,
+ *   onOpenPanel?: (key: 'plan'|'task'|'run'|'delivery'|'progress') => void,
  * }} props
  */
 const OverviewPanel = ({
@@ -220,6 +220,19 @@ const OverviewPanel = ({
     ? MR_STATUS_META[mrStatus] || { color: 'default', label: mrStatus }
     : null;
 
+  // Step summary from the overview — surfaces non-zero exception counts so the
+  // progress card signals UNKNOWN/BLOCKED/APPLIED at a glance.
+  const stepSummary = overview?.stepSummary || null;
+  const stepSummaryTags = stepSummary
+    ? [
+        { key: 'applied', color: 'blue', label: '已应用' },
+        { key: 'unknown', color: 'warning', label: '待对账' },
+        { key: 'blocked', color: 'orange', label: '阻塞' },
+      ]
+        .filter((m) => (stepSummary[m.key] ?? 0) > 0)
+        .map((m) => ({ ...m, count: stepSummary[m.key] }))
+    : [];
+
   const open = (key) => () => onOpenPanel && onOpenPanel(key);
 
   // Compact status-distribution Tags for the task card (only non-zero).
@@ -263,6 +276,28 @@ const OverviewPanel = ({
           {typeof planVersion === 'number' && <span>Plan v{planVersion}</span>}
         </div>
       </div>
+
+      {/* Execution progress — authoritative ledger view */}
+      <button type="button" className={styles.card} onClick={open('progress')}>
+        <div className={styles.cardBody}>
+          <div className={styles.cardTitle}>
+            <span>执行进度</span>
+            <span className={styles.cardCount}>
+              {stepSummary ? `${stepSummary.verified ?? 0}/${stepSummary.required ?? 0} 已验证` : '-'}
+            </span>
+          </div>
+          <div className={styles.cardMeta}>
+            {stepSummaryTags.length > 0
+              ? stepSummaryTags.map((m) => (
+                  <Tag key={m.key} color={m.color}>
+                    {m.label} {m.count}
+                  </Tag>
+                ))
+              : <span className={styles.cardCount}>阶段 / 步骤 / checkpoint</span>}
+          </div>
+        </div>
+        <ArrowRightOutlined className={styles.cardArrow} />
+      </button>
 
       {/* Execution plan */}
       <button type="button" className={styles.card} onClick={open('plan')}>

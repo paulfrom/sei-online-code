@@ -96,7 +96,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
 
   const [drawerRun, setDrawerRun] = useState<RunDto | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailPanel, setDetailPanel] = useState<'plan' | 'task' | 'run' | 'delivery' | null>(null);
+  const [detailPanel, setDetailPanel] = useState<'plan' | 'task' | 'run' | 'delivery' | 'progress' | null>(null);
   const [taskFilterId, setTaskFilterId] = useState<string | null>(null);
   const [highlightTaskKey, setHighlightTaskKey] = useState<string | null>(null);
   // Tracks whether the task panel was reached from the execution plan, so a
@@ -139,7 +139,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   }, []);
 
   const handleOpenPanel = useCallback(
-    (key: 'plan' | 'task' | 'run' | 'delivery') => {
+    (key: 'plan' | 'task' | 'run' | 'delivery' | 'progress') => {
       setDetailPanel(key);
       setTaskFilterId(null);
       setHighlightTaskKey(null);
@@ -272,6 +272,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
       <OverviewDrawer
         panelKey={detailPanel}
         onClose={handleDetailClose}
+        overview={overview}
         plan={executionPlan}
         tasks={codingTasks}
         runs={runs}
