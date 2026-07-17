@@ -134,7 +134,8 @@ public class CodingTaskExecutionService {
         runNumberService.assign(run);
         run = runDao.save(run);
 
-        String fullPrompt = buildExecutionPrompt(task, prompt);
+        String fullPrompt = buildExecutionPrompt(task, prompt)
+                + codingTaskProgressIntegrator.buildProgressBrief(run.getExecutionId());
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
@@ -217,7 +218,9 @@ public class CodingTaskExecutionService {
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
         final Run trackedRun = run;
-        AgentExecutionRequest request = buildRequest(run, task, buildExecutionPrompt(task, prompt), agentName);
+        String fullPrompt = buildExecutionPrompt(task, prompt)
+                + codingTaskProgressIntegrator.buildProgressBrief(run.getExecutionId());
+        AgentExecutionRequest request = buildRequest(run, task, fullPrompt, agentName);
         startAgentAfterCommit(agentName, request, trackedRun, task, baseline, true);
 
         CodingTaskDto dto = new CodingTaskDto();
@@ -375,6 +378,8 @@ public class CodingTaskExecutionService {
                     propagatedFailure, persistedRun.getTriggerSource(), now);
         }
         runDao.save(persistedRun);
+
+        codingTaskProgressIntegrator.appendTerminalObservation(persistedRun, success, summary, failureReason);
 
         if (schedulerManaged) {
             eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(

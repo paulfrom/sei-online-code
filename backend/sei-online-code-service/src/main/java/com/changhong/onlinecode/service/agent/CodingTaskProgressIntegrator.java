@@ -3,6 +3,9 @@ package com.changhong.onlinecode.service.agent;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskExecutionType;
+import com.changhong.onlinecode.dto.enums.ObservationSourceType;
+import com.changhong.onlinecode.dto.enums.RunObservationType;
+import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ExecutionProgressSnapshot;
 import com.changhong.onlinecode.dto.progress.StepSummary;
 import com.changhong.onlinecode.entity.Run;
@@ -81,6 +84,57 @@ public class CodingTaskProgressIntegrator {
         }
         return new ProgressPreflight(execution.getId(), executionKey, snapshot, shouldSkip,
                 invocation.invocationKey(), invocation.reusedRunId());
+    }
+
+    /**
+     * 构造进度简报，注入 Agent brief（ADR-001 §4：把 progress 与 nextActions 注入 brief）。
+     * 已完成步骤会被跳过，提示 Agent 勿重复实现。executionId 为空时返回空串（向后兼容）。
+     */
+    public String buildProgressBrief(String executionId) {
+        if (executionId == null) {
+            return "";
+        }
+        ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(executionId);
+        if (snapshot == null) {
+            return "";
+        }
+        StringBuilder brief = new StringBuilder("\n执行进度（已完成步骤会被跳过，请勿重复实现）：\n");
+        StepSummary summary = snapshot.getStepSummary();
+        if (summary != null) {
+            brief.append("- 必填步骤：").append(summary.getRequired())
+                    .append("，已验证：").append(summary.getVerified())
+                    .append("，已应用：").append(summary.getApplied())
+                    .append("，未知：").append(summary.getUnknown())
+                    .append("，阻塞：").append(summary.getBlocked()).append('\n');
+        }
+        if (snapshot.getNextAction() != null) {
+            brief.append("- 下一步：").append(snapshot.getNextAction()).append('\n');
+        }
+        return brief.toString();
+    }
+
+    /**
+     * Run 终态时追加 TERMINAL observation（ADR-001 §4：自动采集 terminal）。
+     * 仅记录，不判 Execution 完成（Execution 完成由 ProgressService markVerified 控制）。
+     * workspace 未绑定（executionId 为空）时跳过；写入失败不影响 Run 收口（best-effort）。
+     */
+    public void appendTerminalObservation(Run run, boolean success, String summary, String failureReason) {
+        if (run == null || run.getExecutionId() == null) {
+            return;
+        }
+        try {
+            progressService.appendObservation(
+                    run.getId(),
+                    RunObservationType.TERMINAL,
+                    success ? VerificationStatus.CONFIRMED : VerificationStatus.CONTRADICTED,
+                    ObservationSourceType.SYSTEM,
+                    null,
+                    success ? summary : failureReason,
+                    null, null, null, null,
+                    run.getExecutionId());
+        } catch (Exception e) {
+            log.warn("appendTerminalObservation failed runId={}", run.getId(), e);
+        }
     }
 
     /** Execution 全部必填步骤已 VERIFIED 且无当前步骤 → 跳过模型启动。空 Execution（无步骤）不跳过。 */
