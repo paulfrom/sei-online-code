@@ -23,6 +23,7 @@ import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.RunObservation;
 import com.changhong.onlinecode.entity.TaskExecution;
+import com.changhong.sei.core.dto.serach.PageResult;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -120,26 +121,36 @@ public class ExecutionProgressQueryService {
 
     /** 某步骤 checkpoint 分页（计划 §3 findCheckpoints）。page 为 1 基。 */
     @Transactional(readOnly = true)
-    public Page<ExecutionCheckpointDto> findCheckpoints(String stepId, int page, int rows) {
+    public PageResult<ExecutionCheckpointDto> findCheckpoints(String stepId, int page, int rows) {
         Pageable pageable = PageRequest.of(Math.max(page - 1, 0), rows);
-        return executionCheckpointDao.findByStepIdOrderBySequenceNoDesc(stepId, pageable).map(this::toCheckpointDto);
+        return toPageResult(executionCheckpointDao.findByStepIdOrderBySequenceNoDesc(stepId, pageable).map(this::toCheckpointDto));
     }
 
     /** 某 Execution effect 分页（计划 §3 findEffects），status 可空。 */
     @Transactional(readOnly = true)
-    public Page<ExecutionEffectDto> findEffects(String executionId, ExecutionEffectStatus status, int page, int rows) {
+    public PageResult<ExecutionEffectDto> findEffects(String executionId, ExecutionEffectStatus status, int page, int rows) {
         Pageable pageable = PageRequest.of(Math.max(page - 1, 0), rows);
         Page<ExecutionEffect> result = status == null
                 ? executionEffectDao.findByExecutionIdOrderByPreparedAtDesc(executionId, pageable)
                 : executionEffectDao.findByExecutionIdAndStatusOrderByPreparedAtDesc(executionId, status, pageable);
-        return result.map(this::toEffectDto);
+        return toPageResult(result.map(this::toEffectDto));
     }
 
     /** 某 Run observation 分页（计划 §3 runObservation/findByRun）。 */
     @Transactional(readOnly = true)
-    public Page<RunObservationDto> findObservationsByRun(String runId, int page, int rows) {
+    public PageResult<RunObservationDto> findObservationsByRun(String runId, int page, int rows) {
         Pageable pageable = PageRequest.of(Math.max(page - 1, 0), rows);
-        return runObservationDao.findByRunIdOrderByObservedAtDesc(runId, pageable).map(this::toObservationDto);
+        return toPageResult(runObservationDao.findByRunIdOrderByObservedAtDesc(runId, pageable).map(this::toObservationDto));
+    }
+
+    /** Spring {@link Page} → sei-core {@link PageResult}（page 0 基→1 基）。 */
+    private <T extends java.io.Serializable> PageResult<T> toPageResult(Page<T> springPage) {
+        PageResult<T> result = new PageResult<>();
+        result.setRows(springPage.getContent());
+        result.setRecords(springPage.getTotalElements());
+        result.setTotal(springPage.getTotalPages());
+        result.setPage(springPage.getNumber() + 1);
+        return result;
     }
 
     // ============================ helpers ============================

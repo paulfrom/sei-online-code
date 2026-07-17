@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.Date;
 
 /**
@@ -13,7 +14,9 @@ import java.util.Date;
  */
 @Data
 @Schema(description = "RunObservation 查询视图")
-public class RunObservationDto {
+public class RunObservationDto implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String observationId;
     private String runId;

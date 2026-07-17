@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dto.enums.ExecutionEffectType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.Date;
 
 /**
@@ -12,7 +13,9 @@ import java.util.Date;
  */
 @Data
 @Schema(description = "ExecutionEffect 查询视图")
-public class ExecutionEffectDto {
+public class ExecutionEffectDto implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String effectId;
     private String effectKey;

@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.enums.ExecutionCheckpointType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.Date;
 
 /**
@@ -11,7 +12,9 @@ import java.util.Date;
  */
 @Data
 @Schema(description = "ExecutionCheckpoint 查询视图")
-public class ExecutionCheckpointDto {
+public class ExecutionCheckpointDto implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String checkpointId;
     private String executionId;
