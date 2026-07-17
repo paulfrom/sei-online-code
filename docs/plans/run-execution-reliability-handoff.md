@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-001` |
-| 任务状态 | `IN_PROGRESS`（实施中，分批 checkpoint） |
-| 当前 owner | backend-agent / claude |
+| 当前计划任务 | `EXE-002`（EXE-001 已 DONE） |
+| 任务状态 | EXE-001 `DONE`；EXE-002 `READY`（依赖已满足） |
+| 当前 owner | 未分配（EXE-001 已交付） |
 | 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
-| 已观察 HEAD | `46a0657`（EXE-001 schema 契约 commit） |
+| 已观察 HEAD | `97153b9`（EXE-001 entity/dao/test commit） |
 | Requirement feature branch | `feature/run-execution-reliability` |
 | Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 step1 `46a0657`（enums+V7+V8） |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9` |
 | eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
-| 最近完成验证 | 门禁 1–5 解除；EXE-001 step1：11 enum + RunState 扩展 + V7/V8 已落 `46a0657`；api 模块 compileJava 通过；无 RunState 穷举 switch |
-| 下一动作 | EXE-001 step2：6 个新 entity + Run 实体扩展（匹配 V7/V8）；step3 DAO；step4 测试 |
+| 最近完成验证 | EXE-001 DONE：compileJava/compileTestJava 通过、RunStateTest 通过、git diff --check 干净；testcontainer 类 @Disabled 沿用既有约定 |
+| 下一动作 | claim EXE-002（ProgressService 核心原子协议） |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -212,8 +212,8 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 
 | 任务 | 状态 | Owner | Base/Checkpoint | Next action |
 |---|---|---|---|---|
-| EXE-001 | `IN_PROGRESS` | backend-agent/claude | `46a0657` | step1 enums+schema 已落；下一步 entity→DAO→test |
-| EXE-002 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-001 |
+| EXE-001 | `DONE` | backend-agent/claude | `97153b9` | 数据层已交付（V7/V8+enum+entity+dao+测试）；并发/迁移 testcontainer 验收待 CI |
+| EXE-002 | `READY` | - | - | 依赖 EXE-001 已 DONE，可 claim |
 | EXE-003 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
 | EXE-004 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
 | EXE-005 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-004 |
@@ -336,6 +336,28 @@ APPLIED / UNKNOWN / BLOCKED / DONE
 - scope 决策：EXE-001 的 `docs/db/` 范围由权威 Flyway 迁移 `db/migration/V7、V8` 承载（项目 schema 实际由 db/migration 管理，见 application.yaml），不在 docs/db 重复，避免双写漂移。
 - 待验证风险：oc_run 基线 DDL 不可见；若其 `state` 列有 CHECK 约束限制旧枚举集合，需在基表可用时放宽以容纳 QUEUED/UNKNOWN（实体层无 CHECK，不影响编译）。
 - nextAction：EXE-001 step2 生成 6 个新 entity + 扩展 Run 实体（列与 V7/V8 严格一致），再 step3 DAO、step4 测试；各步 checkpoint。
+
+### OBS-006 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-001
+- state：`DONE`
+- baseHead：`4e291ce`
+- currentHead：`97153b9`
+- changedFiles（本次）：6 entity + Run 扩展 + 6 DAO + 2 测试（commit `97153b9`）；累计含 schema `46a0657`
+- verification：
+  - `./gradlew :sei-online-code-service:compileJava`、`compileTestJava` 通过。
+  - `./gradlew :sei-online-code-service:test --tests "...RunStateTest"` 通过（历史 4 态合法 + QUEUED/UNKNOWN 存在 + 共 6 值）。
+  - `git diff --check`、`git diff --cached --check` 无空白错误。
+  - testcontainer 类（ProgressLedgerDaoTest）@Disabled，沿用 FeatureDesignDaoTest 约定。
+- evidence：EXE-001 commits = `46a0657`（enums+V7+V8）+ `97153b9`（entity+dao+test）。
+- 已交付：6 表（V7）+ oc_run 扩展（V8）+ 11 enum + RunState 扩展（QUEUED/UNKNOWN）+ 6 entity + Run 扩展 + 6 DAO + 单元/DAO 测试；迁移含前向说明与回滚注释。
+- 待验证/已知缺口（不掩盖）：
+  - testcontainer 并发回读与 schema validate 须在 CI 验证（本地 @Disabled：Docker 不可用 + 本分支仅 V1，基表 oc_run 等在 feat/compensation-logging）。
+  - 完整并发 insert-on-conflict 事务编排属 EXE-002 ProgressService。
+  - oc_run 基线若存在 state CHECK 约束需在 CI 放宽以容纳 QUEUED/UNKNOWN（实体层无 CHECK，不影响编译）。
+- nextAction：EXE-001 DONE；EXE-002（ProgressService 核心原子协议）BLOCKED_DEPENDENCY 解除 → READY，可 claim。
 
 ### 后续备注模板
 
