@@ -103,6 +103,7 @@ public class AgentExecutionService {
                     prompt, agent.getMcpConfig());
             CliRunResult result = future.get(timeoutSeconds(request), TimeUnit.SECONDS);
             log.info("cli run result {}", result);
+            persistSessionIds(run, result);
             if (result != null && result.isProcessSucceeded()) {
                 return new AgentExecutionResult(run.getId(), result.getOutput(), true, null);
             }
@@ -116,6 +117,31 @@ public class AgentExecutionService {
         } finally {
             activeAgentRuns.remove(slotKey, run.getId());
         }
+    }
+
+    /** 把 CLI runner 返回的 session 线程/轮次写入 Run（ADR-001 §4：保存 threadId/turnId 以支持恢复）。 */
+    private void persistSessionIds(Run run, CliRunResult result) {
+        if (result == null || run == null || run.getId() == null) {
+            return;
+        }
+        String threadId = result.getThreadId();
+        String turnId = result.getTurnId();
+        boolean hasThread = threadId != null && !threadId.isBlank();
+        boolean hasTurn = turnId != null && !turnId.isBlank();
+        if (!hasThread && !hasTurn) {
+            return;
+        }
+        Run persisted = runDao.findOne(run.getId());
+        if (persisted == null) {
+            return;
+        }
+        if (hasThread) {
+            persisted.setThreadId(threadId);
+        }
+        if (hasTurn) {
+            persisted.setTurnId(turnId);
+        }
+        runDao.save(persisted);
     }
 
     public void settleRun(String runId, RunState state, String reason) {

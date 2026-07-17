@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dao.ExecutionCheckpointDao;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskExecutionType;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
@@ -9,6 +10,7 @@ import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ExecutionProgressSnapshot;
 import com.changhong.onlinecode.dto.progress.StepSummary;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.onlinecode.entity.TaskExecution;
 import com.changhong.onlinecode.service.progress.ProgressService;
 import lombok.extern.slf4j.Slf4j;
@@ -42,10 +44,22 @@ public class CodingTaskProgressIntegrator {
 
     private final ProgressService progressService;
     private final RunDao runDao;
+    private final ExecutionCheckpointDao executionCheckpointDao;
 
-    public CodingTaskProgressIntegrator(ProgressService progressService, RunDao runDao) {
+    public CodingTaskProgressIntegrator(ProgressService progressService, RunDao runDao,
+                                        ExecutionCheckpointDao executionCheckpointDao) {
         this.progressService = progressService;
         this.runDao = runDao;
+        this.executionCheckpointDao = executionCheckpointDao;
+    }
+
+    /** 解析 Execution 最近 checkpoint 作为本次 Run 的恢复点（ADR-001 §4 resumeFromCheckpoint）。 */
+    public String resolveResumeCheckpoint(String executionId) {
+        if (executionId == null) {
+            return null;
+        }
+        return executionCheckpointDao.findTopByExecutionIdOrderBySequenceNoDesc(executionId)
+                .map(ExecutionCheckpoint::getId).orElse(null);
     }
 
     /**

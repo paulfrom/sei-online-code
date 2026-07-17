@@ -23,4 +23,10 @@ public class CliRunResult {
 
     /** 失败原因；processSucceeded = false 时有值。 */
     private String failureReason;
+
+    /** Codex/session thread ID（Runner 从会话解析；支持跨 Run 恢复）。可空。 */
+    private String threadId;
+
+    /** 当前/最后 turn ID（Runner 从会话解析）。可空。 */
+    private String turnId;
 }

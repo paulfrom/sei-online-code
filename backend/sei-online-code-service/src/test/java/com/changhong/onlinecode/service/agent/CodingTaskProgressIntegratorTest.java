@@ -40,6 +40,9 @@ class CodingTaskProgressIntegratorTest {
     @Mock
     private RunDao runDao;
 
+    @Mock
+    private com.changhong.onlinecode.dao.ExecutionCheckpointDao executionCheckpointDao;
+
     @InjectMocks
     private CodingTaskProgressIntegrator integrator;
 

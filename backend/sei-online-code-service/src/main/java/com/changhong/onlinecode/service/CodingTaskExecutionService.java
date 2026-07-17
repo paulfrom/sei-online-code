@@ -317,6 +317,7 @@ public class CodingTaskExecutionService {
         run.setInvocationKey(preflight.invocationKey());
         if (preflight.executionId() != null) {
             run.setExecutionId(preflight.executionId());
+            run.setResumeFromCheckpointId(codingTaskProgressIntegrator.resolveResumeCheckpoint(preflight.executionId()));
         }
     }
 
