@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-002`（EXE-001 已 DONE） |
-| 任务状态 | EXE-001 `DONE`；EXE-002 `READY`（依赖已满足） |
-| 当前 owner | 未分配（EXE-001 已交付） |
+| 当前计划任务 | `EXE-003` |
+| 任务状态 | EXE-002 `DONE`；EXE-003 `IN_PROGRESS`（已 claim） |
+| 当前 owner | backend-agent / claude |
 | 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
-| 已观察 HEAD | `97153b9`（EXE-001 entity/dao/test commit） |
+| 已观察 HEAD | `e233612`（EXE-002 impl commit；EXE-003 base） |
 | Requirement feature branch | `feature/run-execution-reliability` |
 | Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612` |
 | eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
-| 最近完成验证 | EXE-001 DONE：compileJava/compileTestJava 通过、RunStateTest 通过、git diff --check 干净；testcontainer 类 @Disabled 沿用既有约定 |
-| 下一动作 | claim EXE-002（ProgressService 核心原子协议） |
+| 最近完成验证 | EXE-002 DONE：compileJava/compileTestJava 通过；8 单测已写未跑（用户暂停 test）；JPQL 待 CI |
+| 下一动作 | EXE-003：冻结 HTTP/WS DTO 契约 + 聚合查询 + 进度事件 |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -213,9 +213,9 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | 任务 | 状态 | Owner | Base/Checkpoint | Next action |
 |---|---|---|---|---|
 | EXE-001 | `DONE` | backend-agent/claude | `97153b9` | 数据层已交付（V7/V8+enum+entity+dao+测试）；并发/迁移 testcontainer 验收待 CI |
-| EXE-002 | `READY` | - | - | 依赖 EXE-001 已 DONE，可 claim |
-| EXE-003 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
-| EXE-004 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002 |
+| EXE-002 | `DONE` | backend-agent/claude | `e233612` | 核心原子协议已交付；测试已写未跑、JPQL 待 CI |
+| EXE-003 | `IN_PROGRESS` | backend-agent/claude | base `e233612` | 已 claim；冻结 DTO 契约 + 聚合查询 + 进度事件 |
+| EXE-004 | `READY` | - | - | 依赖 EXE-002 已 DONE，可 claim |
 | EXE-005 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-004 |
 | EXE-006 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-005 |
 | EXE-007 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-004、EXE-005、EXE-006 |
@@ -358,6 +358,49 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - 完整并发 insert-on-conflict 事务编排属 EXE-002 ProgressService。
   - oc_run 基线若存在 state CHECK 约束需在 CI 放宽以容纳 QUEUED/UNKNOWN（实体层无 CHECK，不影响编译）。
 - nextAction：EXE-001 DONE；EXE-002（ProgressService 核心原子协议）BLOCKED_DEPENDENCY 解除 → READY，可 claim。
+
+### OBS-007 — CLAIM
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-002
+- state：`IN_PROGRESS`
+- baseHead：`cc0d9e1`
+- currentHead：`cc0d9e1`
+- owner：backend-agent / claude
+- claim依据：EXE-001 `DONE`（§8）；无其他 `IN_PROGRESS`；实际 HEAD `cc0d9e1`（校正 §3 此前记录 `97153b9`，差一个 ledger commit）。
+- nextAction：按 EXE-002 scope 分批实施 ProgressService 核心原子协议——find-or-create Execution / Requirement lease / step declare·claim·heartbeat / checkpoint / markApplied / markVerified（不可回退）/ observation / reconcile / snapshotVersion 递增 / snapshot 生成；写命令校验 runId·claimToken·fencingToken·loop·planVersion。每批 compile + 单测后 checkpoint。
+
+### OBS-008 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-002
+- state：`DONE`
+- baseHead：`cc0d9e1`
+- currentHead：`e233612`
+- changedFiles：6 progress DTO + ProgressService + 2 DAO CAS 扩展 + ProgressServiceTest（commit `e233612`）
+- verification：
+  - `compileJava`、`compileTestJava` 通过。
+  - `git diff --check` 干净。
+  - 8 例单测已写（find-or-create×3 / claim×2 / markVerified×3 / checkpoint 回滚×1），**未运行**（用户暂停 test 运行）。
+  - JPQL `@Query` 仅运行期校验，待 CI/testcontainers 跑绿。
+- evidence：commit `e233612`。
+- 已交付：find-or-create / lease CAS / claim·heartbeat·markApplied·markVerified(no-downgrade)·markUnknown / 原子 checkpoint / observation / snapshot 生成；写命令经 CAS WHERE 隐式校验 owner/claim/fencing，失败 STALE_OWNER；可观测写同事务递增 snapshotVersion。
+- 待验证/已知缺口（不掩盖）：测试未本地运行；JPQL 运行期待 CI；完整补偿编排属 EXE-007，HTTP overview DTO/事件属 EXE-003。
+- nextAction：EXE-002 DONE；EXE-003 与 EXE-004 依赖解除 → READY。
+
+### OBS-009 — CLAIM
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-003
+- state：`IN_PROGRESS`
+- baseHead：`e233612`
+- currentHead：`e233612`
+- owner：backend-agent / claude
+- claim依据：EXE-002 `DONE`；无其他 `IN_PROGRESS`；HEAD `e233612`。
+- nextAction：冻结第 3 节 HTTP/WS DTO 契约（overview + step/checkpoint/effect/observation 查询 + appendManual）；实现 overview 聚合与分页查询；受控人工 observation；after-commit 进度事件；DTO 映射前证据授权/脱敏。
 
 ### 后续备注模板
 
