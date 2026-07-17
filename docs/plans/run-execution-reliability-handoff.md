@@ -44,14 +44,14 @@
 | 任务状态 | EXE-008 `IN_PROGRESS`（batch1 checkpoint `0576e9b`） |
 | 当前 owner | frontend-agent / claude |
 | 已观察分支 | `main`（实际工作分支；远程 `feature/run-execution-reliability-exe005` 仍在但落后） |
-| 已观察 HEAD | `4f4cec8`（EXE-008 batch2 checkpoint） |
+| 已观察 HEAD | `c687ff1`（EXE-008 batch3 checkpoint） |
 | Requirement feature branch | 实际 `main`（与 ADR“唯一 feature branch”约定偏离；历史 EXE-001~007 均落在 main，见 OBS-016） |
 | Requirement worktree | 当前检出 `D:\project\monorepo\sei-online-code`（Windows / `lin`） |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108`；其后 main 另有 `ff64c91`（reconciler，EXE-007 scope）+`014efbf`（progress-ledger 开关，EXE-009 scope）—git 实存但 ledger 未经验证登记，见 OBS-016；EXE-008 batch1 `0576e9b`；EXE-008 batch2 `4f4cec8` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108`；其后 main 另有 `ff64c91`（reconciler，EXE-007 scope）+`014efbf`（progress-ledger 开关，EXE-009 scope）—git 实存但 ledger 未经验证登记，见 OBS-016；EXE-008 batch1 `0576e9b`；EXE-008 batch2 `4f4cec8`；EXE-008 batch3 `c687ff1` |
 | eadp-backend skill | 不可用（本机 `~/.claude/skills/` 无；与 OBS-002 声称冲突，见 OBS-016） |
 | suid skill | 不可用（本机同上；经用户授权按 frontend/CLAUDE.md 内联规范 + 既有实现推进，见 OBS-016） |
-| 最近完成验证 | EXE-008 batch2：tsc（index.tsx 零错误；项目全量 tsc 有既有噪音，非本次引入）+ eslint（4 文件干净）+ git diff --check 干净 |
-| 下一动作 | EXE-008 batch3：Run 列表扩展（execution/attempt/恢复点/最新 observation/验证状态）→ batch4 RunLogDrawer 三视图（执行记录/原始日志/证据）+ 证据分页 |
+| 最近完成验证 | EXE-008 batch3：eslint（2 文件 clean，含对既有 formatTokens 的 eqeqeq 合规修复）+ git diff --check 干净 |
+| 下一动作 | EXE-008 batch4：RunLogDrawer 三视图（执行记录/原始日志/证据）+ 证据分页（findEffects/runObservation findByRun） |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -220,7 +220,7 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-005 | `DONE` | backend-agent/claude | `2972873` | WorkspaceLeaseService+Git方法+DAO CAS+接线+GC安全+17测试通过 |
 | EXE-006 | `DONE` | backend-agent/claude | `c2a8108` | EffectService+DAO CAS+delivery 改造+fetch-merge+15测试通过 |
 | EXE-007 | `READY` | - | - | 依赖 EXE-004+005+006 已 DONE，可 claim |
-| EXE-008 | `IN_PROGRESS` | frontend-agent/claude | `4f4cec8` | batch1 DONE（service+socket+MR 状态分离+overview 接入，`0576e9b`）+ batch2 DONE（ExecutionProgressTab 执行进度页签：步骤列表+状态视觉区分+checkpoint 分页，`4f4cec8`）；Run 列表扩展 / RunLogDrawer 三视图 / 证据分页待 batch3+ |
+| EXE-008 | `IN_PROGRESS` | frontend-agent/claude | `c687ff1` | batch1（`0576e9b`）+ batch2（`4f4cec8`）+ batch3（`c687ff1`：Run 列表 execution/owner/attempt/最新 observation）DONE；RunLogDrawer 三视图（执行记录/原始日志/证据）+ 证据分页待 batch4 |
 | EXE-009 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003/004/006/007 |
 | ACC-001 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
 | ACC-002 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
@@ -567,6 +567,24 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - Run 列表扩展、RunLogDrawer 三视图（执行记录/原始日志/证据）、证据分页 → batch3/4。
   - overview 工作区/steps 字段在 backend 是否填充未端到端验证（OBS-010 曾记 null）；前端全程 null 容错。
 - nextAction：EXE-008 batch3 扩展 Run 列表（execution/attempt/恢复点/最新 observation/验证状态）。
+
+### OBS-018 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：frontend-agent / claude
+- task：EXE-008（batch 3/N：Run 列表扩展）
+- state：`IN_PROGRESS`（batch3 `DONE`，batch4 待续）
+- baseHead：`4f4cec8`
+- currentHead：`c687ff1`
+- changedFiles（batch3，commit `c687ff1`，2 文件 +45/-4）：
+  - 改 `RunTab.jsx`：新增 Execution 列（`overview.recentRuns` 按 runId 关联取 executionId；当 run.id === `overview.workspace.ownerRunId` 显示"当前 owner" Tag，使重复 Run 可见共享 Execution 与当前 owner）；重启用 Attempt 列；新增"最新 observation"列（recentRuns.latestObservationSummary 截断）；drive-by 修复既有 `formatTokens` 的 `== null`→`=== null || === undefined`（eqeqeq 合规，语义不变）
+  - 改 `OverviewDrawer.jsx`：run 面板给 RunTab 传 overview
+- 范围说明（不掩盖）：scope 文本列"恢复点/验证状态"，但 `overview.recentRuns`(RecentRunDto) 与既有 RunDto 均不含 resume checkpoint id 与 per-run verification；这些属 effect/observation 详情，归 batch4（RunLogDrawer 三视图 + findEffects/findByRun 证据分页）。
+- verification：
+  - `eslint`（2 文件）：clean，exit 0。
+  - `git diff --check`：clean。
+  - 本批仅改 .jsx（tsc 不覆盖，符合 CLAUDE.md）。
+- nextAction：EXE-008 batch4 RunLogDrawer 三视图（执行记录 / 原始日志 / 证据）+ 证据分页。
 
 ### 后续备注模板
 
