@@ -549,7 +549,7 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_nonGitWorkspaceWithFileChange_marksDevelopmentSucceeded() throws Exception {
+    void executePlanTask_successSummaryContainingFailedWord_marksDevelopmentSucceeded() throws Exception {
         CodingTask task = new CodingTask();
         task.setId("task-file-change");
         task.setRequirementId("req-file-change");
@@ -584,13 +584,15 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated.txt"), "hello");
-                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(), "DONE", true, null));
+                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(),
+                            "Supported outcomes: ENROLLED/WAITLISTED/FAILED", true, null));
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");
 
         assertTrue(result.successful());
         assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
+        assertEquals("Supported outcomes: ENROLLED/WAITLISTED/FAILED", savedRun.get().getSummary());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
                 "task-file-change", true, null));
     }

@@ -11,6 +11,7 @@ import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TaskState;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
@@ -26,8 +27,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * 功能设计构建服务（Task 11）。
@@ -144,14 +145,9 @@ public class FeatureDesignBuildService {
         request.setTaskId(savedTask.getId());
         request.setPrompt(prompt);
         request.setTriggerSource(triggerSource);
-        CompletableFuture<String> executeFuture = agentExecutionService.executeAsync(devAgent.getName(), request)
-                .thenApply(AgentExecutionResult::output);
-        executeFuture.thenAccept(result -> {
-            // 解析结果，判断成功或失败
-            boolean success = parseSuccess(result);
-            updateBuildStatus(featureDesignId, success, triggerSource,
-                    success ? null : "构建执行返回失败结果");
-        });
+        agentExecutionService.executeAsync(devAgent.getName(), request)
+                .whenComplete((result, error) -> completeBuild(
+                        featureDesignId, savedRun.getId(), result, error, triggerSource));
 
         // 8. 返回结果
         FeatureDesignBuildResultDto resultDto = new FeatureDesignBuildResultDto();
@@ -280,11 +276,53 @@ public class FeatureDesignBuildService {
         return fallback == null ? "" : fallback;
     }
 
-    /**
-     * 解析执行结果是否成功（内部辅助）。
-     */
-    private boolean parseSuccess(String result) {
-        // TODO: 实际应解析 ClaudeRunner 返回的结果判断成功或失败
-        return result != null && !result.contains("FAILED");
+    private void completeBuild(String featureDesignId, String runId, AgentExecutionResult result,
+                               Throwable error, TriggerSource triggerSource) {
+        boolean success = error == null && result != null && result.succeeded();
+        String detail = success ? null : firstNonBlank(
+                rootMessage(error),
+                result == null ? null : result.failureReason(),
+                result == null ? null : result.output(),
+                "构建执行失败");
+        try {
+            updateBuildStatus(featureDesignId, success, triggerSource, detail);
+        } catch (RuntimeException persistenceError) {
+            success = false;
+            detail = firstNonBlank(rootMessage(persistenceError), detail, "构建状态更新失败");
+        }
+        settleRun(runId, result, success, detail);
+    }
+
+    private void settleRun(String runId, AgentExecutionResult result, boolean success, String failureReason) {
+        Run current = runService.findOne(runId);
+        if (current == null || current.getState() != RunState.RUNNING) {
+            return;
+        }
+        current.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
+        current.setTerminalReason(success ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
+        current.setFinishedDate(new Date());
+        current.setSummary(result == null ? null : result.output());
+        current.setFailureReason(success ? null : failureReason);
+        runService.save(current);
+    }
+
+    private static String rootMessage(Throwable error) {
+        if (error == null) {
+            return null;
+        }
+        Throwable current = error;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

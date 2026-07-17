@@ -5,6 +5,8 @@ import com.changhong.onlinecode.dao.PlanDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.PlanStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
@@ -136,8 +138,11 @@ class PlanAgentServiceTest {
         latest.setProjectId("p1");
         latest.setStatus(PlanStatus.GENERATING);
         latest.setGenerationToken("token-2");
+        Run run = new Run();
+        run.setState(RunState.RUNNING);
 
         when(planDao.findLatestByProjectId("p1")).thenReturn(initial, latest);
+        when(runDao.findOne("run-1")).thenReturn(run);
         when(projectLifecycleService.findById("p1")).thenReturn(new Project());
         String json = "{\"summary\":\"s\",\"techAssumptions\":[],\"features\":[],\"nonGoals\":[]}";
         when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
@@ -146,6 +151,30 @@ class PlanAgentServiceTest {
         service.spawnPlanning("p1", null, "token-1");
 
         verify(planDao, never()).save(any(Plan.class));
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.SUPERSEDED, run.getTerminalReason());
+    }
+
+    @Test
+    void spawnPlanning_agentFailureReasonContainingSupersedeText_staysFailed() {
+        Plan plan = new Plan();
+        plan.setProjectId("p1");
+        plan.setStatus(PlanStatus.GENERATING);
+        plan.setGenerationToken("token-1");
+        Run run = new Run();
+        run.setState(RunState.RUNNING);
+
+        when(planDao.findLatestByProjectId("p1")).thenReturn(plan);
+        when(projectLifecycleService.findById("p1")).thenReturn(new Project());
+        when(runDao.findOne("run-1")).thenReturn(run);
+        when(agentExecutionService.executeAsync(eq("planning-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(
+                        "run-1", "diagnostic", false, "网络失败：日志提到新一轮生成接管")));
+
+        service.spawnPlanning("p1", null, "token-1");
+
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.FAILED, run.getTerminalReason());
     }
 
     @Test

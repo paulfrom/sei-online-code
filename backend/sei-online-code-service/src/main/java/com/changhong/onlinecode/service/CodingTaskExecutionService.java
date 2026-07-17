@@ -246,9 +246,6 @@ public class CodingTaskExecutionService {
         if (result.output() == null) {
             return CompletionDecision.failed(summary, "执行返回空结果");
         }
-        if (result.output().contains("FAILED")) {
-            return CompletionDecision.failed(summary, summary);
-        }
         List<String> changedFiles = workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath());
         if (changedFiles.isEmpty()) {
             return CompletionDecision.failed(summary, "开发代理未在指定工作区产生代码或文档变更");

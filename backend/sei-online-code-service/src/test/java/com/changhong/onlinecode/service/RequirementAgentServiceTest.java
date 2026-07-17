@@ -4,6 +4,8 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
@@ -83,7 +85,10 @@ class RequirementAgentServiceTest {
         latest.setProjectId("p1");
         latest.setStatus(RequirementStatus.PRD_GENERATING);
         latest.setGenerationToken("token-2");
+        Run run = new Run();
+        run.setState(RunState.RUNNING);
         when(requirementDao.findOne("req1")).thenReturn(initial, latest);
+        when(runDao.findOne("run-1")).thenReturn(run);
         when(projectService.findOne("p1")).thenReturn(new Project());
         String content = """
                 # PRD
@@ -103,6 +108,31 @@ class RequirementAgentServiceTest {
         service.spawnPrd("req1", null, "token-1");
 
         verify(requirementDao, never()).save(any(Requirement.class));
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.SUPERSEDED, run.getTerminalReason());
+    }
+
+    @Test
+    void spawnPrd_agentFailureReasonContainingSupersedeText_staysFailed() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("p1");
+        requirement.setStatus(RequirementStatus.PRD_GENERATING);
+        requirement.setGenerationToken("token-1");
+        Run run = new Run();
+        run.setState(RunState.RUNNING);
+
+        when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
+        when(projectService.findOne("p1")).thenReturn(new Project());
+        when(runDao.findOne("run-1")).thenReturn(run);
+        when(agentExecutionService.executeAsync(eq("prd-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(
+                        "run-1", "diagnostic", false, "网络失败：日志提到新一轮生成接管")));
+
+        service.spawnPrd("req1", null, "token-1");
+
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.FAILED, run.getTerminalReason());
     }
 
     @Test
