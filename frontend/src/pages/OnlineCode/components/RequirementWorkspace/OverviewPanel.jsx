@@ -133,6 +133,17 @@ const DELIVERY_STATUS_META = {
 };
 
 /**
+ * MR merge status (overview.mrStatus) — intentionally distinct from automation
+ * status: "automation COMPLETED + MR OPEN" must read as "MR 待合入", never as
+ * merged. Unknown enum values fall through to the raw value (no silent mapping).
+ */
+const MR_STATUS_META = {
+  OPEN: { color: 'blue', label: 'MR 待合入' },
+  MERGED: { color: 'green', label: 'MR 已合入' },
+  CLOSED: { color: 'default', label: 'MR 已关闭' },
+};
+
+/**
  * Tiny progress phrase: completed / total, derived from task statuses.
  * "completed" counts terminal-success only; others stay in the remaining bucket.
  */
@@ -148,6 +159,8 @@ const planProgress = (tasks) => {
  *   plan: any,
  *   tasks: any[],
  *   runs: any[],
+ *   overview?: any,
+ *   stale?: boolean,
  *   delivery: any,
  *   activeLoopId?: string | null,
  *   planVersion?: number | null,
@@ -162,6 +175,8 @@ const OverviewPanel = ({
   plan,
   tasks,
   runs,
+  overview,
+  stale = false,
   delivery,
   activeLoopId,
   planVersion,
@@ -199,6 +214,12 @@ const OverviewPanel = ({
 
   const deliveryMeta = DELIVERY_STATUS_META[delivery?.status] || DELIVERY_STATUS_META.NONE;
 
+  // MR merge status from the authoritative overview (null when not yet delivered).
+  const mrStatus = overview?.mrStatus;
+  const mrMeta = mrStatus
+    ? MR_STATUS_META[mrStatus] || { color: 'default', label: mrStatus }
+    : null;
+
   const open = (key) => () => onOpenPanel && onOpenPanel(key);
 
   // Compact status-distribution Tags for the task card (only non-zero).
@@ -220,11 +241,22 @@ const OverviewPanel = ({
 
   return (
     <div className={styles.panel}>
-      {/* Automation status — display only */}
+      {/* Automation status — display only. MR merge status is shown
+          separately so "自动化已完成 + MR OPEN" never reads as merged. */}
       <div className={styles.statusCard}>
         <div className={styles.statusMain}>
           <span>自动化：</span>
           <Tag color={automationMeta.color}>{automationMeta.label}</Tag>
+          {mrMeta && (
+            <span>
+              MR：<Tag color={mrMeta.color}>{mrMeta.label}</Tag>
+            </span>
+          )}
+          {stale && (
+            <Tooltip title="实时通道断开或快照已过期，正在通过轮询恢复">
+              <Tag color="warning">数据可能过期</Tag>
+            </Tooltip>
+          )}
         </div>
         <div className={styles.statusSub}>
           <span>Loop：{shorten(activeLoopId)}</span>

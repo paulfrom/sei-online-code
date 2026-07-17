@@ -34,6 +34,9 @@ import {
 } from '@/services/codingTask';
 // @ts-ignore JS service module has no declaration file
 import { findRunsByRequirement } from '@/services/run';
+// @ts-ignore JS service module has no declaration file
+import { findOverview } from '@/services/executionProgress';
+import { subscribeRequirementProgress } from '@/utils/requirement-progress-socket';
 
 const FAST_STATUSES = new Set([
   'PLANNING',
@@ -104,6 +107,10 @@ export function useRequirementWorkspace(requirementId) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sendingComment, setSendingComment] = useState(false);
+  // Authoritative aggregated progress snapshot (ExecutionProgressApi.findOverview).
+  const [overview, setOverview] = useState(null);
+  // True when the snapshot is past staleAfter or the progress WS is down.
+  const [stale, setStale] = useState(false);
 
   // Guards re-entrancy of refresh so overlapping polls can't fight each other.
   const inFlightRef = useRef(false);
@@ -111,6 +118,11 @@ export function useRequirementWorkspace(requirementId) {
   const cancelledRef = useRef(false);
   const timerRef = useRef(null);
   const commentInFlightRef = useRef(false);
+  // Last overview snapshotVersion applied to the UI. Gates WS-triggered
+  // refetch so a stale / duplicate / late event cannot roll the view back.
+  const appliedSnapshotVersionRef = useRef(null);
+  // Progress WebSocket subscription handle.
+  const progressSocketRef = useRef(null);
 
   const safeSet = useCallback((setter, value) => {
     if (cancelledRef.current) return;
@@ -152,6 +164,20 @@ export function useRequirementWorkspace(requirementId) {
       const runRes = await findRunsByRequirement(requirementId);
       const requirementRuns = runRes && runRes.success && runRes.data ? runRes.data : [];
       safeSet(setRuns, requirementRuns);
+
+      // Authoritative progress overview. Read-only here; the UI must not
+      // infer status from summaries/logs elsewhere.
+      const ovRes = await findOverview(requirementId);
+      const ov = ovRes && ovRes.success ? ovRes.data : null;
+      safeSet(setOverview, ov);
+      if (ov) {
+        if (typeof ov.snapshotVersion === 'number') {
+          appliedSnapshotVersionRef.current = ov.snapshotVersion;
+        }
+        const staleAfterMs = ov.staleAfter ? Date.parse(ov.staleAfter) : NaN;
+        // Clear stale on a fresh snapshot unless it is already past staleAfter.
+        safeSet(setStale, Number.isNaN(staleAfterMs) ? false : Date.now() > staleAfterMs);
+      }
 
       safeSet(setError, null);
       safeSet(setLoading, false);
@@ -221,6 +247,47 @@ export function useRequirementWorkspace(requirementId) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirement?.automationStatus, refresh]);
+
+  // Version-gated refresh: only refetch when an event carries a higher
+  // snapshotVersion than what the UI has already applied. Events without a
+  // version are treated as a conservative refresh signal. refresh() coalesces
+  // overlapping calls via inFlightRef, so the polling loop and WS cannot stampede.
+  const maybeRefreshOnVersion = useCallback(
+    (version) => {
+      if (cancelledRef.current) return;
+      const applied = appliedSnapshotVersionRef.current;
+      // Refresh when the event carries no usable version (conservative), or
+      // when nothing has been applied yet, or when the event is strictly newer.
+      const shouldRefresh =
+        typeof version !== 'number' || applied === null || version > applied;
+      if (shouldRefresh) {
+        refresh();
+      }
+    },
+    [refresh],
+  );
+
+  // Progress WebSocket — notification only; authoritative state comes from the
+  // overview refetch it triggers. On disconnect we mark stale and rely on the
+  // polling loop above to converge. Reconnect is handled inside the socket util.
+  useEffect(() => {
+    if (cancelledRef.current) return;
+    if (!requirementId) return undefined;
+    const socket = subscribeRequirementProgress({
+      requirementId,
+      onEvent: (evt) => {
+        maybeRefreshOnVersion(evt && evt.snapshotVersion);
+      },
+      onDisconnect: () => {
+        safeSet(setStale, true);
+      },
+    });
+    progressSocketRef.current = socket;
+    return () => {
+      socket.close();
+      progressSocketRef.current = null;
+    };
+  }, [requirementId, maybeRefreshOnVersion, safeSet]);
 
   const activeLoopId = useMemo(
     () => (requirement ? requirement.activeLoopId : null),
@@ -314,6 +381,8 @@ export function useRequirementWorkspace(requirementId) {
     executionPlan,
     codingTasks,
     runs,
+    overview,
+    stale,
     delivery,
     loading,
     error,

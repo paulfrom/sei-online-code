@@ -83,6 +83,8 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     executionPlan,
     codingTasks,
     runs,
+    overview,
+    stale,
     delivery,
     loading,
     error,
@@ -218,6 +220,8 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
       plan={executionPlan}
       tasks={codingTasks}
       runs={runs}
+      overview={overview}
+      stale={stale}
       delivery={delivery}
       activeLoopId={activeLoopId}
       planVersion={planVersion}
