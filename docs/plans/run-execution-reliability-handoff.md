@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-004` |
-| 任务状态 | EXE-003 `DONE`；EXE-004 `IN_PROGRESS`（已 claim） |
-| 当前 owner | backend-agent / claude |
+| 当前计划任务 | `EXE-005`（EXE-004 已 DONE；建议先 CI） |
+| 任务状态 | EXE-004 `DONE`；EXE-005 `READY` |
+| 当前 owner | 未分配（EXE-004 已交付） |
 | 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
-| 已观察 HEAD | `7db9593`（EXE-003 进度事件 commit；EXE-004 base） |
+| 已观察 HEAD | `122f9a2`（EXE-004 Part C commit） |
 | Requirement feature branch | `feature/run-execution-reliability` |
 | Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2` |
 | eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
-| 最近完成验证 | EXE-003 DONE：compileJava/compileTestJava 通过；缺口（鉴权/WS/automation-mrStatus/测试）延后 |
-| 下一动作 | EXE-004：Runner preflight + Run 绑定 + 自动 checkpoint |
+| 最近完成验证 | EXE-004 DONE：compileTestJava 通过；缺口（Runner threadId/turnId 填充、checkpoint-fencing EXE-005、幂等 EXE-009、测试）延后 |
+| 下一动作 | 推送 CI 验证运行期风险 → claim EXE-005 |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -215,8 +215,8 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-001 | `DONE` | backend-agent/claude | `97153b9` | 数据层已交付（V7/V8+enum+entity+dao+测试）；并发/迁移 testcontainer 验收待 CI |
 | EXE-002 | `DONE` | backend-agent/claude | `e233612` | 核心原子协议已交付；测试已写未跑、JPQL 待 CI |
 | EXE-003 | `DONE` | backend-agent/claude | `7db9593` | 查询/事件/API 已交付；鉴权/WS/automation-mrStatus/测试延后 |
-| EXE-004 | `IN_PROGRESS` | backend-agent/claude | base `7db9593` | 已 claim；Runner preflight + Run 绑定 + 自动 checkpoint |
-| EXE-005 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-004 |
+| EXE-004 | `DONE` | backend-agent/claude | `122f9a2` | 核心集成完成；Runner threadId/turnId 填充 + 测试延后 |
+| EXE-005 | `READY` | - | - | 依赖 EXE-002+EXE-004 已 DONE，可 claim |
 | EXE-006 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-005 |
 | EXE-007 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-004、EXE-005、EXE-006 |
 | EXE-008 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003 契约冻结 |
@@ -427,6 +427,24 @@ APPLIED / UNKNOWN / BLOCKED / DONE
 - owner：backend-agent / claude
 - claim依据：EXE-002 `DONE`；无其他 `IN_PROGRESS`（EXE-003 刚 DONE）；HEAD `7db9593`。
 - nextAction：调度入口用 invocation key 创建/复用 Run 并绑定稳定 Execution；Agent 启动前强制读 progress snapshot（已完成 Execution 不跳过模型启动）；注入 progress.json/nextActions 到 brief；自动采集 accepted/工具/文件/Git HEAD/测试/terminal/heartbeat；保存 threadId/turnId/resumeFromCheckpointId；Run 终态只更新 Run/observation 不判 Execution 完成。需先读 CodingTaskExecutionService/AgentExecution/agent 包理解既有 Runner 模型。
+
+### OBS-012 — CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-004
+- state：`DONE`（核心+管线完成；Runner 填充/跨任务缺口延后）
+- baseHead：`7db9593`
+- currentHead：`122f9a2`
+- changedFiles：CodingTaskProgressIntegrator(+test) + CodingTaskExecutionService 接线 + CliRunResult + AgentExecutionService（commits `441cf6a`/`6fb0bee`/`bd1827f`/`122f9a2`）
+- verification：compileJava/compileTestJava 通过；git diff --check 干净。运行期（JPQL/Feign/热路径/事务）待 CI。
+- 已交付：调度绑定 Execution+invocationKey、preflight 跳过、brief 注入 progress/nextAction、terminal observation、threadId/turnId 落库管线、resumeFromCheckpoint 绑定、Run 终态不判 Execution。
+- 延后缺口（不掩盖）：
+  - (1) Runner 实现尚未填充 CliRunResult.threadId/turnId（管线已通，值暂 null）——CLI 协议层深探；
+  - (2) checkpoint git-HEAD 自动采集需 fencingToken（EXE-005）；
+  - (3) 完整 invocation 幂等重用受 hasActiveRun 阻塞（EXE-009）；
+  - (4) 测试未本地运行（无 Docker）。
+- nextAction：EXE-004 DONE；EXE-005（EXE-002+EXE-004 已 DONE）→ READY。建议先推送 CI 验证堆积的运行期风险。
 
 ### 后续备注模板
 
