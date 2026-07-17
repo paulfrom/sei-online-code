@@ -6,12 +6,12 @@
   "runtime_state": {
     "plan_version": 1,
     "implementation_started": true,
-    "next_task": "EXE-006",
-    "next_task_status": "READY",
-    "repository_branch_observed": "feature/run-execution-reliability-exe005",
-    "repository_head_observed": "2972873",
-    "requirement_branch": "feature/run-execution-reliability-exe005",
-    "requirement_worktree": "/home/paul/project/sei-online-code",
+    "next_task": "EXE-008",
+    "next_task_status": "IN_PROGRESS",
+    "repository_branch_observed": "main",
+    "repository_head_observed": "0576e9b",
+    "requirement_branch": "main",
+    "requirement_worktree": "D:\\project\\monorepo\\sei-online-code",
     "blockers": []
   },
   "source_documents": [

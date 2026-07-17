@@ -40,17 +40,18 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-007`（EXE-006 已 DONE；EXE-007 依赖 EXE-004+005+006 已满足） |
-| 任务状态 | EXE-006 `DONE`；EXE-007 `READY` |
-| 当前 owner | 未分配（EXE-006 已交付） |
-| 已观察分支 | `feature/run-execution-reliability-exe005` |
-| 已观察 HEAD | `c2a8108`（EXE-006 checkpoint commit） |
-| Requirement feature branch | `feature/run-execution-reliability-exe005` |
-| Requirement worktree | 当前检出 `/home/paul/project/sei-online-code` |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108` |
-| eadp-backend skill | 可用 |
-| 最近完成验证 | EXE-006 DONE：compileJava/compileTestJava 通过；15/15 EffectServiceTest 通过 |
-| 下一动作 | EXE-007（ProgressReconciler 与补偿器切换）READY |
+| 当前计划任务 | `EXE-008`（EXE-001~007 均已落在 `main`；EXE-008 基础批次 DONE，后续批次待续） |
+| 任务状态 | EXE-008 `IN_PROGRESS`（batch1 checkpoint `0576e9b`） |
+| 当前 owner | frontend-agent / claude |
+| 已观察分支 | `main`（实际工作分支；远程 `feature/run-execution-reliability-exe005` 仍在但落后） |
+| 已观察 HEAD | `0576e9b`（EXE-008 batch1 checkpoint） |
+| Requirement feature branch | 实际 `main`（与 ADR“唯一 feature branch”约定偏离；历史 EXE-001~007 均落在 main，见 OBS-016） |
+| Requirement worktree | 当前检出 `D:\project\monorepo\sei-online-code`（Windows / `lin`） |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873`；EXE-006 `c2a8108`；其后 main 另有 `ff64c91`（reconciler，EXE-007 scope）+`014efbf`（progress-ledger 开关，EXE-009 scope）—git 实存但 ledger 未经验证登记，见 OBS-016；EXE-008 batch1 `0576e9b` |
+| eadp-backend skill | 不可用（本机 `~/.claude/skills/` 无；与 OBS-002 声称冲突，见 OBS-016） |
+| suid skill | 不可用（本机同上；经用户授权按 frontend/CLAUDE.md 内联规范 + 既有实现推进，见 OBS-016） |
+| 最近完成验证 | EXE-008 batch1：tsc（改动 .ts/.tsx 零错误；项目全量 tsc 有既有噪音，非本次引入）+ eslint（6 文件干净）+ git diff --check 干净 |
+| 下一动作 | EXE-008 后续批次：执行进度页签（findSteps/findCheckpoints）→ Run 列表扩展（execution/attempt/恢复点/observation）→ RunLogDrawer 三视图（执行记录/原始日志/证据）→ 证据分页 |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -219,7 +220,7 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-005 | `DONE` | backend-agent/claude | `2972873` | WorkspaceLeaseService+Git方法+DAO CAS+接线+GC安全+17测试通过 |
 | EXE-006 | `DONE` | backend-agent/claude | `c2a8108` | EffectService+DAO CAS+delivery 改造+fetch-merge+15测试通过 |
 | EXE-007 | `READY` | - | - | 依赖 EXE-004+005+006 已 DONE，可 claim |
-| EXE-008 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003 契约冻结 |
+| EXE-008 | `IN_PROGRESS` | frontend-agent/claude | `0576e9b` | 基础批次 DONE：executionProgress/runObservation service + requirement-progress-socket.ts + OverviewPanel MR 状态分离 + findOverview 接入 hook（snapshotVersion 门控 refetch + stale）；执行进度页签 / Run 列表扩展 / RunLogDrawer 三视图 / 证据分页待后续批次 |
 | EXE-009 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003/004/006/007 |
 | ACC-001 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
 | ACC-002 | `BLOCKED_DEPENDENCY` | - | - | 按计划依赖运行 |
@@ -509,6 +510,39 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - (2) UNKNOWN effect reconcile 对外部查询的完整 handler 注册（仅提供 reconcile 框架+回调函数模式）
   - (3) MR source SHA 校验（需 EXE-005 workspace fencing + VERIFIED step checkpoint gitHead，当前 doDeliver 以当前 HEAD 为准）
 - nextAction：EXE-006 DONE；EXE-007（依赖 EXE-004+005+006 已满足）→ READY，可 claim。
+
+### OBS-016 — CLAIM + CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：frontend-agent / claude
+- task：EXE-008（batch 1/N：数据管线 + MR 状态分离）
+- state：`IN_PROGRESS`（batch1 `DONE`，后续批次待续）
+- baseHead：`014efbf`
+- currentHead：`0576e9b`
+- owner：frontend-agent / claude
+- claim依据：EXE-003 `DONE`（冻结 DTO 契约齐全）；§8 EXE-008 原 `BLOCKED_DEPENDENCY` 已解除；无其他 `IN_PROGRESS`。
+- 环境/门禁偏离（不掩盖）：
+  - skill 门禁：本机 `~/.claude/skills/` 无 `suid`、无 `eadp-backend`（与 OBS-002 在 Linux 机 `/home/paul/...` 上“已可用”的记录冲突）。经用户明确授权“参考当前实现，不用 suid skill”，按 frontend/CLAUDE.md 内联 SUID 规范 + 既有 RequirementWorkspace 实现（@ead/suid）推进；未读取 suid SKILL.md。
+  - 分支偏离：实际工作分支为 `main`（EXE-001~007 均落 main），非 ADR 约定的唯一 feature branch；远程 `feature/run-execution-reliability-exe005` 落后。checkpoint 沿既有约定提交到 `main`，未 push。
+  - ledger §3/§8 滞后于 git：main 上 `ff64c91`（EXE-007 reconciler）+ `014efbf`（EXE-009 progress-ledger 开关）已存在但 ledger 未登记；未经验证不擅自改其状态，留待对账。
+- changedFiles（batch1，commit `0576e9b`，6 文件 +291）：
+  - 新增 `frontend/src/services/executionProgress.js`（findOverview/findSteps/findCheckpoints/findEffects）
+  - 新增 `frontend/src/services/runObservation.js`（findByRun/appendManual）
+  - 新增 `frontend/src/utils/requirement-progress-socket.ts`（`/ws/requirement/{id}/progress`，JSON 帧，有界自动重连，disconnect/reconnect 回调）
+  - 改 `useRequirementWorkspace.js`：refresh 拉 findOverview；snapshotVersion 门控 refetch；stale（staleAfter 或 WS 断线）；暴露 overview/stale
+  - 改 `OverviewPanel.jsx`：状态卡片分离 MR 合并状态（OPEN=待合入 / MERGED=已合入 / CLOSED=已关闭，未知枚举原值透传）+ stale 提示
+  - 改 `index.tsx`：透传 overview/stale
+- 范围偏离（不掩盖）：scope 文本写“扩展 AutomationStatusBar”，但 `AutomationStatusBar.jsx` 是死代码（仅 `AUTOMATION_STATUS_META` 被 OverviewPanel 借用，状态卡由 OverviewPanel 内联渲染）。按“仅改绝对必要部分”未改死代码，MR 分离落在可见的 OverviewPanel 状态卡。
+- verification：
+  - `tsc --noEmit -p tsconfig.json --ignoreDeprecations 5.0`（项目 tsconfig 用 `ignoreDeprecations:"6.0"` 面向更新版 TS；include 仅 .ts/.tsx，.js/.jsx 不参与 tsc，符合 CLAUDE.md）：改动 .ts/.tsx（requirement-progress-socket.ts、index.tsx）零错误；项目全量有既有噪音（FlowStatusView/Login/Agents/List 等），非本次引入。
+  - `eslint`（6 个改动文件）：clean，exit 0。
+  - `git diff --check`：clean（仅 Windows autocrlf LF→CRLF 提示）。
+  - 未跑 umi build；前端无单测要求（frontend/CLAUDE.md“不需要提交测试文件”）；E2E 属 ACC-003 独立任务。
+- 已知缺口/待续（不掩盖）：
+  - 执行进度页签（步骤树 / owner / lease / checkpoint / nextAction）、Run 列表扩展、RunLogDrawer 三视图、证据分页 → 后续批次。
+  - overview.automationStatus/mrStatus 在 EXE-003 时曾为 null（OBS-010）；EXE-006 后是否填充未验证，前端按 null 容错（MR tag 不渲染、不伪造）。
+  - 未连 WS broker 转发（后端 listener 仅 log，OBS-010 延后项）；前端 socket 已就绪，后端推送上线即生效。
+- nextAction：EXE-008 batch2 实现执行进度页签（findSteps + findCheckpoints 分页 + 步骤状态视觉区分 APPLIED/VERIFIED/UNKNOWN/BLOCKED）。
 
 ### 后续备注模板
 
