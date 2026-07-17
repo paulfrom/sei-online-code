@@ -111,6 +111,7 @@ const OverviewDrawer = ({
         return (
           <RunTab
             runs={runs}
+            overview={overview}
             taskFilterId={taskFilterId}
             onClearTaskFilter={onClearTaskFilter}
             onBackToTask={onBackToTask}

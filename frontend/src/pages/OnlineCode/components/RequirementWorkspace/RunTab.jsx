@@ -38,7 +38,7 @@ const TERMINAL_REASON_LABELS = {
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '-');
 
 const formatTokens = (record) => {
-  if (!record || record.totalTokens == null) return '-';
+  if (!record || record.totalTokens === null || record.totalTokens === undefined) return '-';
   return `${record.totalTokens} tokens`;
 };
 
@@ -55,18 +55,43 @@ const computeDuration = (started, finished) => {
 };
 
 /**
- * @param {{ runs: any[], taskFilterId?: string|null, onClearTaskFilter?: () => void,
+ * @param {{ runs: any[], overview?: any, taskFilterId?: string|null, onClearTaskFilter?: () => void,
  *   onBackToTask?: () => void, onOpenLog: (run: any) => void }} props
  */
-const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog }) => {
+const RunTab = ({ runs, overview, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog }) => {
   const { styles } = useStyles();
 
   const filteredRuns = useMemo(() => {
     return taskFilterId ? runs.filter((r) => r.codingTaskId === taskFilterId) : runs;
   }, [runs, taskFilterId]);
 
+  // Progress-ledger enrichment from the authoritative overview: maps runId ->
+  // RecentRunDto so repeated Runs visibly share an Execution, show their latest
+  // observation, and mark the current workspace owner.
+  const recentRunMap = useMemo(() => {
+    const list = overview?.recentRuns;
+    if (!Array.isArray(list)) return new Map();
+    return new Map(list.map((r) => [r.runId, r]));
+  }, [overview?.recentRuns]);
+  const ownerRunId = overview?.workspace?.ownerRunId || null;
+
   const columns = [
     // { title: 'Run 序号', dataIndex: 'runNo', width: 100 },
+    {
+      title: 'Execution',
+      width: 170,
+      render: (_v, record) => {
+        const recent = recentRunMap.get(record.id);
+        const execId = (recent && recent.executionId) || record.executionId || null;
+        const isOwner = ownerRunId && record.id === ownerRunId;
+        return (
+          <Space size={4}>
+            <span>{execId ? String(execId).slice(0, 8) : '-'}</span>
+            {isOwner && <Tag color="processing">当前 owner</Tag>}
+          </Space>
+        );
+      },
+    },
     {
       title: 'Agent',
       dataIndex: 'agentName',
@@ -89,6 +114,12 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog
     //   render: (v) => v || '-',
     // },
     {
+      title: '尝试',
+      dataIndex: 'attemptNo',
+      width: 70,
+      render: (v) => v || '-',
+    },
+    {
       title: '状态',
       dataIndex: 'state',
       width: 110,
@@ -109,7 +140,16 @@ const RunTab = ({ runs, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog
       width: 110,
       render: (v) => TERMINAL_REASON_LABELS[v] || v || '-',
     },
-    
+    {
+      title: '最新 observation',
+      width: 200,
+      render: (_v, record) => {
+        const recent = recentRunMap.get(record.id);
+        const obs = recent && recent.latestObservationSummary;
+        return obs ? `${obs.slice(0, 24)}${obs.length > 24 ? '…' : ''}` : '-';
+      },
+    },
+
     {
       title: 'Token',
       width: 120,
