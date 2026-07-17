@@ -69,6 +69,9 @@ public class CompensationService {
     private final ProgressService progressService;
     private final TransactionTemplate transactionTemplate;
 
+    @Value("${onlinecode.progress-ledger.mode:OFF}")
+    private String progressLedgerMode = "OFF";
+
     @Value("${onlinecode.compensation.loop-stale-minutes:30}")
     private long loopStaleMinutes = 30;
 
@@ -424,7 +427,13 @@ public class CompensationService {
                 requirement.getId(), requirement.getActiveLoopId());
     }
 
+    /**
+     * EXE-009：AUTHORITATIVE 模式下不检查 RUNNING 状态（进度账本管理 lease/takeover）。
+     */
     private boolean hasActiveRun(Requirement requirement) {
+        if ("AUTHORITATIVE".equalsIgnoreCase(progressLedgerMode)) {
+            return false;
+        }
         return !runDao.findByRequirementIdAndState(requirement.getId(), RunState.RUNNING).isEmpty();
     }
 

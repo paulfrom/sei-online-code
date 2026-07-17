@@ -118,7 +118,8 @@ class CodingTaskExecutionServiceTest {
                 eventPublisher,
                 codingTaskProgressIntegrator,
                 workspaceLeaseService,
-                requirementWorkspaceDao
+                requirementWorkspaceDao,
+                "OFF"
         );
     }
 
