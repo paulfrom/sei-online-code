@@ -40,17 +40,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前计划任务 | `EXE-005`（EXE-004 已 DONE；建议先 CI） |
-| 任务状态 | EXE-004 `DONE`；EXE-005 `READY` |
-| 当前 owner | 未分配（EXE-004 已交付） |
-| 已观察分支 | `feature/run-execution-reliability`（自 `main` `6751eb1` 切出） |
-| 已观察 HEAD | `122f9a2`（EXE-004 Part C commit） |
-| Requirement feature branch | `feature/run-execution-reliability` |
-| Requirement worktree | 当前检出 `/home/paul/project/sei-online-code`；物理 worktree 绑定属 EXE-005 |
-| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2` |
-| eadp-backend skill | 可用（`~/.claude/skills/eadp-backend/SKILL.md` 已读取；`suid` 同样可用） |
-| 最近完成验证 | EXE-004 DONE：compileTestJava 通过；缺口（Runner threadId/turnId 填充、checkpoint-fencing EXE-005、幂等 EXE-009、测试）延后 |
-| 下一动作 | 推送 CI 验证运行期风险 → claim EXE-005 |
+| 当前计划任务 | `EXE-006`（EXE-005 已 DONE；EXE-006 依赖 EXE-002+EXE-005 已满足） |
+| 任务状态 | EXE-005 `DONE`；EXE-006 `READY` |
+| 当前 owner | 未分配（EXE-005 已交付） |
+| 已观察分支 | `feature/run-execution-reliability-exe005`（自 `main` `701eb82` 切出） |
+| 已观察 HEAD | `2972873`（EXE-005 checkpoint commit） |
+| Requirement feature branch | `feature/run-execution-reliability-exe005` |
+| Requirement worktree | 当前检出 `/home/paul/project/sei-online-code` |
+| 实施 checkpoint commit | 基线 `d49366f`+`4e291ce`；EXE-001 `46a0657`+`97153b9`+`cc0d9e1`；EXE-002 `e233612`；EXE-003 `99a7e4e`+`e301208`+`7db9593`；EXE-004 `441cf6a`+`6fb0bee`+`bd1827f`+`122f9a2`；EXE-005 `2972873` |
+| eadp-backend skill | 可用 |
+| 最近完成验证 | EXE-005 DONE：compileJava/compileTestJava 通过；17/17 WorkspaceLeaseServiceTest 通过 |
+| 下一动作 | EXE-006（Effect ledger 与 MR 交付改造）READY |
 
 该表是当前态镜像。任务状态改变时更新该表，同时在第 9 节追加一条不可覆盖的 Run 备注。
 
@@ -216,8 +216,8 @@ backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/
 | EXE-002 | `DONE` | backend-agent/claude | `e233612` | 核心原子协议已交付；测试已写未跑、JPQL 待 CI |
 | EXE-003 | `DONE` | backend-agent/claude | `7db9593` | 查询/事件/API 已交付；鉴权/WS/automation-mrStatus/测试延后 |
 | EXE-004 | `DONE` | backend-agent/claude | `122f9a2` | 核心集成完成；Runner threadId/turnId 填充 + 测试延后 |
-| EXE-005 | `READY` | - | - | 依赖 EXE-002+EXE-004 已 DONE，可 claim |
-| EXE-006 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-002、EXE-005 |
+| EXE-005 | `DONE` | backend-agent/claude | `2972873` | WorkspaceLeaseService+Git方法+DAO CAS+接线+GC安全+17测试通过 |
+| EXE-006 | `READY` | - | - | 依赖 EXE-002+EXE-005 已 DONE，可 claim |
 | EXE-007 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-004、EXE-005、EXE-006 |
 | EXE-008 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003 契约冻结 |
 | EXE-009 | `BLOCKED_DEPENDENCY` | - | - | 等待 EXE-003/004/006/007 |
@@ -445,6 +445,33 @@ APPLIED / UNKNOWN / BLOCKED / DONE
   - (3) 完整 invocation 幂等重用受 hasActiveRun 阻塞（EXE-009）；
   - (4) 测试未本地运行（无 Docker）。
 - nextAction：EXE-004 DONE；EXE-005（EXE-002+EXE-004 已 DONE）→ READY。建议先推送 CI 验证堆积的运行期风险。
+
+### OBS-013 — CLAIM + CHECKPOINT
+
+- observedAt：2026-07-17
+- source/agent：backend-agent / claude
+- task：EXE-005
+- state：`DONE`
+- baseHead：`701eb82`（main 最新，feature branch `feature/run-execution-reliability-exe005`）
+- currentHead：`2972873`
+- changedFiles：7 文件（WorkspaceManager +6 Git 方法/GC 安全 + RequirementWorkspaceDao +2 CAS + CodingTaskExecutionService 接线 + ProgressService bumpSnapshotForWorkspace + CodingTaskExecutionServiceTest 构造器更新；新增 WorkspaceLeaseService + WorkspaceLeaseServiceTest 17 测试）
+- verification：
+  - compileJava 通过 ✅
+  - compileTestJava 通过 ✅
+  - 17/17 WorkspaceLeaseServiceTest 通过（bindOrResolve×3 + acquireOwnership×2 + commitCheckpoint×3 + releaseOwnership×2 + isGcSafe×5 + reconcileAfterRestart×2）
+  - git diff --check 无空白错误 ✅
+- 已交付：
+  - WorkspaceLeaseService：bindOrResolveWorkspace / acquireOwnership / commitCheckpoint / reconcileAfterRestart / releaseOwnership / isGcSafe
+  - WorkspaceManager：getCurrentHead / getCurrentBranch / hasUncommittedChanges / commitAll / getGitDiff / getFileLock / resetSoftHead / ensureOnBranch
+  - RequirementWorkspaceDao：advanceCurrentHead（CAS）/ releaseLease
+  - CodingTaskExecutionService：bindProgress 中 workspace 不存在时自动创建（bindOrResolve）
+  - deleteRequirementWorkspace：GC 安全防护（ACTIVE/BLOCKED/DELIVERING 或 COMPLETED+retention 未到期禁止删除）
+- 延后缺口（不掩盖）：
+  - (1) 不实现跨进程 file lock（当前单 JVM ReentrantLock 足够）
+  - (2) 不终止旧 Agent 进程（进程管理属基础设施层，接管通过 fencing_token 递增实现）
+  - (3) Git commit 失败回滚为 best-effort（DB CAS 失败后 git reset HEAD~1；若 reset 也失败需人工对账）
+  - (4) push/MR 属 EXE-006，patch artifact 持久化属 EXE-007
+- nextAction：EXE-005 DONE；EXE-006（依赖 EXE-002+EXE-005 已满足）→ READY，可 claim。
 
 ### 后续备注模板
 

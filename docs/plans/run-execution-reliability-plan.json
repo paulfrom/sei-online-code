@@ -5,19 +5,14 @@
   "handoff_document": "docs/plans/run-execution-reliability-handoff.md",
   "runtime_state": {
     "plan_version": 1,
-    "implementation_started": false,
-    "next_task": "EXE-001",
-    "next_task_status": "BLOCKED_PRECHECK",
-    "repository_branch_observed": "main",
-    "repository_head_observed": "6751eb1",
-    "requirement_branch": null,
-    "requirement_worktree": null,
-    "blockers": [
-      "Required eadp-backend skill is not available",
-      "Required suid skill is not available",
-      "Eight existing uncommitted backend files must be classified and preserved",
-      "A dedicated Requirement branch/worktree has not been recorded"
-    ]
+    "implementation_started": true,
+    "next_task": "EXE-006",
+    "next_task_status": "READY",
+    "repository_branch_observed": "feature/run-execution-reliability-exe005",
+    "repository_head_observed": "2972873",
+    "requirement_branch": "feature/run-execution-reliability-exe005",
+    "requirement_worktree": "/home/paul/project/sei-online-code",
+    "blockers": []
   },
   "source_documents": [
     "docs/architecture/adr-001-run-execution-progress-ledger.md",
