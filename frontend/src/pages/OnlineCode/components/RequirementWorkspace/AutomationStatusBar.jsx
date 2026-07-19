@@ -35,7 +35,7 @@ const AUTOMATION_STATUS_META = {
   DELIVERING: { color: 'processing', label: '交付中' },
   INTERRUPTED: { color: 'warning', label: '已中断' },
   WAITING_HUMAN: { color: 'warning', label: '等待人工' },
-  COMPLETED: { color: 'green', label: '已完成' },
+  COMPLETED: { color: 'green', label: '自动化完成（MR 已提交）' },
   FAILED: { color: 'error', label: '失败' },
 };
 

@@ -1,7 +1,9 @@
 package com.changhong.onlinecode.agent;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -12,6 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * {@link CodexRunner} 单元测试。
  */
 class CodexRunnerTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void buildArgs_usesAppServerStdio() {
@@ -64,5 +69,15 @@ class CodexRunnerTest {
         CodexRunner runner = new CodexRunner();
 
         assertEquals("hello world", runner.stripFences("hello world"));
+    }
+
+    @Test
+    void resolveCodexHome_usesWorkspaceScopedRetainedDirectoryWhenRunIsKnown() throws Exception {
+        CodexRunner runner = new CodexRunner();
+
+        Path codexHome = runner.resolveCodexHome(tempDir.toString(), "run-1");
+
+        assertEquals(tempDir.resolve(".agent_context").resolve("codex-home").resolve("run-1"), codexHome);
+        assertFalse(runner.shouldDeleteCodexHome(tempDir.toString(), "run-1"));
     }
 }

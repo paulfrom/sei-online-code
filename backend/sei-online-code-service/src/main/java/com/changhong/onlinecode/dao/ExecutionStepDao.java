@@ -128,4 +128,34 @@ public interface ExecutionStepDao extends BaseEntityDao<ExecutionStep> {
                     @Param("claimToken") String claimToken,
                     @Param("unknown") ExecutionStepStatus unknown,
                     @Param("inProgress") ExecutionStepStatus inProgress);
+
+    /**
+     * 标记 BLOCKED：owner 匹配且当前处于可阻塞状态时写入阻塞证据。
+     */
+    @Modifying
+    @Query("UPDATE ExecutionStep s SET s.status = :blocked, s.evidenceData = :evidenceData, "
+            + "s.version = s.version + 1, s.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE s.id = :stepId AND s.ownerRunId = :runId AND s.claimToken = :claimToken "
+            + "AND s.status IN (:inProgress, :applied, :unknown)")
+    int markBlocked(@Param("stepId") String stepId,
+                    @Param("runId") String runId,
+                    @Param("claimToken") String claimToken,
+                    @Param("blocked") ExecutionStepStatus blocked,
+                    @Param("inProgress") ExecutionStepStatus inProgress,
+                    @Param("applied") ExecutionStepStatus applied,
+                    @Param("unknown") ExecutionStepStatus unknown,
+                    @Param("evidenceData") String evidenceData);
+
+    /**
+     * 自动恢复可重试 BLOCKED step：清理 owner/claim/lease 并回到 PENDING，等待新 Run claim。
+     */
+    @Modifying
+    @Query("UPDATE ExecutionStep s SET s.status = :pending, s.ownerRunId = NULL, s.claimToken = NULL, "
+            + "s.workspaceFencingToken = NULL, s.leaseExpiresAt = NULL, s.evidenceData = :evidenceData, "
+            + "s.version = s.version + 1, s.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE s.id = :stepId AND s.status = :blocked")
+    int unblockForRetry(@Param("stepId") String stepId,
+                        @Param("blocked") ExecutionStepStatus blocked,
+                        @Param("pending") ExecutionStepStatus pending,
+                        @Param("evidenceData") String evidenceData);
 }

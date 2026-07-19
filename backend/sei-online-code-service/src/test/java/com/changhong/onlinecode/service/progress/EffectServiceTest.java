@@ -212,8 +212,8 @@ class EffectServiceTest {
     void reconcile_unknownEffect_reconcilerReturnsResult_confirmsEffect() {
         ExecutionEffect unknown = effect(HASH_A, ExecutionEffectStatus.UNKNOWN);
         when(effectDao.findOne(EFFECT_ID)).thenReturn(unknown);
-        when(effectDao.confirmEffect(eq(EFFECT_ID), eq(ExecutionEffectStatus.CONFIRMED),
-                eq(ExecutionEffectStatus.APPLIED))).thenReturn(1);
+        when(effectDao.confirmUnknownEffect(eq(EFFECT_ID), eq(ExecutionEffectStatus.CONFIRMED),
+                eq(ExecutionEffectStatus.UNKNOWN))).thenReturn(1);
         ExecutionEffect saved = effect(HASH_A, ExecutionEffectStatus.CONFIRMED);
         when(effectDao.save(any(ExecutionEffect.class))).thenReturn(saved);
 
@@ -221,7 +221,7 @@ class EffectServiceTest {
                 e -> "external result confirmed");
 
         assertNotNull(result);
-        verify(effectDao).confirmEffect(EFFECT_ID, ExecutionEffectStatus.CONFIRMED, ExecutionEffectStatus.APPLIED);
+        verify(effectDao).confirmUnknownEffect(EFFECT_ID, ExecutionEffectStatus.CONFIRMED, ExecutionEffectStatus.UNKNOWN);
     }
 
     @Test

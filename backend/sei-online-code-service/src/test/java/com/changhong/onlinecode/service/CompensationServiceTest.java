@@ -8,8 +8,6 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
-import com.changhong.onlinecode.dto.enums.FailureCode;
-import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
@@ -217,7 +215,7 @@ class CompensationServiceTest {
     }
 
     @Test
-    void timedOutDevelopmentRun_isClosedAndTaskBecomesRetryableFailure() {
+    void timedOutDevelopmentRun_becomesUnknownAndKeepsTaskForReconciliation() {
         Date now = new Date();
         Run run = new Run();
         run.setId("run-1");
@@ -228,19 +226,19 @@ class CompensationServiceTest {
         task.setId("task-1");
         task.setStatus(CodingTaskStatus.RUNNING);
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
-        when(runDao.updateStateIfMatch("run-1", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
-        when(codingTaskDao.findOne("task-1")).thenReturn(task);
+        when(runDao.updateStateIfMatch("run-1", RunState.RUNNING, RunState.UNKNOWN)).thenReturn(1);
 
         service.timeoutRuns(now);
 
-        assertEquals(RunState.FAILED, run.getState());
-        assertEquals(CodingTaskStatus.FAILED, task.getStatus());
-        verify(failureInfoSupport).markCodingTaskFailure(eq(task), eq("运行超时"), any(),
-                eq(TriggerSource.SCHEDULED_COMPENSATION), eq(now));
+        assertEquals(RunState.UNKNOWN, run.getState());
+        assertEquals(CodingTaskStatus.RUNNING, task.getStatus());
+        verify(progressReconciler).reconcileTimedOutRun("run-1");
+        verify(codingTaskDao, never()).save(task);
+        verify(failureInfoSupport, never()).markCodingTaskFailure(any(), any(), any(), any(), any());
     }
 
     @Test
-    void timedOutPlanningRun_marksRequirementFailedForRetry() {
+    void timedOutPlanningRun_becomesUnknownWithoutFailingRequirement() {
         Date now = new Date();
         Run run = new Run();
         run.setId("run-plan");
@@ -251,16 +249,16 @@ class CompensationServiceTest {
         run.setStartedDate(new Date(now.getTime() - 31 * 60_000L));
         Requirement requirement = requirement("req-plan", RequirementAutomationStatus.PLANNING);
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
-        when(runDao.updateStateIfMatch("run-plan", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
+        when(runDao.updateStateIfMatch("run-plan", RunState.RUNNING, RunState.UNKNOWN)).thenReturn(1);
         when(requirementDao.findOne("req-plan")).thenReturn(requirement);
 
         service.timeoutRuns(now);
 
-        assertEquals(RequirementAutomationStatus.FAILED, requirement.getAutomationStatus());
-        verify(failureInfoSupport).markRequirementFailure(eq(requirement), eq(FailureCode.AGENT_TIMEOUT),
-                eq(FailureStage.PLAN), eq("PM 执行计划生成超时"), any(),
-                eq(TriggerSource.SCHEDULED_COMPENSATION), eq(now));
-        verify(requirementDao).save(requirement);
+        assertEquals(RunState.UNKNOWN, run.getState());
+        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+        verify(progressReconciler).reconcileTimedOutRun("run-plan");
+        verify(failureInfoSupport, never()).markRequirementFailure(any(), any(), any(), any(), any(), any(), any());
+        verify(requirementDao, never()).save(requirement);
     }
 
     @Test

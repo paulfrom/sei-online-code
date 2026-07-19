@@ -89,8 +89,11 @@ public class CodexRunner implements CliRunner {
     private CliRunResult runBlocking(String logStreamKey, String taskId, String runId, String prompt,
                                       String cwd, String model, String mcpConfig) {
         Path codexHome = null;
+        boolean deleteCodexHome = false;
         try {
-            codexHome = Files.createTempDirectory("codex-home-");
+            codexHome = resolveCodexHome(cwd, runId);
+            deleteCodexHome = shouldDeleteCodexHome(cwd, runId);
+            Files.createDirectories(codexHome);
             Path writableRoot = (cwd == null || cwd.isBlank())
                     ? null : Path.of(cwd).toAbsolutePath().normalize();
             CodexSandboxConfig.write(codexHome, writableRoot, log);
@@ -154,17 +157,19 @@ public class CodexRunner implements CliRunner {
                         .get(30, TimeUnit.SECONDS);
 
                 waitForTurn(events, process, Duration.ofMinutes(30));
+                String turnId = events.turnId();
 
                 AgentUsage usage = buildUsage(events);
                 if (events.isFailed()) {
                     log.warn("codex app-server turn failed: logStreamKey={} reason={}", logStreamKey, events.failureReason());
                     emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
                     String output = stripFences(events.output());
-                    return failedResult(events.failureReason(), output.isBlank() ? null : output, usage);
+                    return withSession(failedResult(events.failureReason(), output.isBlank() ? null : output, usage),
+                            threadId, turnId);
                 }
                 String output = stripFences(events.output());
                 emit(logStreamKey, taskId, runId, "system", "DONE", "PREVIEW");
-                return successResult(output.isBlank() ? null : output, usage);
+                return withSession(successResult(output.isBlank() ? null : output, usage), threadId, turnId);
             } finally {
                 if (runId != null) {
                     activeProcesses.remove(runId);
@@ -192,10 +197,24 @@ public class CodexRunner implements CliRunner {
             emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");
             return failedResult(e.getMessage(), null);
         } finally {
-            if (codexHome != null) {
+            if (codexHome != null && deleteCodexHome) {
                 deleteTree(codexHome);
             }
         }
+    }
+
+    Path resolveCodexHome(String cwd, String runId) throws IOException {
+        if (cwd == null || cwd.isBlank() || runId == null || runId.isBlank()) {
+            return Files.createTempDirectory("codex-home-");
+        }
+        return Path.of(cwd).toAbsolutePath().normalize()
+                .resolve(".agent_context")
+                .resolve("codex-home")
+                .resolve(runId);
+    }
+
+    boolean shouldDeleteCodexHome(String cwd, String runId) {
+        return cwd == null || cwd.isBlank() || runId == null || runId.isBlank();
     }
 
     private AgentUsage buildUsage(CodexAppServerEvents events) {
@@ -228,6 +247,12 @@ public class CodexRunner implements CliRunner {
         result.setUsage(usage);
         result.setProcessSucceeded(false);
         result.setFailureReason(reason);
+        return result;
+    }
+
+    private CliRunResult withSession(CliRunResult result, String threadId, String turnId) {
+        result.setThreadId(threadId);
+        result.setTurnId(turnId);
         return result;
     }
 

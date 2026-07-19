@@ -10,7 +10,6 @@ import {
   Table,
   Tag,
   Tooltip,
-  message,
 } from '@ead/suid';
 import {
   RedoOutlined,
@@ -19,7 +18,6 @@ import {
   StopOutlined,
   ArrowLeftOutlined,
 } from '@ead/suid-icons';
-import { runCodingTask } from '@/services/codingTask';
 const useStyles = createStyles(({ token, css }) => ({
   toolbar: css`
     display: flex;
@@ -113,18 +111,6 @@ const STATUS_META = {
 
 const isRerunnable = (s) => s === 'FAILED' || s === 'VALIDATION_FAILED';
 
-const parseDependsOn = (value) => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value;
-  if (typeof value !== 'string') return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return value.split(',').map((item) => item.trim()).filter(Boolean);
-  }
-};
-
 const parseMetadata = (raw) => {
   if (!raw) return {};
   try {
@@ -178,7 +164,6 @@ const TaskTab = ({
   const [reportModal, setReportModal] = useState({ open: false, title: '', content: '' });
   const [stopping, setStopping] = useState(false);
   const [rerunningTaskId, setRerunningTaskId] = useState(null);
-  const [runningTaskId, setRunningTaskId] = useState(null);
 
   const resultsByTask = useMemo(() => {
     const result = new Map();
@@ -217,16 +202,6 @@ const TaskTab = ({
     return ids;
   }, [runs]);
 
-  const taskStatusByKey = useMemo(() => {
-    const map = new Map();
-    tasks.forEach((task) => {
-      if (task.planTaskKey) {
-        map.set(task.planTaskKey, task.status);
-      }
-    });
-    return map;
-  }, [tasks]);
-
   useEffect(() => {
     if (highlightTaskKey && onHighlightTaskConsumed) {
       onHighlightTaskConsumed();
@@ -252,39 +227,6 @@ const TaskTab = ({
       await onRerun(task, prompt);
     } finally {
       setRerunningTaskId(null);
-    }
-  };
-
-  const canManualRun = (task) => {
-    if (task.status !== 'PENDING') return false;
-    return parseDependsOn(task.dependsOn).every((key) => taskStatusByKey.get(key) === 'SUCCEEDED');
-  };
-
-  const manualRunBlockedReason = (task, hasActiveRun) => {
-    if (hasActiveRun) return '该任务已有运行中的 Run，请等待完成';
-    if (task.status !== 'PENDING') return '仅待执行任务可手动执行';
-    const pendingDeps = parseDependsOn(task.dependsOn)
-      .filter((key) => taskStatusByKey.get(key) !== 'SUCCEEDED');
-    if (pendingDeps.length > 0) {
-      return `依赖未完成：${pendingDeps.join(', ')}`;
-    }
-    return '手动启动当前待执行任务';
-  };
-
-  const handleManualRun = async (task) => {
-    if (runningTaskId || activeRunTaskIds.has(task.id) || !canManualRun(task)) return;
-    const prompt = window.prompt('请输入执行提示词（可留空）');
-    if (prompt === null) return;
-    setRunningTaskId(task.id);
-    try {
-      const res = await runCodingTask(task.id, prompt || null);
-      if (res && res.success) {
-        message.success('手动执行已启动');
-      } else {
-        message.error((res && res.message) || '手动执行失败');
-      }
-    } finally {
-      setRunningTaskId(null);
     }
   };
 
@@ -353,24 +295,9 @@ const TaskTab = ({
       render: (_id, record) => {
         const hasActiveRun = activeRunTaskIds.has(record.id);
         const rerunDisabled = hasActiveRun || !!rerunningTaskId;
-        const manualRunEnabled = canManualRun(record);
-        const manualRunDisabled = hasActiveRun || !!runningTaskId || !manualRunEnabled;
         const validationComment = resultsByTask.get(record.id)?.validation;
         return (
           <Space>
-            {record.status === 'PENDING' && (
-              <Tooltip title={manualRunBlockedReason(record, hasActiveRun)}>
-                <Button
-                  type="link"
-                  icon={<RedoOutlined />}
-                  loading={runningTaskId === record.id}
-                  disabled={manualRunDisabled}
-                  onClick={() => handleManualRun(record)}
-                >
-                  手动执行
-                </Button>
-              </Tooltip>
-            )}
             {isRerunnable(record.status) && (
               <Tooltip title={hasActiveRun ? '该任务已有运行中的 Run，请等待完成' : '重新执行当前失败任务'}>
                 <Button

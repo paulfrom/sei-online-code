@@ -11,7 +11,7 @@
     "lint-fix:script": "npm run lint:script --fix",
     "lint-fix:style": "npm run lint:style --fix",
     "lint:script": "eslint --ext '.js,.jsx,.ts,.tsx'",
-    "lint:style": "stylelint 'src/**/*.less'",
+    "lint:style": "stylelint 'src/**/*.less' --allow-empty-input",
     "precommit": "lint-staged --allow-empty",
     "prepare": "husky",
     "prettier": "prettier -c --write '**/*'",

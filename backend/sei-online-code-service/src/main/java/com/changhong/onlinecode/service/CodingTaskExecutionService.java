@@ -137,9 +137,17 @@ public class CodingTaskExecutionService {
             run.setCliTool(agent.getCliTool());
             run.setModel(agent.getModel());
         }
-        bindProgress(run, id, task.getRequirementId(), null, prompt, run.getBaseCommit());
+        CodingTaskProgressIntegrator.ProgressPreflight preflight =
+                bindProgress(run, id, task.getRequirementId(), null, prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
+        if (preflight.shouldSkip()) {
+            completeSkippedRun(run, task, false);
+            CodingTaskDto dto = new CodingTaskDto();
+            dto.setId(task.getId());
+            dto.setStatus(task.getStatus());
+            return ResultData.success(dto);
+        }
 
         String fullPrompt = buildExecutionPrompt(task, prompt)
                 + codingTaskProgressIntegrator.buildProgressBrief(run.getExecutionId());
@@ -218,9 +226,17 @@ public class CodingTaskExecutionService {
         run.setAgentName(agent.getName());
         run.setCliTool(agent.getCliTool());
         run.setModel(agent.getModel());
-        bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
+        CodingTaskProgressIntegrator.ProgressPreflight preflight =
+                bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
+        if (preflight.shouldSkip()) {
+            completeSkippedRun(run, task, true);
+            CodingTaskDto dto = new CodingTaskDto();
+            dto.setId(task.getId());
+            dto.setStatus(task.getStatus());
+            return ResultData.success(dto);
+        }
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
@@ -267,6 +283,11 @@ public class CodingTaskExecutionService {
         List<String> changedFiles = workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath());
         if (changedFiles.isEmpty()) {
             return CompletionDecision.failed(summary, "开发代理未在指定工作区产生代码或文档变更");
+        }
+        boolean ledgerRecorded = codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
+                run, summary, changedFiles);
+        if (!ledgerRecorded && "AUTHORITATIVE".equalsIgnoreCase(progressLedgerMode)) {
+            return CompletionDecision.failed(summary, "进度账本更新失败，已阻断旧式成功收口");
         }
         if (log.isDebugEnabled()) {
             log.debug("coding-task: detected workspace changes runId={}, files={}",
@@ -315,8 +336,8 @@ public class CodingTaskExecutionService {
      * 把 Run 绑定到进度账本（EXE-004+EXE-005）：解析 invocationKey + 在 RequirementWorkspace 就绪时绑定 Execution。
      * workspace 不存在时通过 WorkspaceLeaseService 创建（EXE-005：bindOrResolveWorkspace）。
      */
-    private void bindProgress(Run run, String codingTaskId, String requirementId, String loopId,
-                              String prompt, String baseCommit) {
+    private CodingTaskProgressIntegrator.ProgressPreflight bindProgress(Run run, String codingTaskId,
+                              String requirementId, String loopId, String prompt, String baseCommit) {
         String workspaceId = requirementWorkspaceDao.findByRequirementId(requirementId)
                 .map(RequirementWorkspace::getId).orElse(null);
         // EXE-005: workspace 不存在时自动创建（bindOrResolve 保证同一需求只有一个 workspace）
@@ -335,8 +356,28 @@ public class CodingTaskExecutionService {
         run.setInvocationKey(preflight.invocationKey());
         if (preflight.executionId() != null) {
             run.setExecutionId(preflight.executionId());
+            run.setObservedPlanVersion(1);
             run.setResumeFromCheckpointId(codingTaskProgressIntegrator.resolveResumeCheckpoint(preflight.executionId()));
         }
+        return preflight;
+    }
+
+    private void completeSkippedRun(Run run, CodingTask task, boolean schedulerManaged) {
+        Date now = new Date();
+        String summary = "Execution 已全部验证，跳过重复 Agent 调用";
+        run.setState(RunState.SUCCEEDED);
+        run.setTerminalReason(RunTerminalReason.SUCCEEDED);
+        run.setFinishedDate(now);
+        run.setSummary(summary);
+        runDao.save(run);
+        codingTaskProgressIntegrator.appendTerminalObservation(run, true, summary, null);
+        if (schedulerManaged) {
+            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                    task.getId(), true, null));
+            return;
+        }
+        task.setStatus(CodingTaskStatus.SUCCEEDED);
+        codingTaskDao.save(task);
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {

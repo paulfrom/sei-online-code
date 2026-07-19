@@ -58,4 +58,26 @@ class RequirementDeliveryServiceTest {
         assertEquals("run-1", root.path("runId").asText());
         assertEquals("全量验证通过\"含引号\"", root.path("validationSummary").asText());
     }
+
+    @Test
+    void deliveryEffectKeys_includeCandidateCommitSoMrUpdatesDoNotConflict() throws Exception {
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class),
+                mock(ConfigService.class), mock(WorkspaceManager.class),
+                mock(RequirementCommentService.class), mock(MemoryJobService.class),
+                mock(WorkspaceMemoryService.class), mock(EffectService.class));
+        Method pushKey = RequirementDeliveryService.class.getDeclaredMethod("pushEffectKey",
+                String.class, String.class, String.class);
+        Method mrKey = RequirementDeliveryService.class.getDeclaredMethod("mrEffectKey",
+                String.class, String.class, String.class);
+        pushKey.setAccessible(true);
+        mrKey.setAccessible(true);
+
+        assertEquals("push:42:feature/req-1:commit-a",
+                pushKey.invoke(service, "42", "feature/req-1", "commit-a"));
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+                mrKey.invoke(service, "42", "feature/req-1", "commit-a"),
+                mrKey.invoke(service, "42", "feature/req-1", "commit-b"));
+    }
 }

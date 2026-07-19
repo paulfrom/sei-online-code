@@ -20,6 +20,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -75,9 +76,9 @@ class CodingTaskProgressIntegratorTest {
         assertNotNull(result.invocationKey());
     }
 
-    /** 仅部分 VERIFIED → shouldSkip=false，且复用活跃 Run 的 invocationKey。 */
+    /** 仅部分 VERIFIED → shouldSkip=false；新 attempt 使用新 invocationKey，避免保存新 Run 时撞唯一键。 */
     @Test
-    void preflight_partialProgress_doesNotSkipAndReusesActiveRun() {
+    void preflight_partialProgress_doesNotSkipAndUsesFreshInvocationKey() {
         stubExecution("exec-2");
         when(progressService.generateSnapshot("exec-2")).thenReturn(snapshot(2, 1, "step-x"));
         Run active = new Run();
@@ -90,7 +91,7 @@ class CodingTaskProgressIntegratorTest {
                 "ct-2", "req-1", TaskExecutionType.CODING_TASK, "loop-1", 1, "prompt", "ws-1", "commit-1");
 
         assertFalse(result.shouldSkip());
-        assertEquals("inv-existing", result.invocationKey(), "active Run 的 invocationKey 被复用（幂等重入）");
+        assertNotEquals("inv-existing", result.invocationKey(), "新 attempt 不能复用 active Run 的 invocationKey");
         assertEquals("run-active", result.reusedRunId());
     }
 

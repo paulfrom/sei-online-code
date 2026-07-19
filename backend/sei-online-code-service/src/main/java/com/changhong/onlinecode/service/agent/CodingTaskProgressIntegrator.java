@@ -2,24 +2,35 @@ package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.ExecutionCheckpointDao;
+import com.changhong.onlinecode.dto.enums.ExecutionCheckpointType;
+import com.changhong.onlinecode.dto.enums.ExecutionPhase;
+import com.changhong.onlinecode.dto.enums.ExecutionStepStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskExecutionType;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.VerificationStatus;
+import com.changhong.onlinecode.dto.progress.CurrentStepView;
 import com.changhong.onlinecode.dto.progress.ExecutionProgressSnapshot;
+import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.StepSummary;
+import com.changhong.onlinecode.dto.progress.WriteAuthorization;
+import com.changhong.onlinecode.entity.ExecutionStep;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.onlinecode.entity.TaskExecution;
 import com.changhong.onlinecode.service.progress.ProgressService;
+import com.changhong.sei.core.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -41,6 +52,9 @@ import java.util.UUID;
 @Service
 @Slf4j
 public class CodingTaskProgressIntegrator {
+
+    private static final String IMPLEMENT_STEP_KEY = "implement:coding-task";
+    private static final String VERIFY_STEP_KEY = "verify:coding-task";
 
     private final ProgressService progressService;
     private final RunDao runDao;
@@ -89,6 +103,9 @@ public class CodingTaskProgressIntegrator {
 
         TaskExecution execution = progressService.findOrCreateExecution(executionKey, taskType, codingTaskId,
                 null, requirementId, loopId, inputHash, effectivePlanVersion, requirementWorkspaceId, baseCommit);
+        if (taskType == TaskExecutionType.CODING_TASK) {
+            declareFixedCodingTaskSteps(execution.getId(), effectivePlanVersion, inputHash);
+        }
         ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(execution.getId());
 
         boolean shouldSkip = shouldSkipExecution(snapshot);
@@ -163,8 +180,9 @@ public class CodingTaskProgressIntegrator {
     }
 
     /**
-     * 解析 invocation：存在活跃 Run（RUNNING/QUEUED）则复用其 invocationKey（幂等重入返回同一 Run），
-     * 否则生成新 UUID（最小可确定唯一 id）。legacy 活跃 Run 无 invocationKey 时补一个。
+     * 解析 invocation：当前入口没有携带外部 invocationKey，因此每次新 attempt 使用新的 UUID。
+     * 若直接复用活跃 Run 的 invocationKey，新 Run 保存时会命中唯一约束；真正的“同一 invocation 重入返回
+     * 首次 Run”应在 API 层显式传入 invocationKey 后实现。
      */
     private InvocationResolution resolveInvocation(String codingTaskId) {
         List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
@@ -173,12 +191,92 @@ public class CodingTaskProgressIntegrator {
                 .findFirst()
                 .orElse(null);
         if (active != null) {
-            String invocationKey = active.getInvocationKey() != null
-                    ? active.getInvocationKey()
-                    : UUID.randomUUID().toString();
-            return new InvocationResolution(invocationKey, active.getId());
+            return new InvocationResolution(UUID.randomUUID().toString(), active.getId());
         }
         return new InvocationResolution(UUID.randomUUID().toString(), null);
+    }
+
+    /**
+     * Phase 2 桥接：在动态步骤协议落地前，为 CodingTask 声明两个稳定固定步骤，保证账本不是空壳。
+     */
+    private void declareFixedCodingTaskSteps(String executionId, int planVersion, String inputHash) {
+        progressService.declareStep(executionId, IMPLEMENT_STEP_KEY, ExecutionPhase.IMPLEMENT, planVersion,
+                "执行编码任务", "Agent 在工作区完成本 CodingTask 的文件变更", inputHash, true);
+        progressService.declareStep(executionId, VERIFY_STEP_KEY, ExecutionPhase.VERIFY, planVersion,
+                "验证编码任务", "确认本 CodingTask 的工作区变更满足执行结果判定", inputHash, true);
+    }
+
+    /**
+     * Agent 成功后把固定步骤推进到 VERIFIED。动态 step/tool 协议尚未接入前，这让重复 Run 能通过账本跳过。
+     *
+     * @return true 表示所有可推进步骤均完成；false 表示账本推进失败，应由 AUTHORITATIVE 模式阻断旧式成功。
+     */
+    public boolean recordSuccessfulCodingTaskCompletion(Run run, String summary, List<String> changedFiles) {
+        if (run == null || run.getExecutionId() == null) {
+            return true;
+        }
+        for (int i = 0; i < 4; i++) {
+            ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(run.getExecutionId());
+            CurrentStepView current = snapshot == null ? null : snapshot.getCurrentStep();
+            if (current == null) {
+                return true;
+            }
+            if (!advanceCurrentStep(run, current, summary, changedFiles)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private boolean advanceCurrentStep(Run run, CurrentStepView current, String summary, List<String> changedFiles) {
+        WriteAuthorization auth = new WriteAuthorization();
+        auth.setRunId(run.getId());
+        auth.setFencingToken(0L);
+        if (current.getStatus() != ExecutionStepStatus.APPLIED) {
+            ProgressOperationResult<ExecutionStep> claim = progressService.claimStep(
+                    current.getStepId(), auth, new Date(System.currentTimeMillis() + 15 * 60_000L));
+            if (!claim.isOk() || claim.getData() == null) {
+                log.warn("recordSuccessfulCodingTaskCompletion claim failed runId={}, stepKey={}, status={}",
+                        run.getId(), current.getStepKey(), claim.getStatus());
+                return false;
+            }
+            auth.setClaimToken(claim.getData().getClaimToken());
+            auth.setFencingToken(claim.getData().getWorkspaceFencingToken());
+            ProgressOperationResult<ExecutionStep> applied = progressService.markApplied(current.getStepId(), auth);
+            if (!applied.isOk()) {
+                log.warn("recordSuccessfulCodingTaskCompletion markApplied failed runId={}, stepKey={}, status={}",
+                        run.getId(), current.getStepKey(), applied.getStatus());
+                return false;
+            }
+            appendStepCheckpoint(run, current, auth, ExecutionCheckpointType.APPLIED, summary, changedFiles);
+        }
+        ProgressOperationResult<ExecutionStep> verified = progressService.markVerified(current.getStepId(), auth);
+        if (!verified.isOk()) {
+            log.warn("recordSuccessfulCodingTaskCompletion markVerified failed runId={}, stepKey={}, status={}",
+                    run.getId(), current.getStepKey(), verified.getStatus());
+            return false;
+        }
+        appendStepCheckpoint(run, current, auth, ExecutionCheckpointType.VERIFIED, summary, changedFiles);
+        return true;
+    }
+
+    private void appendStepCheckpoint(Run run, CurrentStepView current, WriteAuthorization auth,
+                                      ExecutionCheckpointType type, String summary, List<String> changedFiles) {
+        progressService.appendCheckpoint(current.getStepId(), run.getExecutionId(), auth, type,
+                checkpointPayload(type, summary, changedFiles), null, null, null);
+    }
+
+    private String checkpointPayload(ExecutionCheckpointType type, String summary, List<String> changedFiles) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("schemaVersion", 1);
+            payload.put("checkpointType", type.name());
+            payload.put("summary", summary);
+            payload.put("changedFiles", changedFiles == null ? List.of() : changedFiles);
+            return JsonUtils.mapper().writeValueAsString(payload);
+        } catch (Exception e) {
+            return "{\"schemaVersion\":1}";
+        }
     }
 
     /** 数据模型 §4：executionKey = sha256(taskType|businessTaskId|loopId|planVersion|inputHash)。 */

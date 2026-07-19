@@ -8,8 +8,6 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
-import com.changhong.onlinecode.dto.enums.FailureCode;
-import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
@@ -159,16 +157,6 @@ public class CompensationService {
                 log.warn("ProgressReconciler 对账异常 runId={}", run.getId(), e);
             }
 
-            // CodingTask：不再直接 FAILED；仅在仍 RUNNING/VALIDATING 时保留标记让补偿器发现
-            CodingTask task = run.getCodingTaskId() == null ? null : codingTaskDao.findOne(run.getCodingTaskId());
-            if (task != null && (task.getStatus() == CodingTaskStatus.RUNNING
-                    || task.getStatus() == CodingTaskStatus.VALIDATING)) {
-                task.setStatus(CodingTaskStatus.FAILED);
-                failureInfoSupport.markCodingTaskFailure(task, "运行超时（待对账）", run.getFailureReason(),
-                        TriggerSource.SCHEDULED_COMPENSATION, now);
-                codingTaskDao.save(task);
-            }
-
             // PM agent 超时：不再直接 fail Requirement；追加 comment 提醒人工关注
             if ("pm-agent".equals(run.getAgentName()) && run.getRequirementId() != null) {
                 Requirement requirement = requirementDao.findOne(run.getRequirementId());
@@ -184,27 +172,6 @@ public class CompensationService {
             compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN_RECONCILE", true,
                     "超时 Run→UNKNOWN，已触发对账", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
         }
-    }
-
-    private void failTimedOutPlanningRequirement(Run run, Date now) {
-        // PM 规划 run 现以 agent_name 快照识别（RunType 已移除）。
-        if (!"pm-agent".equals(run.getAgentName()) || run.getRequirementId() == null) {
-            return;
-        }
-        Requirement requirement = requirementDao.findOne(run.getRequirementId());
-        if (requirement == null
-                || requirement.getStatus() != RequirementStatus.PRD_CONFIRMED
-                || requirement.getAutomationStatus() != RequirementAutomationStatus.PLANNING
-                || !Objects.equals(requirement.getActiveLoopId(), run.getLoopId())) {
-            return;
-        }
-        requirement.setAutomationStatus(RequirementAutomationStatus.FAILED);
-        failureInfoSupport.markRequirementFailure(requirement, FailureCode.AGENT_TIMEOUT,
-                FailureStage.PLAN, "PM 执行计划生成超时", run.getFailureReason(),
-                TriggerSource.SCHEDULED_COMPENSATION, now);
-        requirementDao.save(requirement);
-        log.info("PM 执行计划生成超时，requirement {}，loopId {}",
-                requirement.getId(), run.getLoopId());
     }
 
     /**
@@ -357,6 +324,13 @@ public class CompensationService {
                 if (reconciliation != null && reconciliation.allVerified()) {
                     log.info("recoverDevelopment: requirement {} Execution 全部 VERIFIED，跳过编码重试 → 推进验证",
                             requirement.getId());
+                    TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
+                            requirement.getId(), requirement.getActiveLoopId()));
+                    return;
+                }
+                if (reconciliation != null && reconciliation.recoveredBlocked() > 0) {
+                    log.info("recoverDevelopment: requirement {} 已自动解除 {} 个阻塞步骤 → 恢复开发调度",
+                            requirement.getId(), reconciliation.recoveredBlocked());
                     TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
                             requirement.getId(), requirement.getActiveLoopId()));
                     return;

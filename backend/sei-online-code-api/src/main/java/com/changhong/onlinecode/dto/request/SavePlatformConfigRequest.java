@@ -23,6 +23,8 @@ import java.io.Serializable;
 public class SavePlatformConfigRequest implements Serializable {
 
     @Schema(description = "工作区根目录；空则默认 ${java.io.tmpdir}/sei-online-code", example = "/tmp/sei-online-code")
+    @Pattern(regexp = "^(\\s*|/.*|[A-Za-z]:\\\\.*)$",
+            message = "workspaceRoot 为空或绝对路径")
     private String workspaceRoot;
 
     @Schema(description = "模板 GitLab 仓库地址；空即走脚手架生成路径", example = "")

@@ -41,6 +41,11 @@ public interface ExecutionEffectDao extends BaseEntityDao<ExecutionEffect> {
     List<ExecutionEffect> findByExecutionIdAndStatus(String executionId, ExecutionEffectStatus status);
 
     /**
+     * 统计某 Execution 下尚未确认的 effect。Execution 成功收口前必须为 0。
+     */
+    long countByExecutionIdAndStatusIn(String executionId, List<ExecutionEffectStatus> statuses);
+
+    /**
      * 某 Execution 的 effect 分页（按 preparedAt 倒序）。
      */
     Page<ExecutionEffect> findByExecutionIdOrderByPreparedAtDesc(String executionId, Pageable pageable);
@@ -77,6 +82,18 @@ public interface ExecutionEffectDao extends BaseEntityDao<ExecutionEffect> {
     int confirmEffect(@Param("effectId") String effectId,
                       @Param("confirmed") ExecutionEffectStatus confirmed,
                       @Param("applied") ExecutionEffectStatus applied);
+
+    /**
+     * 对账确认 UNKNOWN→CONFIRMED。外部查询已证明副作用存在时使用，不重新执行副作用。
+     */
+    @Modifying
+    @Query("UPDATE ExecutionEffect e SET e.status = :confirmed, e.confirmedAt = CURRENT_TIMESTAMP, "
+            + "e.lastReconciledAt = CURRENT_TIMESTAMP, e.version = e.version + 1, "
+            + "e.lastEditedDate = CURRENT_TIMESTAMP "
+            + "WHERE e.id = :effectId AND e.status = :unknown")
+    int confirmUnknownEffect(@Param("effectId") String effectId,
+                             @Param("confirmed") ExecutionEffectStatus confirmed,
+                             @Param("unknown") ExecutionEffectStatus unknown);
 
     /**
      * CAS 推进 APPLIED→UNKNOWN（ADR-001 §5）。结果不确定，需对账。

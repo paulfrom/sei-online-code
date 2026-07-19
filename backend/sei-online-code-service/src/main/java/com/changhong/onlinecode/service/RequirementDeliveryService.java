@@ -170,7 +170,8 @@ public class RequirementDeliveryService {
                 .stdout().lines().filter(line -> !line.isBlank()).toList();
 
         // EXE-006: push effect ledger（ADR-001 §5 幂等）
-        String pushEffectKey = "push:" + config.getGitlabProjectId().trim() + ":" + branch;
+        String projectKey = config.getGitlabProjectId().trim();
+        String pushEffectKey = pushEffectKey(projectKey, branch, commitHash);
         String pushHash = sha256(commitHash);
         ExecutionEffect pushEffect = effectService.findOrPrepare(
                 pushEffectKey, ExecutionEffectType.PUSH, pushHash, requirement.getId(), "deliver", 0L);
@@ -179,6 +180,7 @@ public class RequirementDeliveryService {
                 runCommand(workspace, "git", "push", "-u", "origin", branch);
                 effectService.markApplied(pushEffect.getId(), toJson(Map.of("branch", branch, "commitHash", commitHash)),
                         branch + "@" + commitHash);
+                effectService.markConfirmed(pushEffect.getId());
             } catch (Exception e) {
                 effectService.markUnknown(pushEffect.getId());
                 throw e;
@@ -197,7 +199,7 @@ public class RequirementDeliveryService {
                 + "\nCommit: " + commitHash;
 
         // EXE-006: MR effect ledger（ADR-001 §5 幂等：相同 key+hash 复用 MR；不同 hash 冲突）
-        String mrEffectKey = "mr:" + config.getGitlabProjectId().trim() + ":" + branch;
+        String mrEffectKey = mrEffectKey(projectKey, branch, commitHash);
         String mrHash = sha256(title + "|" + description + "|" + targetBranch);
         ExecutionEffect mrEffect = effectService.findOrPrepare(
                 mrEffectKey, ExecutionEffectType.MR, mrHash, requirement.getId(), "deliver", 0L);
@@ -220,6 +222,7 @@ public class RequirementDeliveryService {
             MergeRequest updated = gitLabApi.getMergeRequestApi()
                     .updateMergeRequest(projectId, mr.getIid(), params);
             effectService.markApplied(mrEffect.getId(), updated.getWebUrl(), String.valueOf(mr.getIid()));
+            effectService.markConfirmed(mrEffect.getId());
             return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(), false, changedFiles);
         }
 
@@ -233,7 +236,16 @@ public class RequirementDeliveryService {
         MergeRequest created = gitLabApi.getMergeRequestApi()
                 .createMergeRequest(projectId, branch, targetBranch, title, description, null);
         effectService.markApplied(mrEffect.getId(), created.getWebUrl(), String.valueOf(created.getIid()));
+        effectService.markConfirmed(mrEffect.getId());
         return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true, changedFiles);
+    }
+
+    private String pushEffectKey(String projectKey, String branch, String commitHash) {
+        return "push:" + projectKey + ":" + branch + ":" + commitHash;
+    }
+
+    private String mrEffectKey(String projectKey, String branch, String commitHash) {
+        return "mr:" + projectKey + ":" + branch + ":" + commitHash;
     }
 
     private void submitDeliveryMemoryJob(Requirement requirement,

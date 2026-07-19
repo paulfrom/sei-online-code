@@ -65,6 +65,7 @@ class CodingTaskExecutionServiceTest {
     private AgentExecutionService agentExecutionService;
     private RunNumberService runNumberService;
     private CodingTaskChangeCollector changeCollector;
+    private com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator codingTaskProgressIntegrator;
     private WorkspaceChangeDetector workspaceChangeDetector;
     private CodingTaskExecutionService service;
     @org.junit.jupiter.api.io.TempDir
@@ -91,8 +92,7 @@ class CodingTaskExecutionServiceTest {
         requirementService = mock(RequirementService.class);
         com.changhong.onlinecode.dao.RequirementWorkspaceDao requirementWorkspaceDao =
                 mock(com.changhong.onlinecode.dao.RequirementWorkspaceDao.class);
-        com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator codingTaskProgressIntegrator =
-                mock(com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.class);
+        codingTaskProgressIntegrator = mock(com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.class);
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
                         null, null, null, false, "inv-test", null));
@@ -411,6 +411,52 @@ class CodingTaskExecutionServiceTest {
 
         assertTrue(result.successful());
         assertEquals("run-generated", savedRun.get().getId());
+    }
+
+    @Test
+    void executePlanTask_preflightSkip_completesRunWithoutStartingAgent() {
+        CodingTask task = new CodingTask();
+        task.setId("task-skip");
+        task.setRequirementId("req-skip");
+        task.setProjectId("project-skip");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-skip")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-skip")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-skip");
+            }
+            savedRun.set(run);
+            return run;
+        });
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-skip"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-skip");
+        when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
+                        "exec-skip", "key-skip", null, true, "inv-skip", null));
+
+        ResultData<CodingTaskDto> result = service.executePlanTask("task-skip", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
+        assertEquals("Execution 已全部验证，跳过重复 Agent 调用", savedRun.get().getSummary());
+        verify(agentExecutionService, never()).executeAsync(anyString(), any());
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-skip", true, null));
     }
 
     @Test

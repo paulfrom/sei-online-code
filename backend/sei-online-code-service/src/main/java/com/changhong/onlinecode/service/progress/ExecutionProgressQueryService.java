@@ -3,6 +3,7 @@ package com.changhong.onlinecode.service.progress;
 import com.changhong.onlinecode.dao.ExecutionCheckpointDao;
 import com.changhong.onlinecode.dao.ExecutionEffectDao;
 import com.changhong.onlinecode.dao.ExecutionStepDao;
+import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.RunObservationDao;
@@ -19,6 +20,7 @@ import com.changhong.onlinecode.dto.progress.WorkspaceStateDto;
 import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.onlinecode.entity.ExecutionEffect;
 import com.changhong.onlinecode.entity.ExecutionStep;
+import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.RunObservation;
@@ -57,6 +59,7 @@ public class ExecutionProgressQueryService {
     private final RunObservationDao runObservationDao;
     private final RunDao runDao;
     private final ProgressService progressService;
+    private final RequirementDao requirementDao;
 
     public ExecutionProgressQueryService(RequirementWorkspaceDao requirementWorkspaceDao,
                                          TaskExecutionDao taskExecutionDao,
@@ -65,7 +68,8 @@ public class ExecutionProgressQueryService {
                                          ExecutionEffectDao executionEffectDao,
                                          RunObservationDao runObservationDao,
                                          RunDao runDao,
-                                         ProgressService progressService) {
+                                         ProgressService progressService,
+                                         RequirementDao requirementDao) {
         this.requirementWorkspaceDao = requirementWorkspaceDao;
         this.taskExecutionDao = taskExecutionDao;
         this.executionStepDao = executionStepDao;
@@ -74,15 +78,17 @@ public class ExecutionProgressQueryService {
         this.runObservationDao = runObservationDao;
         this.runDao = runDao;
         this.progressService = progressService;
+        this.requirementDao = requirementDao;
     }
 
     /**
      * 需求进度聚合 overview（计划 §3 findOverview）。一致性读：workspace + 当前 Execution 快照 + 最新 checkpoint +
-     * 最近 Run。automationStatus/mrStatus 待与 Requirement/MR effect 接线后补全（属 EXE-006/009）。
+     * 最近 Run。MR 真实 OPEN/MERGED/CLOSED 后续由 GitLab webhook/轮询补强；当前只返回提交边界。
      */
     @Transactional(readOnly = true)
     public RequirementExecutionOverviewDto findOverview(String requirementId) {
         Date serverTime = new Date();
+        Requirement requirement = requirementDao.findOne(requirementId);
         RequirementWorkspace workspace = requirementWorkspaceDao.findByRequirementId(requirementId).orElse(null);
         String executionId = resolveActiveExecutionId(requirementId, workspace);
         ExecutionProgressSnapshot snapshot = executionId == null ? null : progressService.generateSnapshot(executionId);
@@ -92,6 +98,11 @@ public class ExecutionProgressQueryService {
         RequirementExecutionOverviewDto overview = new RequirementExecutionOverviewDto();
         TaskExecution execution = executionId == null ? null : taskExecutionDao.findOne(executionId);
         overview.setRequirementId(requirementId);
+        if (requirement != null) {
+            overview.setAutomationStatus(requirement.getAutomationStatus());
+            overview.setMrStatus(requirement.getDeliveryMrUrl() == null || requirement.getDeliveryMrUrl().isBlank()
+                    ? "NOT_SUBMITTED" : "SUBMITTED");
+        }
         overview.setActiveLoopId(workspace == null ? null : workspace.getActiveLoopId());
         overview.setPlanVersion(execution == null ? null : execution.getPlanVersion());
         overview.setSnapshotVersion(workspace == null ? null : workspace.getSnapshotVersion());

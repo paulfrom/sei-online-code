@@ -1,10 +1,11 @@
 package com.changhong.onlinecode.service.progress;
 
-import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionStepDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.TaskExecutionDao;
-import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dao.ExecutionEffectDao;
+import com.changhong.onlinecode.dto.enums.BlockedRecoveryPolicy;
+import com.changhong.onlinecode.dto.enums.ExecutionEffectStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionStepStatus;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RunObservationType;
@@ -13,10 +14,11 @@ import com.changhong.onlinecode.dto.enums.TaskExecutionStatus;
 import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.WriteAuthorization;
-import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionStep;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.TaskExecution;
+import com.changhong.sei.core.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,8 +26,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -44,20 +49,20 @@ public class ProgressReconciler {
     private final RunDao runDao;
     private final TaskExecutionDao taskExecutionDao;
     private final ExecutionStepDao executionStepDao;
-    private final CodingTaskDao codingTaskDao;
+    private final ExecutionEffectDao executionEffectDao;
     private final ProgressService progressService;
     private final WorkspaceLeaseService workspaceLeaseService;
 
     public ProgressReconciler(RunDao runDao,
                                TaskExecutionDao taskExecutionDao,
                                ExecutionStepDao executionStepDao,
-                               CodingTaskDao codingTaskDao,
+                               ExecutionEffectDao executionEffectDao,
                                ProgressService progressService,
                                WorkspaceLeaseService workspaceLeaseService) {
         this.runDao = runDao;
         this.taskExecutionDao = taskExecutionDao;
         this.executionStepDao = executionStepDao;
-        this.codingTaskDao = codingTaskDao;
+        this.executionEffectDao = executionEffectDao;
         this.progressService = progressService;
         this.workspaceLeaseService = workspaceLeaseService;
     }
@@ -131,16 +136,6 @@ public class ProgressReconciler {
             }
         }
 
-        // CodingTask：不直接 FAILED；仅在 CodingTask 仍 RUNNING 时标记 UNKNOWN
-        if (run.getCodingTaskId() != null) {
-            CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
-            if (task != null && (task.getStatus() == CodingTaskStatus.RUNNING
-                    || task.getStatus() == CodingTaskStatus.VALIDATING)) {
-                task.setStatus(CodingTaskStatus.FAILED); // 保持现有语义让补偿器发现
-                codingTaskDao.save(task);
-            }
-        }
-
         return new ReconciliationResult(runId, executionId, markedUnknown, true);
     }
 
@@ -169,6 +164,8 @@ public class ProgressReconciler {
         int applied = 0;
         int unknown = 0;
         int blocked = 0;
+        int recoveredBlocked = 0;
+        int humanBlocked = 0;
         String nextAction = null;
 
         for (ExecutionStep step : steps) {
@@ -190,7 +187,28 @@ public class ProgressReconciler {
                     nextAction = "reconcile:" + step.getStepKey();
                 }
             } else if (status == ExecutionStepStatus.BLOCKED) {
-                blocked++;
+                BlockedRecovery recovery = blockedRecovery(step);
+                if (recovery.canAutoRetryNow()) {
+                    ProgressOperationResult<ExecutionStep> result = progressService.unblockForRetry(
+                            step.getId(), unblockEvidence(step, recovery));
+                    if (result.isOk()) {
+                        recoveredBlocked++;
+                        if (nextAction == null) {
+                            nextAction = "claim:" + step.getStepKey();
+                        }
+                    } else {
+                        blocked++;
+                        humanBlocked++;
+                    }
+                } else {
+                    blocked++;
+                    if (recovery.needsHuman()) {
+                        humanBlocked++;
+                    }
+                    if (nextAction == null) {
+                        nextAction = recovery.nextAction(step.getStepKey());
+                    }
+                }
             } else if (status == ExecutionStepStatus.IN_PROGRESS) {
                 if (nextAction == null) {
                     nextAction = "complete:" + step.getStepKey();
@@ -198,22 +216,28 @@ public class ProgressReconciler {
             }
         }
 
-        boolean allVerified = totalRequired > 0 && verified == totalRequired;
+        long unconfirmedEffects = executionEffectDao.countByExecutionIdAndStatusIn(executionId,
+                List.of(ExecutionEffectStatus.PREPARED, ExecutionEffectStatus.APPLIED,
+                        ExecutionEffectStatus.UNKNOWN, ExecutionEffectStatus.FAILED));
+        if (nextAction == null && unconfirmedEffects > 0) {
+            nextAction = "reconcile:effects";
+        }
+        boolean allVerified = totalRequired > 0 && verified == totalRequired && unconfirmedEffects == 0;
         if (allVerified && execution.getStatus() != TaskExecutionStatus.SUCCEEDED) {
             execution.setStatus(TaskExecutionStatus.SUCCEEDED);
             taskExecutionDao.save(execution);
             log.info("reconcileExecution: execution {} 全部 required steps VERIFIED → SUCCEEDED", executionId);
         }
 
-        boolean needsHuman = blocked > 0 || (unknown > 0 && applied == 0 && verified == 0);
+        boolean needsHuman = humanBlocked > 0 || (unknown > 0 && applied == 0 && verified == 0);
         return new ExecutionReconciliation(executionId, totalRequired, verified, applied, unknown, blocked,
-                allVerified, needsHuman, nextAction);
+                recoveredBlocked, allVerified, needsHuman, nextAction);
     }
 
     /**
      * 按 requirement+loopId 查找最近 Execution 并对账（供 Compensator 使用）。
      */
-    @Transactional(readOnly = true)
+    @Transactional(rollbackFor = Exception.class)
     public ExecutionReconciliation reconcileExecutionByRequirement(String requirementId, String loopId) {
         TaskExecution execution = taskExecutionDao.findFirstByRequirementIdOrderByCreatedDateDesc(requirementId)
                 .orElse(null);
@@ -265,6 +289,60 @@ public class ProgressReconciler {
         }
     }
 
+    private BlockedRecovery blockedRecovery(ExecutionStep step) {
+        if (step.getEvidenceData() == null || step.getEvidenceData().isBlank()) {
+            return BlockedRecovery.manual();
+        }
+        try {
+            JsonNode root = JsonUtils.mapper().readTree(step.getEvidenceData());
+            BlockedRecoveryPolicy policy = parsePolicy(root.path("recoveryPolicy").asText(null));
+            Instant retryAfter = parseInstant(root.path("retryAfter").asText(null));
+            String reason = root.path("blockedReason").asText(null);
+            return new BlockedRecovery(policy, retryAfter, reason);
+        } catch (Exception e) {
+            log.warn("blockedRecovery: invalid evidenceData stepId={}", step.getId(), e);
+            return BlockedRecovery.manual();
+        }
+    }
+
+    private BlockedRecoveryPolicy parsePolicy(String value) {
+        if (value == null || value.isBlank()) {
+            return BlockedRecoveryPolicy.MANUAL_REVIEW;
+        }
+        try {
+            return BlockedRecoveryPolicy.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return BlockedRecoveryPolicy.MANUAL_REVIEW;
+        }
+    }
+
+    private Instant parseInstant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String unblockEvidence(ExecutionStep step, BlockedRecovery recovery) {
+        try {
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("schemaVersion", 1);
+            evidence.put("previousStatus", "BLOCKED");
+            evidence.put("blockedReason", recovery.reason());
+            evidence.put("recoveryPolicy", recovery.policy().name());
+            evidence.put("recoveredAt", Instant.now().toString());
+            evidence.put("recoveryAction", "AUTO_RETRY_UNBLOCK_TO_PENDING");
+            evidence.put("previousEvidenceData", step.getEvidenceData());
+            return JsonUtils.mapper().writeValueAsString(evidence);
+        } catch (Exception e) {
+            return "{\"schemaVersion\":1,\"recoveryAction\":\"AUTO_RETRY_UNBLOCK_TO_PENDING\"}";
+        }
+    }
+
     // ======================== result records ========================
 
     public record ReconciliationResult(String runId, String executionId, int stepsMarkedUnknown,
@@ -274,11 +352,38 @@ public class ProgressReconciler {
         }
     }
 
+    private record BlockedRecovery(BlockedRecoveryPolicy policy, Instant retryAfter, String reason) {
+        static BlockedRecovery manual() {
+            return new BlockedRecovery(BlockedRecoveryPolicy.MANUAL_REVIEW, null, null);
+        }
+
+        boolean canAutoRetryNow() {
+            return policy == BlockedRecoveryPolicy.AUTO_RETRY
+                    && (retryAfter == null || !retryAfter.isAfter(Instant.now()));
+        }
+
+        boolean needsHuman() {
+            return policy == BlockedRecoveryPolicy.MANUAL_REVIEW
+                    || policy == BlockedRecoveryPolicy.REMEDIATION_STEP;
+        }
+
+        String nextAction(String stepKey) {
+            if (policy == BlockedRecoveryPolicy.AUTO_RETRY || policy == BlockedRecoveryPolicy.WAIT) {
+                return "wait:" + stepKey;
+            }
+            if (policy == BlockedRecoveryPolicy.REMEDIATION_STEP) {
+                return "remediate:" + stepKey;
+            }
+            return "manual:" + stepKey;
+        }
+    }
+
     public record ExecutionReconciliation(String executionId, int totalRequired, int verified, int applied,
-                                          int unknown, int blocked, boolean allVerified, boolean needsHuman,
+                                          int unknown, int blocked, int recoveredBlocked,
+                                          boolean allVerified, boolean needsHuman,
                                           String nextAction) {
         static ExecutionReconciliation notFound(String executionId) {
-            return new ExecutionReconciliation(executionId, 0, 0, 0, 0, 0, false, false, null);
+            return new ExecutionReconciliation(executionId, 0, 0, 0, 0, 0, 0, false, false, null);
         }
     }
 }

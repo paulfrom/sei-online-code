@@ -247,6 +247,45 @@ public class ProgressService {
         return ProgressOperationResult.ok(step);
     }
 
+    /**
+     * 标记 BLOCKED。阻塞恢复策略写入 evidenceData JSON；仅 owner 匹配时允许，防止旁路改状态。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ProgressOperationResult<ExecutionStep> markBlocked(String stepId, WriteAuthorization auth,
+                                                              String evidenceData) {
+        int updated = executionStepDao.markBlocked(stepId, auth.getRunId(), auth.getClaimToken(),
+                ExecutionStepStatus.BLOCKED, ExecutionStepStatus.IN_PROGRESS,
+                ExecutionStepStatus.APPLIED, ExecutionStepStatus.UNKNOWN, evidenceData);
+        ExecutionStep step = executionStepDao.findOne(stepId);
+        if (updated == 0) {
+            if (step != null && step.getStatus() == ExecutionStepStatus.BLOCKED && matchesOwner(step, auth)) {
+                return ProgressOperationResult.ok(step);
+            }
+            return staleOrInvalid(step, auth, "markBlocked");
+        }
+        bumpSnapshot(step.getExecutionId());
+        return ProgressOperationResult.ok(step);
+    }
+
+    /**
+     * 自动解除可重试 BLOCKED step：回到 PENDING，等待新的 Run claim。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ProgressOperationResult<ExecutionStep> unblockForRetry(String stepId, String evidenceData) {
+        ExecutionStep step = executionStepDao.findOne(stepId);
+        if (step == null) {
+            return ProgressOperationResult.notFound("step not found: " + stepId);
+        }
+        int updated = executionStepDao.unblockForRetry(stepId, ExecutionStepStatus.BLOCKED,
+                ExecutionStepStatus.PENDING, evidenceData);
+        if (updated == 0) {
+            return ProgressOperationResult.invalidState(
+                    "unblockForRetry rejected: current status=" + step.getStatus());
+        }
+        bumpSnapshot(step.getExecutionId());
+        return ProgressOperationResult.ok(executionStepDao.findOne(stepId));
+    }
+
     // ============================ Checkpoint & Observation ============================
 
     /**

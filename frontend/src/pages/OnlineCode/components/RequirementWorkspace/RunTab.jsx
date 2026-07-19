@@ -1,9 +1,9 @@
 /**
  * Run tab: filterable run history list; click a row to open the log drawer.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
-import { Button, Space, Table, Tag } from '@ead/suid';
+import { Button, FilterView, Space, Table, Tag } from '@ead/suid';
 import { ArrowLeftOutlined } from '@ead/suid-icons';
 
 const useStyles = createStyles(({ token, css }) => ({
@@ -26,6 +26,11 @@ const RUN_TYPE_META = {
   AGENT: { color: 'blue', label: 'Agent' },
   SYSTEM: { color: 'default', label: '系统' },
 };
+
+const RUN_TYPE_OPTIONS = [
+  { key: 'AGENT', title: 'Agent' },
+  { key: 'SYSTEM', title: '系统' },
+];
 
 const TERMINAL_REASON_LABELS = {
   SUCCEEDED: '成功',
@@ -60,10 +65,19 @@ const computeDuration = (started, finished) => {
  */
 const RunTab = ({ runs, overview, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog }) => {
   const { styles } = useStyles();
+  const [runTypeKeys, setRunTypeKeys] = useState([]);
 
   const filteredRuns = useMemo(() => {
-    return taskFilterId ? runs.filter((r) => r.codingTaskId === taskFilterId) : runs;
-  }, [runs, taskFilterId]);
+    return runs.filter((run) => {
+      if (taskFilterId && run.codingTaskId !== taskFilterId) {
+        return false;
+      }
+      if (runTypeKeys.length > 0 && !runTypeKeys.includes(run.runType)) {
+        return false;
+      }
+      return true;
+    });
+  }, [runs, taskFilterId, runTypeKeys]);
 
   // Progress-ledger enrichment from the authoritative overview: maps runId ->
   // RecentRunDto so repeated Runs visibly share an Execution, show their latest
@@ -176,6 +190,15 @@ const RunTab = ({ runs, overview, taskFilterId, onClearTaskFilter, onBackToTask,
   return (
     <div>
       <div className={styles.toolbar}>
+        <FilterView
+          labelTitle="Run 类型"
+          dataSource={RUN_TYPE_OPTIONS}
+          selectedKeys={runTypeKeys}
+          multiSelect
+          onChange={(selectedItems = []) => {
+            setRunTypeKeys(selectedItems.map((item) => item.key));
+          }}
+        />
         {taskFilterId && (
           <Space>
             <Tag color="blue">已按任务筛选</Tag>

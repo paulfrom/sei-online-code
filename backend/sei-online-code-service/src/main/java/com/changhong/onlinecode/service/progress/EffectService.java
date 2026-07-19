@@ -196,7 +196,15 @@ public class EffectService {
                 // 外部查询确认结果
                 effect.setResultSnapshot(externalResult);
                 effectDao.save(effect);
-                markConfirmed(effectId);
+                int updated = effectDao.confirmUnknownEffect(effectId, ExecutionEffectStatus.CONFIRMED,
+                        ExecutionEffectStatus.UNKNOWN);
+                if (updated == 0) {
+                    log.warn("reconcile: UNKNOWN→CONFIRMED CAS 失败 effectId={}, currentStatus={}",
+                            effectId, effect.getStatus());
+                } else {
+                    effect.setStatus(ExecutionEffectStatus.CONFIRMED);
+                    effect.setConfirmedAt(new Date());
+                }
                 log.info("reconcile: effectId={} UNKNOWN→CONFIRMED via external query", effectId);
             }
         } catch (Exception e) {
