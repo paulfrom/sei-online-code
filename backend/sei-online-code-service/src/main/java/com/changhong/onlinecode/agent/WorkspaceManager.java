@@ -9,13 +9,14 @@ import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.service.ConfigService;
+import com.changhong.onlinecode.service.GitApi;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.gitlab4j.api.Constants;
 import org.gitlab4j.api.GitLabApi;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedInputStream;
@@ -82,11 +83,13 @@ public class WorkspaceManager {
     private final ProjectDao projectDao;
     private final ConfigService configService;
     private final ScaffoldGenerator scaffoldGenerator;
+    private final GitApi gitApi;
     /**
      * Git 会用 index.lock/config.lock 保护仓库写操作；同一 JVM 内必须先按物理路径串行化工作区初始化，
      * 否则多个 worker 会在业务执行槽登记前同时进入 git init/checkout。
      */
     private final ConcurrentMap<Path, ReentrantLock> workspaceLocks = new ConcurrentHashMap<>();
+    private final OcConfig ocConfig;
 
     @Autowired(required = false)
     private RequirementDao requirementDao;
@@ -94,16 +97,18 @@ public class WorkspaceManager {
     @Autowired(required = false)
     private RequirementWorkspaceDao requirementWorkspaceDao;
 
-    @Value("${oc.gitlab.host:}")
-    private String gitlabHost;
-
-    @Value("${oc.gitlab.token:}")
-    private String gitlabToken;
-
-    public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator) {
+    @Autowired
+    public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator,
+                            GitApi gitApi, OcConfig ocConfig) {
         this.projectDao = projectDao;
         this.configService = configService;
         this.scaffoldGenerator = scaffoldGenerator;
+        this.gitApi = gitApi;
+        this.ocConfig = ocConfig;
+    }
+
+    public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator) {
+        this(projectDao, configService, scaffoldGenerator, null, null);
     }
 
     void setRequirementDao(RequirementDao requirementDao) {
@@ -509,8 +514,10 @@ public class WorkspaceManager {
             throw new IOException("工作区缺少父目录: " + workspaceDir);
         }
         Files.createDirectories(parent);
-        runCommand(parent, "git", "clone", gitUrl.trim(), workspaceDir.getFileName().toString());
-        ensureLocalGitConfig(workspaceDir);
+        if (gitApi == null) {
+            throw new IllegalStateException("GitApi 未初始化，无法克隆项目仓库");
+        }
+        gitApi.cloneRepository(gitUrl.trim(), workspaceDir);
     }
 
     private void materializeTemplateWorkspace(PlatformConfig config, Project project, Path workspaceDir) {
@@ -580,7 +587,7 @@ public class WorkspaceManager {
         Map<String, String> replaceData = buildReplaceData(project);
         Map<String, String> backendReplaceData = new HashMap<>(replaceData);
         putPackageData(backendReplaceData, derivePackageName(project));
-        String resolvedHost = nullToEmpty(templateRepo.host(), nullToEmpty(gitlabHost));
+        String resolvedHost = nullToEmpty(templateRepo.host(), nullToEmpty(ocConfig.getGitlabHost()));
 
         try (InputStream is = getGitLabApi(resolvedHost).getRepositoryApi()
                 .getRepositoryArchive(templateRepo.projectPath(), null, Constants.ArchiveFormat.ZIP);
@@ -632,11 +639,11 @@ public class WorkspaceManager {
         if (resolvedHost.isBlank()) {
             throw new IllegalStateException("未配置 GitLab Host，无法初始化 GitLabApi");
         }
-        if (nullToEmpty(gitlabToken).isBlank()) {
+        if (nullToEmpty(ocConfig.getGitlabToken()).isBlank()) {
             throw new IllegalStateException("未配置 oc.gitlab.token，无法拉取模板仓归档");
         }
         try {
-            GitLabApi gitLabApi = new GitLabApi(resolvedHost, gitlabToken.trim());
+            GitLabApi gitLabApi = new GitLabApi(resolvedHost, ocConfig.getGitlabToken().trim());
             gitLabApi.setRequestTimeout(60 * 1000, 120 * 1000);
             return gitLabApi;
         } catch (Exception e) {

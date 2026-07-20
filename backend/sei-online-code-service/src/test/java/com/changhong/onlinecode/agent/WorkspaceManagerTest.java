@@ -7,6 +7,7 @@ import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.ConfigService;
+import com.changhong.onlinecode.service.GitApi;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -26,6 +27,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -391,7 +395,14 @@ class WorkspaceManagerTest {
 
         ConfigService configService = mock(ConfigService.class);
         ProjectDao projectDao = mock(ProjectDao.class);
-        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+        GitApi gitApi = mock(GitApi.class);
+        doAnswer(invocation -> {
+            Path destination = invocation.getArgument(1);
+            runGit(tempDir, "clone", projectRepo.toUri().toString(), destination.toString());
+            return null;
+        }).when(gitApi).cloneRepository(eq(projectRepo.toUri().toString()), any(Path.class));
+        WorkspaceManager workspaceManager = new WorkspaceManager(
+                projectDao, configService, new ScaffoldGenerator(), gitApi);
 
         PlatformConfig config = new PlatformConfig();
         config.setWorkspaceRoot(tempDir.resolve("workspaces-project-git").toString());

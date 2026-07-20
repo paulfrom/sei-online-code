@@ -12,12 +12,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -62,6 +66,15 @@ class CodingTaskSchedulerTest {
             savedTasks.incrementAndGet();
             return invocation.getArgument(0);
         });
+    }
+
+    @Test
+    void schedule_startsNewTransactionWhenInvokedFromAfterCommitCallback() throws Exception {
+        Method entryPoint = CodingTaskScheduler.class.getMethod("schedule", String.class);
+        Transactional transactional = entryPoint.getAnnotation(Transactional.class);
+
+        assertNotNull(transactional);
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation());
     }
 
     @Test

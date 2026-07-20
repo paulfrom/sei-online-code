@@ -1,5 +1,6 @@
 package com.changhong.onlinecode.service;
 
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.dao.PlatformConfigDao;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.sei.core.dao.BaseEntityDao;
@@ -7,7 +8,6 @@ import com.changhong.sei.core.service.BaseEntityService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +18,9 @@ import java.util.Objects;
  * 平台配置服务（B34）。契约 Phase 5 §1.1、§2 端点 31/32。
  *
  * <p>单例：{@link #get()} 缺失时补建默认行、{@link #save} 幂等 upsert 固定主键
- * {@link PlatformConfig#FIXED_ID} 的那一行。工作区根目录采用 env-with-fallback（backend 规则 #11）：
- * 配置行 workspaceRoot 非空优先；否则回退环境变量 {@code oc.workspace.root}；仍空回退
- * {@code ${java.io.tmpdir}/sei-online-code}。</p>
+ * {@link PlatformConfig#FIXED_ID} 的那一行。工作区根目录和 GitLab 配置均采用 env-with-fallback（backend 规则 #11）：
+ * 配置行非空优先；否则回退同名环境变量（{@code oc.gitlab.api-base-url} / {@code oc.gitlab.token} / 等）；
+ * 仍空则按各字段语义兜底（如 targetBranch 默认 {@code main}）。</p>
  *
  * <p>框架 {@code BaseEntityService.save} 对「预置且尚不存在的主键」会拒绝（视为非法更新），
  * 故固定主键单例的首次插入直接走 {@link EntityManager#persist}；后续更新走 {@code dao.save}（merge）。</p>
@@ -34,16 +34,14 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
     private static final String DEFAULT_WORKSPACE_DIR = "sei-online-code";
 
     private final PlatformConfigDao dao;
+    private final OcConfig ocConfig;
 
     @PersistenceContext
     private EntityManager entityManager;
 
-    /** 工作区根环境覆盖；未配置时兜底空串（backend 规则 #11 env-with-fallback）。 */
-    @Value("${oc.workspace.root:}")
-    private String envWorkspaceRoot;
-
-    public ConfigService(PlatformConfigDao dao) {
+    public ConfigService(PlatformConfigDao dao, OcConfig ocConfig) {
         this.dao = dao;
+        this.ocConfig = ocConfig;
     }
 
     @Override
@@ -132,10 +130,66 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
         if (config != null && isNotBlank(config.getWorkspaceRoot())) {
             return config.getWorkspaceRoot().trim();
         }
-        if (isNotBlank(envWorkspaceRoot)) {
-            return envWorkspaceRoot.trim();
+        if (isNotBlank(ocConfig.getWorkspaceRoot())) {
+            return ocConfig.getWorkspaceRoot().trim();
         }
         return System.getProperty("java.io.tmpdir") + File.separator + DEFAULT_WORKSPACE_DIR;
+    }
+
+    /**
+     * 解析生效的 GitLab API Base URL（env-with-fallback）：
+     * 配置行 gitlabApiBaseUrl 非空优先 → 环境变量 {@code oc.gitlab.api-base-url} → {@code null}。
+     */
+    public String resolveGitlabApiBaseUrl(PlatformConfig config) {
+        if (config != null && isNotBlank(config.getGitlabApiBaseUrl())) {
+            return config.getGitlabApiBaseUrl().trim();
+        }
+        if (isNotBlank(ocConfig.getGitlabApiBaseUrl())) {
+            return ocConfig.getGitlabApiBaseUrl().trim();
+        }
+        return null;
+    }
+
+    /**
+     * 解析生效的 GitLab token（env-with-fallback）：
+     * 配置行 gitlabToken 非空优先 → 环境变量 {@code oc.gitlab.token} → {@code null}。
+     */
+    public String resolveGitlabToken(PlatformConfig config) {
+        if (config != null && isNotBlank(config.getGitlabToken())) {
+            return config.getGitlabToken().trim();
+        }
+        if (isNotBlank(ocConfig.getGitlabToken())) {
+            return ocConfig.getGitlabToken().trim();
+        }
+        return null;
+    }
+
+    /**
+     * 解析生效的 GitLab Project ID（env-with-fallback）：
+     * 配置行 gitlabProjectId 非空优先 → 环境变量 {@code oc.gitlab.project-id} → {@code null}。
+     */
+    public String resolveGitlabProjectId(PlatformConfig config) {
+        if (config != null && isNotBlank(config.getGitlabProjectId())) {
+            return config.getGitlabProjectId().trim();
+        }
+        if (isNotBlank(ocConfig.getGitlabProjectId())) {
+            return ocConfig.getGitlabProjectId().trim();
+        }
+        return null;
+    }
+
+    /**
+     * 解析生效的 GitLab 目标分支（env-with-fallback）：
+     * 配置行 gitlabTargetBranch 非空优先 → 环境变量 {@code oc.gitlab.target-branch} → {@code main}。
+     */
+    public String resolveGitlabTargetBranch(PlatformConfig config) {
+        if (config != null && isNotBlank(config.getGitlabTargetBranch())) {
+            return config.getGitlabTargetBranch().trim();
+        }
+        if (isNotBlank(ocConfig.getGitlabTargetBranch())) {
+            return ocConfig.getGitlabTargetBranch().trim();
+        }
+        return "main";
     }
 
     private static boolean isNotBlank(String s) {

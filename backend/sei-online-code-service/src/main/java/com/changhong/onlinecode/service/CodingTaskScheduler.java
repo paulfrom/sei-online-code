@@ -17,6 +17,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
@@ -69,6 +70,7 @@ public class CodingTaskScheduler {
      *
      * @param requirementId 需求 ID
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void schedule(String requirementId) {
         if (requirementId == null || requirementId.isBlank()) {
             return;
@@ -85,7 +87,6 @@ public class CodingTaskScheduler {
         }
     }
 
-    @Transactional(rollbackFor = Exception.class)
     protected void doSchedule(String requirementId) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {

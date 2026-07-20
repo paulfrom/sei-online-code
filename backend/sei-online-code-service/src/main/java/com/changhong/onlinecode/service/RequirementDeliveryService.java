@@ -18,7 +18,6 @@ import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.ExecutionEffect;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
-import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
@@ -65,6 +64,7 @@ public class RequirementDeliveryService {
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final EffectService effectService;
+    private final GitApi gitApi;
 
     @Transactional(rollbackFor = Exception.class)
     public void deliver(String requirementId, String executionPlanId) {
@@ -142,42 +142,40 @@ public class RequirementDeliveryService {
     }
 
     private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan) throws Exception {
-        PlatformConfig config = configService.get();
-        if (isBlank(config.getGitlabApiBaseUrl()) || isBlank(config.getGitlabToken())
-                || isBlank(config.getGitlabProjectId())) {
-            throw new IllegalStateException("GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填");
+        String gitlabApiBaseUrl = configService.resolveGitlabApiBaseUrl(null);
+        String gitlabToken = configService.resolveGitlabToken(null);
+        String gitlabProjectId = configService.resolveGitlabProjectId(null);
+        String gitlabTargetBranch = configService.resolveGitlabTargetBranch(null);
+        if (isBlank(gitlabApiBaseUrl) || isBlank(gitlabToken) || isBlank(gitlabProjectId)) {
+            throw new IllegalStateException(
+                    "GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填，" +
+                    "请通过环境变量 oc.gitlab.api-base-url / oc.gitlab.token / oc.gitlab.project-id 或平台配置页面设置");
         }
         Path workspace = workspaceManager.resolveRequirementWorkspace(requirement.getProjectId(), requirement.getId());
         String branch = branchName(requirement);
-        String targetBranch = isBlank(config.getGitlabTargetBranch()) ? "main" : config.getGitlabTargetBranch();
-
-        // EXE-006: 交付前合入最新目标分支，避免冲突与基线漂移（ADR-001 §6）
-        runCommand(workspace, "git", "fetch", "origin", targetBranch);
-        try {
-            runCommand(workspace, "git", "merge", "--ff-only", "origin/" + targetBranch);
-        } catch (Exception e) {
-            log.warn("doDeliver: 快进合并目标分支失败 branch={}, target={}", branch, targetBranch, e);
-            throw new IllegalStateException("无法快进合并目标分支 " + targetBranch + "，存在冲突需人工解决", e);
-        }
+        String targetBranch = gitlabTargetBranch;
 
         runCommand(workspace, "git", "checkout", "-B", branch);
         runCommand(workspace, "git", "add", ".");
         if (!runCommand(workspace, "git", "diff", "--cached", "--quiet").success()) {
             runCommand(workspace, "git", "commit", "-m", "feat: deliver requirement " + shortId(requirement.getId()));
         }
-        String commitHash = runCommand(workspace, "git", "rev-parse", "HEAD").stdout().trim();
-        List<String> changedFiles = runCommand(workspace, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-                .stdout().lines().filter(line -> !line.isBlank()).toList();
+        String localCommitHash = runCommand(workspace, "git", "rev-parse", "HEAD").stdout().trim();
 
         // EXE-006: push effect ledger（ADR-001 §5 幂等）
-        String projectKey = config.getGitlabProjectId().trim();
-        String pushEffectKey = pushEffectKey(projectKey, branch, commitHash);
-        String pushHash = sha256(commitHash);
+        String projectKey = gitlabProjectId;
+        String pushEffectKey = pushEffectKey(projectKey, branch, localCommitHash);
+        String pushHash = sha256(localCommitHash);
         ExecutionEffect pushEffect = effectService.findOrPrepare(
                 pushEffectKey, ExecutionEffectType.PUSH, pushHash, requirement.getId(), "deliver", 0L);
+        String commitHash;
+        List<String> changedFiles;
         if (pushEffect.getStatus() == ExecutionEffectStatus.PREPARED) {
             try {
-                runCommand(workspace, "git", "push", "-u", "origin", branch);
+                GitApi.UploadResult upload = gitApi.upload(workspace, projectKey, branch, targetBranch,
+                        "feat: deliver requirement " + shortId(requirement.getId()));
+                commitHash = upload.commitHash();
+                changedFiles = upload.changedFiles();
                 effectService.markApplied(pushEffect.getId(), toJson(Map.of("branch", branch, "commitHash", commitHash)),
                         branch + "@" + commitHash);
                 effectService.markConfirmed(pushEffect.getId());
@@ -188,10 +186,13 @@ public class RequirementDeliveryService {
         } else if (pushEffect.getStatus() != ExecutionEffectStatus.APPLIED
                 && pushEffect.getStatus() != ExecutionEffectStatus.CONFIRMED) {
             throw new IllegalStateException("push effect 状态异常: key=" + pushEffectKey + " status=" + pushEffect.getStatus());
+        } else {
+            commitHash = gitApi.getBranchHead(projectKey, branch);
+            changedFiles = List.of();
         }
 
-        GitLabApi gitLabApi = new GitLabApi(config.getGitlabApiBaseUrl().trim(), config.getGitlabToken().trim());
-        Object projectId = config.getGitlabProjectId().trim();
+        GitLabApi gitLabApi = new GitLabApi(gitlabApiBaseUrl, gitlabToken);
+        Object projectId = gitlabProjectId;
         String title = "Requirement " + shortId(requirement.getId()) + ": " + requirement.getTitle();
         String description = "Automated delivery for requirement " + requirement.getId()
                 + "\n\nExecutionPlan: " + plan.getId()

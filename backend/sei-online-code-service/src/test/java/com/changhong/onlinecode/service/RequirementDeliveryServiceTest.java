@@ -24,7 +24,7 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
         Requirement requirement = new Requirement();
         requirement.setId("requirement-12345678");
         requirement.setActiveLoopId("new-loop-12345678");
@@ -42,7 +42,7 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
         Method method = RequirementDeliveryService.class.getDeclaredMethod("buildSuccessMetadata",
                 String.class, String.class, String.class, String.class, String.class, String.class);
         method.setAccessible(true);
@@ -66,7 +66,7 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
         Method pushKey = RequirementDeliveryService.class.getDeclaredMethod("pushEffectKey",
                 String.class, String.class, String.class);
         Method mrKey = RequirementDeliveryService.class.getDeclaredMethod("mrEffectKey",

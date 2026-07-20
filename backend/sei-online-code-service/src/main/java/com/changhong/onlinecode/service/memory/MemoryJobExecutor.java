@@ -14,6 +14,7 @@ import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.service.AgentMemoryTemplateService;
 import com.changhong.onlinecode.service.MemoryJobService;
 import com.changhong.onlinecode.service.PlatformMemoryWriterService;
@@ -21,13 +22,10 @@ import com.changhong.onlinecode.service.WorkspaceMemoryService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -79,6 +77,7 @@ public class MemoryJobExecutor {
     private final PlatformMemoryWriterService platformMemoryWriterService;
     private final CodingTaskChangeCollector changeCollector;
     private final CodingTaskMemoryUpdateAssembler updateAssembler;
+    private final OcConfig ocConfig;
 
     public MemoryJobExecutor(MemoryJobService memoryJobService,
                              ProjectDao projectDao,
@@ -91,9 +90,7 @@ public class MemoryJobExecutor {
                              PlatformMemoryWriterService platformMemoryWriterService,
                              CodingTaskChangeCollector changeCollector,
                              CodingTaskMemoryUpdateAssembler updateAssembler,
-                             @Value("${memory.rebuild.large-change-threshold:50}") int largeChangeThreshold,
-                             @Value("${memory.rebuild.critical-hits-threshold:3}") int criticalHitsThreshold,
-                             @Value("${memory.rebuild.critical-paths:build.gradle,settings.gradle,package.json,pnpm-workspace.yaml,bootstrap,routes/,.sql}") String criticalPathsCsv) {
+                             OcConfig ocConfig) {
         this.memoryJobService = memoryJobService;
         this.projectDao = projectDao;
         this.codingTaskDao = codingTaskDao;
@@ -105,24 +102,10 @@ public class MemoryJobExecutor {
         this.platformMemoryWriterService = platformMemoryWriterService;
         this.changeCollector = changeCollector;
         this.updateAssembler = updateAssembler;
-        this.largeChangeThreshold = largeChangeThreshold;
-        this.criticalHitsThreshold = criticalHitsThreshold;
-        this.criticalPaths = parseCriticalPaths(criticalPathsCsv);
-    }
-
-    /**
-     * 解析关键路径配置。空值或空白片段被忽略，结果保持插入顺序去重。
-     */
-    private static Set<String> parseCriticalPaths(String csv) {
-        Set<String> paths = new LinkedHashSet<>();
-        if (csv == null || csv.isBlank()) {
-            return paths;
-        }
-        Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .forEach(paths::add);
-        return paths;
+        this.ocConfig = ocConfig;
+        this.largeChangeThreshold = ocConfig.getLargeChangeThreshold();
+        this.criticalHitsThreshold = ocConfig.getCriticalHitsThreshold();
+        this.criticalPaths = ocConfig.getCriticalPaths();
     }
 
     /**

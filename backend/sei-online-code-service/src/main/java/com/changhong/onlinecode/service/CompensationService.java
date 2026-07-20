@@ -25,11 +25,11 @@ import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
 import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.sei.core.utils.TransactionUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -65,13 +65,8 @@ public class CompensationService {
     private final RequirementCommentService requirementCommentService;
     private final ProgressReconciler progressReconciler;
     private final ProgressService progressService;
+    private final OcConfig ocConfig;
     private final TransactionTemplate transactionTemplate;
-
-    @Value("${onlinecode.compensation.loop-stale-minutes:30}")
-    private long loopStaleMinutes = 30;
-
-    @Value("${onlinecode.compensation.run-timeout-minutes:30}")
-    private long runTimeoutMinutes = 30;
 
     public CompensationService(RequirementDao requirementDao,
                                RequirementDesignContextDao requirementDesignContextDao,
@@ -86,6 +81,7 @@ public class CompensationService {
                                RequirementCommentService requirementCommentService,
                                ProgressReconciler progressReconciler,
                                ProgressService progressService,
+                               OcConfig ocConfig,
                                PlatformTransactionManager transactionManager) {
         this.requirementDao = requirementDao;
         this.requirementDesignContextDao = requirementDesignContextDao;
@@ -100,6 +96,7 @@ public class CompensationService {
         this.requirementCommentService = requirementCommentService;
         this.progressReconciler = progressReconciler;
         this.progressService = progressService;
+        this.ocConfig = ocConfig;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -129,6 +126,7 @@ public class CompensationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void timeoutRuns(Date now) {
+        long runTimeoutMinutes = ocConfig.getRunTimeoutMinutes();
         Date deadline = new Date(now.getTime() - runTimeoutMinutes * 60_000L);
         List<Run> runList = runDao.findByState(RunState.RUNNING);
         for (Run run : runList) {
@@ -404,6 +402,6 @@ public class CompensationService {
 
     private boolean isStale(Date lastEditedAt, Date now) {
         return lastEditedAt == null
-                || lastEditedAt.getTime() <= now.getTime() - loopStaleMinutes * 60_000L;
+                || lastEditedAt.getTime() <= now.getTime() - ocConfig.getLoopStaleMinutes() * 60_000L;
     }
 }
