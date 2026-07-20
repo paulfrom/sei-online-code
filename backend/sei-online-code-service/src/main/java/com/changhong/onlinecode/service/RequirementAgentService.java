@@ -26,6 +26,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
@@ -48,6 +49,8 @@ public class RequirementAgentService {
     private static final String PRD_AGENT_NAME = "prd-agent";
     private static final String MEMORY_REVIEW_AGENT_NAME = "memory-review-agent";
     private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^#{1,6}\\s+.+$");
+    private static final List<String> REQUIRED_PRD_SECTIONS = List.of(
+            "需求概述", "业务目标", "功能需求");
     private static final Pattern JSON_FENCE = Pattern.compile("(?s)```(?:json)?\\s*(\\{.*?})\\s*```");
 
     private final RequirementDao requirementDao;
@@ -316,7 +319,15 @@ public class RequirementAgentService {
                 + "\n1. 只输出 Markdown 正文，不要 JSON，不要 markdown 围栏，不要解释性前后缀。"
                 + "\n2. 至少包含：需求概述、业务目标、范围、用户场景、功能需求、非功能需求、验收标准、风险与待确认项。"
                 + "\n3. 必须包含与现有系统关系、复用/扩展/重构范围、冲突与待确认项、非目标、验收标准、规范符合性说明。"
-                + "\n4. 文档内容要可直接进入评审，而不是提纲或骨架。";
+                + "\n4. 文档内容要可直接进入评审，而不是提纲或骨架。"
+                + buildPrdValidationChecklist();
+    }
+
+    private static String buildPrdValidationChecklist() {
+        return "\n\n服务端校验项（输出必须全部满足）："
+                + "\n1. 输出内容不能为空。"
+                + "\n2. 至少包含一个 ATX Markdown 标题，格式为 `# 标题` 到 `###### 标题`。"
+                + "\n3. 必须包含以下章节关键字：" + String.join("、", REQUIRED_PRD_SECTIONS) + "。";
     }
 
     private static String normalizeMarkdown(String raw) {
@@ -343,9 +354,7 @@ public class RequirementAgentService {
         if (!MARKDOWN_HEADING.matcher(content).find()) {
             throw new IllegalArgumentException("PRD 输出缺少 Markdown 标题");
         }
-        requireKeyword(content, "需求概述");
-        requireKeyword(content, "业务目标");
-        requireKeyword(content, "功能需求");
+        REQUIRED_PRD_SECTIONS.forEach(keyword -> requireKeyword(content, keyword));
     }
 
     private static void requireKeyword(String content, String keyword) {

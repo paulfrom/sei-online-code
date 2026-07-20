@@ -60,14 +60,30 @@ public interface RunDao extends BaseEntityDao<Run> {
     Optional<Run> findTopByCodingTaskIdAndStateInOrderByCreatedDateDesc(String codingTaskId,
                                                                         List<com.changhong.onlinecode.dto.enums.RunState> states);
 
+    Optional<Run> findTopByCodingTaskIdAndAgentNameAndStateOrderByCreatedDateDesc(
+            String codingTaskId,
+            String agentName,
+            com.changhong.onlinecode.dto.enums.RunState state);
+
     Optional<Run> findTopByRequirementIdAndLoopIdAndStateInOrderByCreatedDateDesc(
             String requirementId,
             String loopId,
             List<com.changhong.onlinecode.dto.enums.RunState> states);
 
+    Optional<Run> findTopByRequirementIdAndLoopIdAndAgentNameAndStateOrderByCreatedDateDesc(
+            String requirementId,
+            String loopId,
+            String agentName,
+            com.changhong.onlinecode.dto.enums.RunState state);
+
     Optional<Run> findTopByRequirementIdAndStateInOrderByCreatedDateDesc(
             String requirementId,
             List<com.changhong.onlinecode.dto.enums.RunState> states);
+
+    Optional<Run> findTopByRequirementIdAndAgentNameAndStateOrderByCreatedDateDesc(
+            String requirementId,
+            String agentName,
+            com.changhong.onlinecode.dto.enums.RunState state);
 
     /**
      * 仅当运行仍处于期望状态时切换状态，用于终态保护。

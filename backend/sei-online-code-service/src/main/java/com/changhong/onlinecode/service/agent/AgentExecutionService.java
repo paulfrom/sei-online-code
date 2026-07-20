@@ -96,7 +96,7 @@ public class AgentExecutionService {
             AgentBriefWriter.writeBrief(workspace.pathString(), agent.getCliTool(), agent.getName(),
                     agent.getInstructions(), agent.getModel(),
                     agent.getMcpConfig() != null && !agent.getMcpConfig().isBlank(), null);
-            String prompt = composePrompt(agent, request.getPrompt());
+            String prompt = executionPrompt(agent, request, run);
             CompletableFuture<CliRunResult> future = cliRunnerRegistry.executeDetailed(workspace,
                     new AgentInvocationContext(run.getId(), logStreamKey(request), request.getCodingTaskId(),
                             agent.getId(), agent.getName(), agent.getCliTool(), agent.getModel()),
@@ -222,6 +222,14 @@ public class AgentExecutionService {
             return RunTerminalReason.CANCELLED;
         }
         return RunTerminalReason.FAILED;
+    }
+
+    private String executionPrompt(Agent agent, AgentExecutionRequest request, Run run) {
+        if ((request.getRunId() == null || request.getRunId().isBlank())
+                && run.getUserPrompt() != null && !run.getUserPrompt().isBlank()) {
+            return run.getUserPrompt();
+        }
+        return composePrompt(agent, request.getPrompt());
     }
 
     private String composePrompt(Agent agent, String runtimePrompt) {

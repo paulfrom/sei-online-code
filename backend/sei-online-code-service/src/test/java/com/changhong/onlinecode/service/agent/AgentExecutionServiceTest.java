@@ -60,13 +60,14 @@ class AgentExecutionServiceTest {
         Run run = new Run();
         run.setId("run-1");
         run.setState(RunState.RUNNING);
+        run.setUserPrompt("prompt\n\n## 上一次 Agent 执行失败\n失败原因：格式校验失败");
         when(recorder.createAgentRun(any())).thenReturn(run);
 
         CliRunResult cliResult = new CliRunResult();
         cliResult.setProcessSucceeded(true);
         cliResult.setOutput("{\"passed\":true}");
         when(registry.executeDetailed(eq(agentWorkspace), any(),
-                org.mockito.ArgumentMatchers.contains("prompt"), any()))
+                org.mockito.ArgumentMatchers.contains("失败原因：格式校验失败"), any()))
                 .thenReturn(CompletableFuture.completedFuture(cliResult));
 
         AgentExecutionRequest request = new AgentExecutionRequest();
@@ -89,7 +90,7 @@ class AgentExecutionServiceTest {
         assertEquals("task-1", commandCaptor.getValue().getCodingTaskId());
         assertEquals("agent-1", commandCaptor.getValue().getAgentId());
         verify(registry).executeDetailed(eq(agentWorkspace), any(),
-                org.mockito.ArgumentMatchers.contains("prompt"), any());
+                org.mockito.ArgumentMatchers.contains("失败原因：格式校验失败"), any());
     }
 
     @Test

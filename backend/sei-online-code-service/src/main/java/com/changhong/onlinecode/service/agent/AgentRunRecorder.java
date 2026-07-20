@@ -5,7 +5,6 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.UsageStatus;
-import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.RunNumberService;
 import org.slf4j.Logger;
@@ -15,7 +14,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
-import java.util.List;
 
 /**
  * Agent Run 记录器。
@@ -32,8 +30,6 @@ public class AgentRunRecorder {
 
     private final RunDao runDao;
     private final RunNumberService runNumberService;
-    private static final List<RunState> TERMINAL_RETRYABLE_STATES = List.of(
-            RunState.FAILED, RunState.CANCELLED);
 
     public AgentRunRecorder(RunDao runDao, RunNumberService runNumberService) {
         this.runDao = runDao;
@@ -57,9 +53,9 @@ public class AgentRunRecorder {
         run.setLogStreamKey(command.getLogStreamKey());
         run.setLoopId(command.getLoopId());
         run.setRunType(command.getRunType() == null ? RunType.AGENT : command.getRunType());
-        bindAttemptLineage(run, command);
+        Run previousFailedRun = bindAttemptLineage(run, command);
         run.setTriggerSource(command.getTriggerSource());
-        run.setUserPrompt(command.getUserPrompt());
+        run.setUserPrompt(appendPreviousFailure(command.getUserPrompt(), previousFailedRun));
         run.setMemoryContextId(command.getMemoryContextId());
         run.setWorkspaceMemoryId(command.getWorkspaceMemoryId());
         run.setWorktreePath(command.getWorktreePath());
@@ -78,47 +74,68 @@ public class AgentRunRecorder {
         return saved;
     }
 
-    private void bindAttemptLineage(Run run, AgentRunCreateCommand command) {
+    private Run bindAttemptLineage(Run run, AgentRunCreateCommand command) {
         run.setParentRunId(command.getParentRunId());
         run.setCompensatesRunId(command.getCompensatesRunId());
         run.setAttemptNo(command.getAttemptNo() == null || command.getAttemptNo() < 1
                 ? 1 : command.getAttemptNo());
 
-        if (!isCompensation(command.getTriggerSource())
-                || run.getParentRunId() != null
-                || run.getCompensatesRunId() != null) {
-            return;
+        if (run.getCompensatesRunId() != null) {
+            return runDao.findOne(run.getCompensatesRunId());
+        }
+        if (run.getParentRunId() != null) {
+            return null;
         }
 
-        Run previous = findPreviousAttempt(command);
+        Run previous = findPreviousFailedAttempt(command);
         if (previous == null) {
-            return;
+            return null;
         }
         run.setParentRunId(previous.getId());
         run.setCompensatesRunId(previous.getId());
         run.setAttemptNo(previous.getAttemptNo() == null ? 2 : previous.getAttemptNo() + 1);
+        return previous;
     }
 
-    private boolean isCompensation(TriggerSource triggerSource) {
-        return triggerSource == TriggerSource.SCHEDULED_COMPENSATION
-                || triggerSource == TriggerSource.CHAIN_COMPENSATION
-                || triggerSource == TriggerSource.RETRY
-                || triggerSource == TriggerSource.REMEDIATION;
+    private String appendPreviousFailure(String prompt, Run previousFailedRun) {
+        if (previousFailedRun == null) {
+            return prompt;
+        }
+        String reason = previousFailedRun.getFailureReason();
+        if (reason == null || reason.isBlank()) {
+            reason = previousFailedRun.getFailureSummary();
+        }
+        if (reason == null || reason.isBlank()) {
+            reason = "上一轮 Agent 执行失败，但未记录具体失败原因。";
+        }
+        StringBuilder result = new StringBuilder(prompt == null ? "" : prompt.trim());
+        if (!result.isEmpty()) {
+            result.append("\n\n");
+        }
+        result.append("## 上一次 Agent 执行失败\n")
+                .append("这是失败后的下一次执行。请先分析并修正上一次失败，不要重复相同问题。\n")
+                .append("失败原因：\n")
+                .append(reason.trim());
+        return result.toString();
     }
 
-    private Run findPreviousAttempt(AgentRunCreateCommand command) {
+    private Run findPreviousFailedAttempt(AgentRunCreateCommand command) {
+        if (command.getAgentName() == null || command.getAgentName().isBlank()) {
+            return null;
+        }
         if (command.getCodingTaskId() != null && !command.getCodingTaskId().isBlank()) {
-            return runDao.findTopByCodingTaskIdAndStateInOrderByCreatedDateDesc(
-                    command.getCodingTaskId(), TERMINAL_RETRYABLE_STATES).orElse(null);
+            return runDao.findTopByCodingTaskIdAndAgentNameAndStateOrderByCreatedDateDesc(
+                    command.getCodingTaskId(), command.getAgentName(), RunState.FAILED).orElse(null);
         }
         if (command.getRequirementId() != null && !command.getRequirementId().isBlank()
                 && command.getLoopId() != null && !command.getLoopId().isBlank()) {
-            return runDao.findTopByRequirementIdAndLoopIdAndStateInOrderByCreatedDateDesc(
-                    command.getRequirementId(), command.getLoopId(), TERMINAL_RETRYABLE_STATES).orElse(null);
+            return runDao.findTopByRequirementIdAndLoopIdAndAgentNameAndStateOrderByCreatedDateDesc(
+                    command.getRequirementId(), command.getLoopId(), command.getAgentName(),
+                    RunState.FAILED).orElse(null);
         }
         if (command.getRequirementId() != null && !command.getRequirementId().isBlank()) {
-            return runDao.findTopByRequirementIdAndStateInOrderByCreatedDateDesc(
-                    command.getRequirementId(), TERMINAL_RETRYABLE_STATES).orElse(null);
+            return runDao.findTopByRequirementIdAndAgentNameAndStateOrderByCreatedDateDesc(
+                    command.getRequirementId(), command.getAgentName(), RunState.FAILED).orElse(null);
         }
         return null;
     }

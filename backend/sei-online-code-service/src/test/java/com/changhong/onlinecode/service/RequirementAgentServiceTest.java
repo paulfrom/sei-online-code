@@ -107,6 +107,12 @@ class RequirementAgentServiceTest {
 
         service.spawnPrd("req1", null, "token-1");
 
+        ArgumentCaptor<AgentExecutionRequest> requestCaptor = ArgumentCaptor.forClass(AgentExecutionRequest.class);
+        verify(agentExecutionService).executeAsync(eq("prd-agent"), requestCaptor.capture());
+        assertTrue(requestCaptor.getValue().getPrompt().contains("服务端校验项（输出必须全部满足）"));
+        assertTrue(requestCaptor.getValue().getPrompt().contains(
+                "至少包含一个 ATX Markdown 标题，格式为 `# 标题` 到 `###### 标题`"));
+        assertTrue(requestCaptor.getValue().getPrompt().contains("需求概述、业务目标、功能需求"));
         verify(requirementDao, never()).save(any(Requirement.class));
         assertEquals(RunState.FAILED, run.getState());
         assertEquals(RunTerminalReason.SUPERSEDED, run.getTerminalReason());
