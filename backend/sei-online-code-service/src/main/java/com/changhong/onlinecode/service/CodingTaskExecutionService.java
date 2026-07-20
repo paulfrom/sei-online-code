@@ -37,7 +37,6 @@ import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.utils.TransactionUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,10 +81,6 @@ public class CodingTaskExecutionService {
     private final WorkspaceLeaseService workspaceLeaseService;
     private final RequirementWorkspaceDao requirementWorkspaceDao;
 
-    /** EXE-009: 进度账本模式开关（OFF=旧逻辑 / SHADOW=双写对比 / AUTHORITATIVE=账本权威）。 */
-    @Value("${onlinecode.progress-ledger.mode:OFF}")
-    private String progressLedgerMode = "OFF";
-
     /**
      * Requests logical cancellation and best-effort process termination.
      */
@@ -112,10 +107,6 @@ public class CodingTaskExecutionService {
         if (Objects.isNull(task)) {
             return ResultData.fail("编码任务不存在: " + id);
         }
-        if (hasActiveRun(id)) {
-            return ResultData.fail("任务已有正在执行的 Run");
-        }
-
         task.setStatus(CodingTaskStatus.RUNNING);
         codingTaskDao.save(task);
 
@@ -138,7 +129,7 @@ public class CodingTaskExecutionService {
             run.setModel(agent.getModel());
         }
         CodingTaskProgressIntegrator.ProgressPreflight preflight =
-                bindProgress(run, id, task.getRequirementId(), null, prompt, run.getBaseCommit());
+                bindProgress(run, id, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
         if (preflight.shouldSkip()) {
@@ -184,10 +175,6 @@ public class CodingTaskExecutionService {
         if (Objects.isNull(task)) {
             return ResultData.fail("编码任务不存在: " + codingTaskId);
         }
-        if (hasActiveRun(codingTaskId)) {
-            return ResultData.fail("任务已有正在执行的 Run");
-        }
-
         Agent agent = agentService.findByName(agentName);
         if (agent == null) {
             log.error("coding-task plan agent not found taskId={}, agentName={}", codingTaskId, agentName);
@@ -286,7 +273,7 @@ public class CodingTaskExecutionService {
         }
         boolean ledgerRecorded = codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
                 run, summary, changedFiles);
-        if (!ledgerRecorded && "AUTHORITATIVE".equalsIgnoreCase(progressLedgerMode)) {
+        if (!ledgerRecorded) {
             return CompletionDecision.failed(summary, "进度账本更新失败，已阻断旧式成功收口");
         }
         if (log.isDebugEnabled()) {
@@ -552,19 +539,6 @@ public class CodingTaskExecutionService {
                 .reduce((a, b) -> Objects.requireNonNullElse(a.getRunNo(), 0)
                         > Objects.requireNonNullElse(b.getRunNo(), 0) ? a : b)
                 .orElse(null);
-    }
-
-    /**
-     * EXE-009：OFF 模式保持旧逻辑（检查 RUNNING 状态）；
-     * SHADOW/AUTHORITATIVE 模式下允许重复 Run（进度账本处理幂等与 fencing）。
-     */
-    private boolean hasActiveRun(String codingTaskId) {
-        if ("AUTHORITATIVE".equalsIgnoreCase(progressLedgerMode)
-                || "SHADOW".equalsIgnoreCase(progressLedgerMode)) {
-            return false; // 账本权威：重复 Run 由 ProgressService claim/fencing 保护
-        }
-        List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
-        return runs.stream().anyMatch(r -> r.getState() == RunState.RUNNING);
     }
 
     private static String rootMessage(Throwable throwable) {

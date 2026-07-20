@@ -209,11 +209,11 @@ public class CodingTaskProgressIntegrator {
     /**
      * Agent 成功后把固定步骤推进到 VERIFIED。动态 step/tool 协议尚未接入前，这让重复 Run 能通过账本跳过。
      *
-     * @return true 表示所有可推进步骤均完成；false 表示账本推进失败，应由 AUTHORITATIVE 模式阻断旧式成功。
+     * @return true 表示所有可推进步骤均完成；false 表示账本推进失败，应阻断旧式成功收口。
      */
     public boolean recordSuccessfulCodingTaskCompletion(Run run, String summary, List<String> changedFiles) {
         if (run == null || run.getExecutionId() == null) {
-            return true;
+            return false;
         }
         for (int i = 0; i < 4; i++) {
             ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(run.getExecutionId());

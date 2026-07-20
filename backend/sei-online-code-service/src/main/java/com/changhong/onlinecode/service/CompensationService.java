@@ -67,9 +67,6 @@ public class CompensationService {
     private final ProgressService progressService;
     private final TransactionTemplate transactionTemplate;
 
-    @Value("${onlinecode.progress-ledger.mode:OFF}")
-    private String progressLedgerMode = "OFF";
-
     @Value("${onlinecode.compensation.loop-stale-minutes:30}")
     private long loopStaleMinutes = 30;
 
@@ -183,7 +180,6 @@ public class CompensationService {
         List<Requirement> candidates = new java.util.ArrayList<>(requirementDao.findByStatus(RequirementStatus.FAILED));
         requirementDao.findByStatus(RequirementStatus.PRD_GENERATING).stream()
                 .filter(requirement -> isStale(requirement.getLastEditedDate(), now))
-                .filter(requirement -> !hasActiveRun(requirement))
                 .forEach(candidates::add);
         for (Requirement requirement : candidates) {
             if (!failureInfoSupport.canRetry(requirement, now)) {
@@ -274,10 +270,6 @@ public class CompensationService {
     }
 
     private void recoverPlanning(Requirement requirement, Date now) {
-//        if (hasActiveRun(requirement) || (requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
-//                && !isStale(requirement.getLastEditedDate(), now))) {
-//            return;
-//        }
         ExecutionPlan current = currentPlan(requirement);
         if (current != null && (current.getStatus() == ExecutionPlanStatus.READY
                 || current.getStatus() == ExecutionPlanStatus.DEVELOPING)) {
@@ -366,14 +358,14 @@ public class CompensationService {
             log.info("恢复 loop 编码任务，task {}，requirement {}",
                     task.getId(), requirement.getId());
         }
-        if (!waitingForRetryWindow && !hasActiveRun(requirement)) {
+        if (!waitingForRetryWindow) {
             TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
                     requirement.getId(), requirement.getActiveLoopId()));
         }
     }
 
     private void recoverAcceptance(Requirement requirement, Date now) {
-        if (!isStale(requirement.getLastEditedDate(), now) || hasActiveRun(requirement)) {
+        if (!isStale(requirement.getLastEditedDate(), now)) {
             return;
         }
         compensationLogService.record("REQUIREMENT", requirement.getId(), "RESUME_ACCEPTANCE", true,
@@ -384,7 +376,7 @@ public class CompensationService {
     }
 
     private void recoverDelivery(Requirement requirement, Date now) {
-        if (!isStale(requirement.getLastEditedDate(), now) || hasActiveRun(requirement)) {
+        if (!isStale(requirement.getLastEditedDate(), now)) {
             return;
         }
         compensationLogService.record("REQUIREMENT", requirement.getId(), "RESUME_DELIVERY", true,
@@ -399,16 +391,6 @@ public class CompensationService {
         }
         return executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                 requirement.getId(), requirement.getActiveLoopId());
-    }
-
-    /**
-     * EXE-009：AUTHORITATIVE 模式下不检查 RUNNING 状态（进度账本管理 lease/takeover）。
-     */
-    private boolean hasActiveRun(Requirement requirement) {
-        if ("AUTHORITATIVE".equalsIgnoreCase(progressLedgerMode)) {
-            return false;
-        }
-        return !runDao.findByRequirementIdAndState(requirement.getId(), RunState.RUNNING).isEmpty();
     }
 
     private boolean isStale(Date lastEditedAt, Date now) {

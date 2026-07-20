@@ -96,6 +96,9 @@ class CodingTaskExecutionServiceTest {
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
                         null, null, null, false, "inv-test", null));
+        org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
+                        any(Run.class), any(), any()))
+                .thenReturn(true);
         com.changhong.onlinecode.service.progress.WorkspaceLeaseService workspaceLeaseService =
                 mock(com.changhong.onlinecode.service.progress.WorkspaceLeaseService.class);
         service = new CodingTaskExecutionService(
@@ -118,8 +121,7 @@ class CodingTaskExecutionServiceTest {
                 eventPublisher,
                 codingTaskProgressIntegrator,
                 workspaceLeaseService,
-                requirementWorkspaceDao,
-                "OFF"
+                requirementWorkspaceDao
         );
     }
 
@@ -654,6 +656,59 @@ class CodingTaskExecutionServiceTest {
         assertEquals("Supported outcomes: ENROLLED/WAITLISTED/FAILED", savedRun.get().getSummary());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
                 "task-file-change", true, null));
+    }
+
+    @Test
+    void executePlanTask_ledgerRecordFailure_marksDevelopmentFailed() throws Exception {
+        CodingTask task = new CodingTask();
+        task.setId("task-ledger-fail");
+        task.setRequirementId("req-ledger-fail");
+        task.setProjectId("project-ledger-fail");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("claude");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-ledger-fail")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-ledger-fail")).thenReturn(java.util.List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-ledger-fail");
+            }
+            savedRun.set(run);
+            return run;
+        });
+        when(runDao.findOne(anyString())).thenAnswer(invocation -> savedRun.get());
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-ledger-fail"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
+        when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(any(Run.class), any(), any()))
+                .thenReturn(false);
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenAnswer(invocation -> {
+                    Files.writeString(tempDir.resolve("generated-ledger-fail.txt"), "hello");
+                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(),
+                            "任务已完成", true, null));
+                });
+
+        ResultData<CodingTaskDto> result = service.executePlanTask(
+                "task-ledger-fail", "backend-dev-agent", "prompt");
+
+        assertTrue(result.successful());
+        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals("任务已完成", savedRun.get().getSummary());
+        assertEquals("进度账本更新失败，已阻断旧式成功收口", savedRun.get().getFailureReason());
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-ledger-fail", false, "进度账本更新失败，已阻断旧式成功收口"));
     }
 
     @Test

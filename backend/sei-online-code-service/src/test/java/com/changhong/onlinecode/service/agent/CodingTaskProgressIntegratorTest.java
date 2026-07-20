@@ -110,6 +110,17 @@ class CodingTaskProgressIntegratorTest {
         assertNull(result.reusedRunId());
     }
 
+    /** 权威账本模式下，未绑定 Execution 的成功收口不能绕过进度账本。 */
+    @Test
+    void recordSuccessfulCodingTaskCompletion_withoutExecution_returnsFalse() {
+        Run run = new Run();
+        run.setId("run-no-execution");
+
+        boolean result = integrator.recordSuccessfulCodingTaskCompletion(run, "done", List.of("a.java"));
+
+        assertFalse(result);
+    }
+
     private void stubExecution(String executionId) {
         TaskExecution execution = new TaskExecution();
         execution.setId(executionId);
