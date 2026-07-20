@@ -277,6 +277,15 @@ public class CompensationService {
                     requirement.getId(), requirement.getActiveLoopId()));
             return;
         }
+        if (!runDao.findByRequirementIdAndState(requirement.getId(), RunState.RUNNING).isEmpty()) {
+            log.debug("跳过 PM 规划补偿，requirement {} 仍有运行中的 Run", requirement.getId());
+            return;
+        }
+        if (requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
+                && !isStale(requirement.getLastEditedDate(), now)) {
+            log.debug("跳过 PM 规划补偿，requirement {} 的 PLANNING 状态尚未过期", requirement.getId());
+            return;
+        }
         if (!failureInfoSupport.canRetry(requirement, now)) {
             return;
         }

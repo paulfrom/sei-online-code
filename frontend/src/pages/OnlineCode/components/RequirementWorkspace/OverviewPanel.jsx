@@ -12,7 +12,7 @@
 import React, { useMemo } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Button, Space, Tag, Tooltip } from '@ead/suid';
-import { ArrowRightOutlined, StopOutlined } from '@ead/suid-icons';
+import { ArrowRightOutlined, ReloadOutlined, StopOutlined } from '@ead/suid-icons';
 import { parsePlanJson } from './parsePlanJson';
 import { AUTOMATION_STATUS_META } from './AutomationStatusBar';
 
@@ -98,7 +98,7 @@ const useStyles = createStyles(({ token, css }) => ({
     color: ${token.colorTextTertiary};
     flex-shrink: 0;
   `,
-  stopBtn: css`
+  actionBtn: css`
     margin-top: ${token.marginXS}px;
     width: 100%;
   `,
@@ -165,7 +165,10 @@ const planProgress = (tasks) => {
  *   activeLoopId?: string | null,
  *   planVersion?: number | null,
  *   autoStopEnabled: boolean,
+ *   resumeEnabled: boolean,
+ *   resuming?: boolean,
  *   stopping?: boolean,
+ *   onResume?: () => void,
  *   onStop?: () => void,
  *   onOpenPanel?: (key: 'plan'|'task'|'run'|'delivery'|'progress') => void,
  * }} props
@@ -181,7 +184,10 @@ const OverviewPanel = ({
   activeLoopId,
   planVersion,
   autoStopEnabled,
+  resumeEnabled,
+  resuming = false,
   stopping = false,
+  onResume,
   onStop,
   onOpenPanel,
 }) => {
@@ -369,6 +375,25 @@ const OverviewPanel = ({
         <ArrowRightOutlined className={styles.cardArrow} />
       </button>
 
+      <Tooltip
+        title={
+          resumeEnabled
+            ? '重新投递当前 loop 的待执行任务，不生成新计划'
+            : '仅开发中的 READY/DEVELOPING 执行计划可恢复'
+        }
+      >
+        <Button
+          className={styles.actionBtn}
+          type="primary"
+          icon={<ReloadOutlined />}
+          disabled={!resumeEnabled || stopping}
+          loading={resuming}
+          onClick={onResume}
+        >
+          恢复执行计划
+        </Button>
+      </Tooltip>
+
       {/* Stop automation — always visible, gated by autoStopEnabled */}
       <Tooltip
         title={
@@ -378,10 +403,10 @@ const OverviewPanel = ({
         }
       >
         <Button
-          className={styles.stopBtn}
+          className={styles.actionBtn}
           danger
           icon={<StopOutlined />}
-          disabled={!autoStopEnabled}
+          disabled={!autoStopEnabled || resuming}
           loading={stopping}
           onClick={onStop}
         >

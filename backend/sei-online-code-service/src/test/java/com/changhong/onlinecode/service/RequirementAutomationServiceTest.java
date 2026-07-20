@@ -10,6 +10,7 @@ import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
@@ -199,6 +200,54 @@ class RequirementAutomationServiceTest {
         assertEquals(CodingTaskStatus.PENDING, taskCaptor.getValue().getStatus());
         assertEquals(ExecutionPlanStatus.DEVELOPING, plan.getStatus());
         assertEquals("loop-recover", requirement.getActiveLoopId());
+    }
+
+    @Test
+    void resumeCurrentPlan_developingRequirement_republishesCurrentLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-manual-resume");
+        requirement.setProjectId("proj-1");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setActiveLoopId("loop-current");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setId("plan-current");
+        plan.setRequirementId(requirement.getId());
+        plan.setLoopId("loop-current");
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        plan.setPlanJson("{\"tasks\":[{\"taskKey\":\"BE-001\",\"title\":\"待恢复任务\","
+                + "\"description\":\"继续执行\",\"agent\":\"backend-dev-agent\","
+                + "\"area\":\"backend\",\"dependsOn\":[],\"fileScope\":[\"backend/\"]}]}");
+        CodingTask existing = new CodingTask();
+        existing.setId("task-existing");
+        existing.setStatus(CodingTaskStatus.SUCCEEDED);
+        when(requirementDao.findOne(requirement.getId())).thenReturn(requirement);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                requirement.getId(), "loop-current")).thenReturn(plan);
+        when(codingTaskDao.findByRequirementIdAndLoopIdAndPlanTaskKey(
+                requirement.getId(), "loop-current", "BE-001")).thenReturn(existing);
+
+        Requirement resumed = service.resumeCurrentPlan(requirement.getId());
+
+        assertEquals(requirement, resumed);
+        verify(eventPublisher).publishEvent(
+                new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId()));
+        assertEquals(CodingTaskStatus.SUCCEEDED, existing.getStatus());
+        verify(codingTaskDao).save(existing);
+    }
+
+    @Test
+    void resumeCurrentPlan_nonDevelopingRequirement_rejects() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-not-developing");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
+        when(requirementDao.findOne(requirement.getId())).thenReturn(requirement);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> service.resumeCurrentPlan(requirement.getId()));
+
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test

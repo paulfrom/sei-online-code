@@ -64,6 +64,21 @@ test('stop automation uses the requirement-level cancellation endpoint', () => {
   assert.doesNotMatch(hook, /running\.map\(\(t\) => cancelCodingTask/);
 });
 
+test('resume automation is gated to the current developing plan and calls the requirement endpoint', () => {
+  const service = read('src/services/requirement.js');
+  const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
+  const container = read('src/pages/OnlineCode/components/RequirementWorkspace/index.tsx');
+  const overview = read('src/pages/OnlineCode/components/RequirementWorkspace/OverviewPanel.jsx');
+  assert.match(service, /requirement\/\$\{id\}\/resume/);
+  assert.match(hook, /resumeRequirementAutomation\(requirementId\)/);
+  assert.match(container, /requirement\.status === 'PRD_CONFIRMED'/);
+  assert.match(container, /requirement\.automationStatus === 'DEVELOPING'/);
+  assert.match(container, /\['READY', 'DEVELOPING'\]\.includes\(executionPlan\?\.status\)/);
+  assert.match(overview, /恢复执行计划/);
+  assert.match(overview, /loading=\{resuming\}/);
+  assert.match(overview, /onClick=\{onResume\}/);
+});
+
 test('frontend contracts no longer expose the retired detailed-design flow or manual task run', () => {
   const shared = read('src/services/onlineCodeTypes.ts');
   const local = read('src/pages/OnlineCode/components/RequirementWorkspace/types.ts');

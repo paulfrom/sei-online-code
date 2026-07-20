@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -108,6 +109,21 @@ class CodingTaskProgressIntegratorTest {
         assertFalse(result.shouldSkip(), "空 Execution（无步骤）不跳过");
         assertNotNull(result.invocationKey());
         assertNull(result.reusedRunId());
+    }
+
+    /** 无首个 Git commit 时用全零 SHA 持久化，不能把 null 写入账本必填列。 */
+    @Test
+    void preflight_nullBaseCommit_usesUnbornHeadPlaceholder() {
+        stubExecution("exec-unborn");
+        when(progressService.generateSnapshot("exec-unborn")).thenReturn(snapshot(0, 0, null));
+        when(runDao.findByCodingTaskId("ct-unborn")).thenReturn(Collections.emptyList());
+
+        integrator.preflight("ct-unborn", "req-1", TaskExecutionType.CODING_TASK,
+                "loop-1", 1, "prompt", "ws-1", null);
+
+        verify(progressService).findOrCreateExecution(any(), eq(TaskExecutionType.CODING_TASK),
+                eq("ct-unborn"), eq(null), eq("req-1"), eq("loop-1"), any(), eq(1), eq("ws-1"),
+                eq("0000000000000000000000000000000000000000"));
     }
 
     /** 权威账本模式下，未绑定 Execution 的成功收口不能绕过进度账本。 */

@@ -53,6 +53,9 @@ import java.util.UUID;
 @Slf4j
 public class CodingTaskProgressIntegrator {
 
+    /** Git 仓库尚无首个提交时使用的基线占位，与 WorkspaceManager#getCurrentHead 保持一致。 */
+    private static final String UNBORN_HEAD = "0000000000000000000000000000000000000000";
+
     private static final String IMPLEMENT_STEP_KEY = "implement:coding-task";
     private static final String VERIFY_STEP_KEY = "verify:coding-task";
 
@@ -100,9 +103,12 @@ public class CodingTaskProgressIntegrator {
         int effectivePlanVersion = planVersion == null ? 1 : planVersion;
         String inputHash = sha256(prompt == null ? "" : prompt);
         String executionKey = computeExecutionKey(taskType, codingTaskId, loopId, effectivePlanVersion, inputHash);
+        String effectiveBaseCommit = baseCommit == null || baseCommit.isBlank()
+                ? UNBORN_HEAD : baseCommit.trim();
 
         TaskExecution execution = progressService.findOrCreateExecution(executionKey, taskType, codingTaskId,
-                null, requirementId, loopId, inputHash, effectivePlanVersion, requirementWorkspaceId, baseCommit);
+                null, requirementId, loopId, inputHash, effectivePlanVersion,
+                requirementWorkspaceId, effectiveBaseCommit);
         if (taskType == TaskExecutionType.CODING_TASK) {
             declareFixedCodingTaskSteps(execution.getId(), effectivePlanVersion, inputHash);
         }

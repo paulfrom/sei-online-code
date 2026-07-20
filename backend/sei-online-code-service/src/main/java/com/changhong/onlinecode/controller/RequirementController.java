@@ -112,6 +112,16 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     }
 
     @Override
+    public ResultData<RequirementDto> resumeAutomation(String id) {
+        try {
+            Requirement requirement = requirementAutomationService.resumeCurrentPlan(id);
+            return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    @Override
     public ResultData<RequirementDto> stopAutomation(String id) {
         try {
             Requirement requirement = requirementAutomationService.stopAutomation(id);

@@ -89,8 +89,13 @@ public class PmAgentClient {
             return null;
         }
 
+        PmPlanResult result = parsePlanJson(execution.output(), requirement.getId(), loopId);
+        if (result == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 返回内容无法解析为有效计划 JSON");
+            return null;
+        }
         markRunSucceeded(execution.runId());
-        return parsePlanJson(execution.output(), requirement.getId(), loopId);
+        return result;
     }
 
     /**
@@ -127,8 +132,13 @@ public class PmAgentClient {
             return null;
         }
 
+        PmAcceptanceResult result = parseAcceptanceJson(execution.output());
+        if (result == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 返回内容无法解析为有效验收 JSON");
+            return null;
+        }
         markRunSucceeded(execution.runId());
-        return parseAcceptanceJson(execution.output());
+        return result;
     }
 
     private AgentExecutionResult executeAgent(String projectId, String requirementId, String loopId, String prompt,
@@ -326,7 +336,7 @@ public class PmAgentClient {
 
     private PmPlanResult parsePlanJson(String json, String requirementId, String loopId) {
         try {
-            JsonNode root = JsonUtils.mapper().readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(json));
             String goal = root.path("goal").asText("");
             List<String> risks = readStringList(root.path("risks"));
             List<ValidationCommand> validationCommands = readValidationCommands(root.path("validation"));
@@ -369,7 +379,7 @@ public class PmAgentClient {
 
     private PmAcceptanceResult parseAcceptanceJson(String json) {
         try {
-            JsonNode root = JsonUtils.mapper().readTree(json);
+            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(json));
             boolean accepted = root.path("accepted").asBoolean(false);
             String summary = root.path("summary").asText("");
             List<String> findings = readStringList(root.path("findings"));
@@ -405,6 +415,23 @@ public class PmAgentClient {
             LOGGER.warn("pm-agent acceptance JSON parse failed", e);
             return null;
         }
+    }
+
+    /**
+     * 从 agent 文本输出中提取 JSON 对象，兼容 Markdown 围栏及前后说明文字。
+     * 若输出不包含完整 JSON 对象则原样返回，由 Jackson 产生解析失败信号。
+     */
+    private String extractJsonObject(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return trimmed;
     }
 
     private boolean isValidTaskGraph(List<RequirementAutomationService.PlanTask> tasks) {

@@ -21,6 +21,7 @@ import {
   editPrd,
   confirmPrd,
   regeneratePrd,
+  resumeRequirementAutomation,
   stopRequirementAutomation,
 } from '@/services/requirement';
 // @ts-ignore JS service module has no declaration file
@@ -352,6 +353,15 @@ export function useRequirementWorkspace(requirementId) {
         } else {
           message.error((res && res.message) || '重跑失败');
         }
+      },
+      async resumeAutomation() {
+        const res = await resumeRequirementAutomation(requirementId);
+        if (!res || !res.success) {
+          message.error((res && res.message) || '恢复执行计划失败');
+          return;
+        }
+        message.success('已重新触发当前执行计划');
+        await refresh();
       },
       async stopAutomation() {
         const res = await stopRequirementAutomation(requirementId);

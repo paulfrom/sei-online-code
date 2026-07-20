@@ -12,8 +12,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -92,6 +93,42 @@ class PmAgentClientTest {
     }
 
     @Test
+    void generatePlan_nonJsonOutputMarksRunFailed() {
+        RunDao runDao = mock(RunDao.class);
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
+        AtomicReference<Run> savedRun = new AtomicReference<>();
+        Run run = new Run();
+        run.setId("run-invalid-json");
+        run.setState(RunState.RUNNING);
+        savedRun.set(run);
+        when(runDao.findOne("run-invalid-json")).thenAnswer(invocation -> savedRun.get());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run saved = invocation.getArgument(0);
+            savedRun.set(saved);
+            return saved;
+        });
+        when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult(
+                "run-invalid-json", """
+                ---
+
+                **执行计划已输出。**
+                """, true, null));
+
+        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
+        Requirement requirement = new Requirement();
+        requirement.setId("requirement-1");
+        requirement.setProjectId("project-1");
+
+        PmAgentClient.PmPlanResult result = client.generatePlan(requirement, "loop-1",
+                ExecutionPlanType.INITIAL, null, List.of(), null);
+
+        assertNull(result);
+        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals("pm-agent 返回内容无法解析为有效计划 JSON", savedRun.get().getFailureReason());
+    }
+
+    @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
 
@@ -129,6 +166,24 @@ class PmAgentClientTest {
     }
 
     @Test
+    void parsePlan_extractsJsonFromMarkdownOutput() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient.PmPlanResult result = parsePlan(client, """
+                计划如下：
+                ```json
+                {"goal":"g","tasks":[{"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
+                "area":"backend","dependsOn":[],"fileScope":["backend/"],
+                "acceptanceCriteria":["接口测试通过"]}],"risks":[],"validation":{"commands":[]}}
+                ```
+                以上为执行计划。
+                """);
+
+        assertNotNull(result);
+        assertEquals("g", result.goal());
+        assertEquals("BE-1", result.tasks().get(0).taskKey());
+    }
+
+    @Test
     void parsePlan_acceptsExplicitTestAgentValidationTask() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
@@ -144,10 +199,30 @@ class PmAgentClientTest {
         assertEquals(List.of("BE-1"), result.tasks().get(1).dependsOn());
     }
 
+    @Test
+    void parseAcceptance_extractsJsonFromMarkdownOutput() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient.PmAcceptanceResult result = parseAcceptance(client, """
+                ```json
+                {"accepted":true,"summary":"验收通过","findings":[],"remediationTasks":[]}
+                ```
+                """);
+
+        assertNotNull(result);
+        assertTrue(result.accepted());
+        assertEquals("验收通过", result.summary());
+    }
+
     private PmAgentClient.PmPlanResult parsePlan(PmAgentClient client, String json) throws Exception {
         Method method = PmAgentClient.class.getDeclaredMethod("parsePlanJson",
                 String.class, String.class, String.class);
         method.setAccessible(true);
         return (PmAgentClient.PmPlanResult) method.invoke(client, json, "requirement-1", "loop-1");
+    }
+
+    private PmAgentClient.PmAcceptanceResult parseAcceptance(PmAgentClient client, String json) throws Exception {
+        Method method = PmAgentClient.class.getDeclaredMethod("parseAcceptanceJson", String.class);
+        method.setAccessible(true);
+        return (PmAgentClient.PmAcceptanceResult) method.invoke(client, json);
     }
 }

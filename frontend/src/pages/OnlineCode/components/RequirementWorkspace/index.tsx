@@ -102,6 +102,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   // Tracks whether the task panel was reached from the execution plan, so a
   // "back to plan" affordance can be offered. Reset by other entry points.
   const [taskPanelFromPlan, setTaskPanelFromPlan] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [stopping, setStopping] = useState(false);
 
   const handleBack = useCallback(() => {
@@ -193,6 +194,15 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     }
   }, [actions]);
 
+  const handleResume = useCallback(async () => {
+    setResuming(true);
+    try {
+      await actions.resumeAutomation();
+    } finally {
+      setResuming(false);
+    }
+  }, [actions]);
+
   if (loading) {
     return (
       <PageContainer>
@@ -213,6 +223,9 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
 
   const autoStopEnabled = ['PLANNING', 'DEVELOPING', 'VALIDATING', 'ACCEPTING']
     .includes(requirement.automationStatus);
+  const resumeEnabled = requirement.status === 'PRD_CONFIRMED'
+    && requirement.automationStatus === 'DEVELOPING'
+    && ['READY', 'DEVELOPING'].includes(executionPlan?.status);
 
   const rightColumn = (
     <OverviewPanel
@@ -226,7 +239,10 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
       activeLoopId={activeLoopId}
       planVersion={planVersion}
       autoStopEnabled={autoStopEnabled}
+      resumeEnabled={resumeEnabled}
+      resuming={resuming}
       stopping={stopping}
+      onResume={handleResume}
       onStop={handleStop}
       onOpenPanel={handleOpenPanel}
     />

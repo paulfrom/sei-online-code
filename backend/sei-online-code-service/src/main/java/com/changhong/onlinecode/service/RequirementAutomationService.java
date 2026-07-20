@@ -303,7 +303,8 @@ public class RequirementAutomationService {
         appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
                 RequirementCommentType.EXECUTION_PLAN, summary + "\n\n" + renderTasks(planResult.tasks()),
                 planCommentMetadata(plan));
-        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), planResult.tasks());
+        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(),
+                planResult.tasks(), false);
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
         if (failureInfoSupport != null) {
@@ -344,7 +345,7 @@ public class RequirementAutomationService {
                     requirementId, plan.getId());
             return false;
         }
-        createCodingTasks(requirementId, plan.getId(), loopId, requirement.getProjectId(), planTasks);
+        createCodingTasks(requirementId, plan.getId(), loopId, requirement.getProjectId(), planTasks, true);
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
@@ -352,6 +353,34 @@ public class RequirementAutomationService {
         TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
                 new CodingTaskSchedulingEvents.ScheduleRequested(requirementId)));
         return true;
+    }
+
+    /**
+     * 人工恢复当前执行计划。只重新投递当前 loop，不创建新计划或新 loop。
+     *
+     * @param requirementId 需求 ID
+     * @return 恢复后的需求
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Requirement resumeCurrentPlan(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (requirement.getStatus() != RequirementStatus.PRD_CONFIRMED) {
+            throw new IllegalStateException("仅已确认 PRD 的需求可恢复执行计划");
+        }
+        if (requirement.getAutomationStatus() != RequirementAutomationStatus.DEVELOPING) {
+            throw new IllegalStateException("仅开发中的需求可恢复执行计划");
+        }
+        String loopId = requirement.getActiveLoopId();
+        if (loopId == null || loopId.isBlank()) {
+            throw new IllegalStateException("当前需求没有可恢复的 loop");
+        }
+        if (!resumeDevelopmentLoop(requirementId, loopId)) {
+            throw new IllegalStateException("当前 loop 没有可恢复的执行计划");
+        }
+        return requirement;
     }
 
     private String interruptActiveLoop(Requirement requirement, RequirementComment comment) {
@@ -413,10 +442,12 @@ public class RequirementAutomationService {
     }
 
     private void createCodingTasks(String requirementId, String executionPlanId, String loopId,
-                                   String projectId, List<PlanTask> planTasks) {
+                                   String projectId, List<PlanTask> planTasks,
+                                   boolean preserveExistingState) {
         for (PlanTask planTask : planTasks) {
             CodingTask task = codingTaskDao.findByRequirementIdAndLoopIdAndPlanTaskKey(
                     requirementId, loopId, planTask.taskKey());
+            boolean existing = task != null;
             if (task == null) {
                 task = new CodingTask();
                 task.setProjectId(projectId);
@@ -431,9 +462,11 @@ public class RequirementAutomationService {
             task.setArea(planTask.area());
             task.setDependsOn(planTask.dependsOn());
             task.setFileScope(planTask.fileScope());
-            task.setStatus(CodingTaskStatus.PENDING);
-            task.setFailureSummary(null);
-            task.setFailureDetail(null);
+            if (!existing || !preserveExistingState) {
+                task.setStatus(CodingTaskStatus.PENDING);
+                task.setFailureSummary(null);
+                task.setFailureDetail(null);
+            }
             codingTaskDao.save(task);
         }
     }
@@ -510,7 +543,8 @@ public class RequirementAutomationService {
         appendComment(requirement.getId(), loopId, RequirementCommentAuthorType.PM_AGENT, "pm-agent",
                 RequirementCommentType.EXECUTION_PLAN, "PM 生成补救执行计划。\n\n" + renderTasks(remediationTasks),
                 planCommentMetadata(plan));
-        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(), remediationTasks);
+        createCodingTasks(requirement.getId(), plan.getId(), loopId, requirement.getProjectId(),
+                remediationTasks, false);
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
