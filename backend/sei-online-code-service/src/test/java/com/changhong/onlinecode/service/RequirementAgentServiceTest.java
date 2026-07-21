@@ -196,6 +196,34 @@ class RequirementAgentServiceTest {
     }
 
     @Test
+    void reviewMemory_recoversJson_whenFindingContainsUnescapedQuotes() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req1");
+        requirement.setProjectId("p1");
+        requirement.setStatus(RequirementStatus.PRD_REVIEW);
+        requirement.setPrdContent("# PRD");
+        RequirementDesignContext context = new RequirementDesignContext();
+        context.setId("ctx1");
+        when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
+        when(agentExecutionService.executeAsync(eq("memory-review-agent"), any()))
+                .thenReturn(CompletableFuture.completedFuture(agentResult("""
+                        ```json
+                        {"findings":[{"severity":"WARNING",
+                        "message":"所有节标注"待项目维护"，无法完成交叉验证",
+                        "suggestedAction":"补充 Hard Rules（"目录边界"）"}]}
+                        ```
+                        """)));
+
+        service.reviewMemory("req1", "# PRD", context);
+
+        assertEquals(MemoryValidationStatus.WARNING, requirement.getMemoryValidationStatus());
+        verify(requirementDao).save(requirement);
+        verify(requirementCommentService).append(eq("req1"), any(), any(), eq("记忆审阅 agent"), any(),
+                org.mockito.ArgumentMatchers.contains("所有节标注\"待项目维护\""),
+                org.mockito.ArgumentMatchers.contains("Hard Rules（\\\"目录边界\\\"）"));
+    }
+
+    @Test
     void reviewMemory_invalidJsonMarksRunFailedWithoutThrowingToCaller() {
         Requirement requirement = new Requirement();
         requirement.setId("req1");
@@ -265,6 +293,7 @@ class RequirementAgentServiceTest {
         String logStreamKey = captor.getValue().getLogStreamKey();
         assertTrue(logStreamKey.length() <= 36, "log_stream_key must fit varchar(36): " + logStreamKey);
         assertEquals("req1", logStreamKey);
+        assertTrue(captor.getValue().getPrompt().contains("ASCII 双引号必须转义为 \\\""));
     }
 
     private static AgentExecutionResult agentResult(String output) {

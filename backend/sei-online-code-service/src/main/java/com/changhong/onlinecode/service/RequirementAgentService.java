@@ -172,6 +172,8 @@ public class RequirementAgentService {
                 + "\n只输出 JSON：{\"findings\":[{\"severity\":\"INFO|WARNING\","
                 + "\"message\":\"差异或新增信息\",\"suggestedAction\":\"设计提醒或后续记忆沉淀建议\"}]}。"
                 + "\n没有值得提醒的差异时输出 {\"findings\":[]}。"
+                + "\n禁止输出 Markdown 围栏、解释性前后缀或其他非 JSON 内容。"
+                + "\nJSON 字符串内容如需引用原文，优先使用中文引号（“”）；ASCII 双引号必须转义为 \\\"。"
                 + "\n\n项目记忆与设计上下文：\n" + designContextPromptAssembler.assemble(context)
                 + "\n\n待审阅 PRD：\n" + content;
     }
@@ -208,21 +210,90 @@ public class RequirementAgentService {
 
     private JsonNode readMemoryReviewJson(String raw) {
         for (String candidate : jsonCandidates(raw)) {
-            try {
-                JsonNode root = JsonUtils.mapper().readTree(candidate);
-                if (root != null && root.isObject() && root.has("findings")) {
+            JsonNode root = readMemoryReviewCandidate(candidate);
+            if (root != null) {
+                return root;
+            }
+        }
+        // Some models still place unescaped quotation marks inside otherwise valid JSON strings.
+        // Repair only quote tokens that cannot terminate a JSON string, then let Jackson validate
+        // the complete result. This keeps the recovery bounded to the observed LLM formatting fault.
+        for (String candidate : jsonCandidates(raw)) {
+            String repaired = repairUnescapedJsonQuotes(candidate);
+            if (!repaired.equals(candidate)) {
+                JsonNode root = readMemoryReviewCandidate(repaired);
+                if (root != null) {
                     return root;
                 }
-            } catch (Exception ignored) {
-                // Try the next candidate; LLM output often contains examples before the real JSON.
             }
         }
         String extracted = extractJsonObject(raw);
         try {
             return JsonUtils.mapper().readTree(extracted);
         } catch (Exception e) {
-            throw new IllegalArgumentException("记忆审阅 agent 未返回合法 JSON", e);
+            String repaired = repairUnescapedJsonQuotes(extracted);
+            try {
+                return JsonUtils.mapper().readTree(repaired);
+            } catch (Exception repairedFailure) {
+                repairedFailure.addSuppressed(e);
+                throw new IllegalArgumentException("记忆审阅 agent 未返回合法 JSON", repairedFailure);
+            }
         }
+    }
+
+    private static JsonNode readMemoryReviewCandidate(String candidate) {
+        try {
+            JsonNode root = JsonUtils.mapper().readTree(candidate);
+            return root != null && root.isObject() && root.has("findings") ? root : null;
+        } catch (Exception ignored) {
+            // Try the next candidate; LLM output often contains examples before the real JSON.
+            return null;
+        }
+    }
+
+    private static String repairUnescapedJsonQuotes(String json) {
+        StringBuilder repaired = new StringBuilder(json.length());
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                repaired.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\' && inString) {
+                repaired.append(c);
+                escaped = true;
+                continue;
+            }
+            if (c != '"') {
+                repaired.append(c);
+                continue;
+            }
+            if (!inString) {
+                repaired.append(c);
+                inString = true;
+            } else if (isJsonStringTerminator(json, i + 1)) {
+                repaired.append(c);
+                inString = false;
+            } else {
+                repaired.append('\\').append(c);
+            }
+        }
+        return repaired.toString();
+    }
+
+    private static boolean isJsonStringTerminator(String json, int offset) {
+        int i = offset;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        if (i == json.length()) {
+            return true;
+        }
+        char next = json.charAt(i);
+        return next == ':' || next == ',' || next == '}' || next == ']';
     }
 
     private void persistMemoryReview(String requirementId, String reviewedContent,
