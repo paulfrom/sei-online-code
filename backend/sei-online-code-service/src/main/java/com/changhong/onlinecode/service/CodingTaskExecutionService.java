@@ -42,8 +42,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -112,6 +114,7 @@ public class CodingTaskExecutionService {
 
         Agent agent = agentService.findByName(task.getAssignedAgent());
         Run run = new Run();
+        linkPreviousAttempt(run, findLatestRun(id));
         run.setCodingTaskId(id);
         run.setRequirementId(task.getRequirementId());
         run.setTriggerSource(prompt == null ? TriggerSource.AUTO : TriggerSource.USER_ACTION);
@@ -128,20 +131,10 @@ public class CodingTaskExecutionService {
             run.setCliTool(agent.getCliTool());
             run.setModel(agent.getModel());
         }
-        CodingTaskProgressIntegrator.ProgressPreflight preflight =
-                bindProgress(run, id, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
+        bindProgress(run, id, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
-        if (preflight.shouldSkip()) {
-            completeSkippedRun(run, task, false);
-            CodingTaskDto dto = new CodingTaskDto();
-            dto.setId(task.getId());
-            dto.setStatus(task.getStatus());
-            return ResultData.success(dto);
-        }
-
-        String fullPrompt = buildExecutionPrompt(task, prompt)
-                + codingTaskProgressIntegrator.buildProgressBrief(run.getExecutionId());
+        String fullPrompt = buildExecutionPrompt(task, prompt, run) + safeProgressBrief(run.getExecutionId());
 
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
@@ -191,6 +184,7 @@ public class CodingTaskExecutionService {
         codingTaskDao.save(task);
 
         Run run = new Run();
+        linkPreviousAttempt(run, findLatestRun(codingTaskId));
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
         run.setLoopId(task.getLoopId());
@@ -213,23 +207,13 @@ public class CodingTaskExecutionService {
         run.setAgentName(agent.getName());
         run.setCliTool(agent.getCliTool());
         run.setModel(agent.getModel());
-        CodingTaskProgressIntegrator.ProgressPreflight preflight =
-                bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
+        bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
-        if (preflight.shouldSkip()) {
-            completeSkippedRun(run, task, true);
-            CodingTaskDto dto = new CodingTaskDto();
-            dto.setId(task.getId());
-            dto.setStatus(task.getStatus());
-            return ResultData.success(dto);
-        }
-
         WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
         final Run trackedRun = run;
-        String fullPrompt = buildExecutionPrompt(task, prompt)
-                + codingTaskProgressIntegrator.buildProgressBrief(run.getExecutionId());
+        String fullPrompt = buildExecutionPrompt(task, prompt, run) + safeProgressBrief(run.getExecutionId());
         AgentExecutionRequest request = buildRequest(run, task, fullPrompt, agentName);
         startAgentAfterCommit(agentName, request, trackedRun, task, baseline, true);
 
@@ -267,15 +251,11 @@ public class CodingTaskExecutionService {
         if (result.output() == null) {
             return CompletionDecision.failed(summary, "执行返回空结果");
         }
-        List<String> changedFiles = workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath());
+        List<String> changedFiles = resolveChangedFiles(run, baseline);
         if (changedFiles.isEmpty()) {
             return CompletionDecision.failed(summary, "开发代理未在指定工作区产生代码或文档变更");
         }
-        boolean ledgerRecorded = codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
-                run, summary, changedFiles);
-        if (!ledgerRecorded) {
-            return CompletionDecision.failed(summary, "进度账本更新失败，已阻断旧式成功收口");
-        }
+        recordProgressBestEffort(run, summary, changedFiles);
         if (log.isDebugEnabled()) {
             log.debug("coding-task: detected workspace changes runId={}, files={}",
                     run.getId(), changedFiles);
@@ -296,6 +276,8 @@ public class CodingTaskExecutionService {
         request.setTriggerSource(run.getTriggerSource());
         request.setMemoryContextId(run.getMemoryContextId());
         request.setWorkspaceMemoryId(run.getWorkspaceMemoryId());
+        request.setParentRunId(run.getParentRunId());
+        request.setAttemptNo(run.getAttemptNo());
         if (agentName == null || agentName.isBlank()) {
             request.setTimeoutSeconds(1_800L);
         }
@@ -325,46 +307,32 @@ public class CodingTaskExecutionService {
      */
     private CodingTaskProgressIntegrator.ProgressPreflight bindProgress(Run run, String codingTaskId,
                               String requirementId, String loopId, String prompt, String baseCommit) {
-        String workspaceId = requirementWorkspaceDao.findByRequirementId(requirementId)
-                .map(RequirementWorkspace::getId).orElse(null);
-        // EXE-005: workspace 不存在时自动创建（bindOrResolve 保证同一需求只有一个 workspace）
-        if (workspaceId == null) {
-            Requirement requirement = requirementService.findOne(requirementId);
-            String projectId = requirement != null ? requirement.getProjectId() : null;
-            if (projectId != null) {
-                RequirementWorkspace ws = workspaceLeaseService.bindOrResolveWorkspace(projectId, requirementId);
-                if (ws != null) {
-                    workspaceId = ws.getId();
+        try {
+            String workspaceId = requirementWorkspaceDao.findByRequirementId(requirementId)
+                    .map(RequirementWorkspace::getId).orElse(null);
+            // EXE-005: workspace 不存在时自动创建（bindOrResolve 保证同一需求只有一个 workspace）
+            if (workspaceId == null) {
+                Requirement requirement = requirementService.findOne(requirementId);
+                String projectId = requirement != null ? requirement.getProjectId() : null;
+                if (projectId != null) {
+                    RequirementWorkspace ws = workspaceLeaseService.bindOrResolveWorkspace(projectId, requirementId);
+                    if (ws != null) {
+                        workspaceId = ws.getId();
+                    }
                 }
             }
+            CodingTaskProgressIntegrator.ProgressPreflight preflight = codingTaskProgressIntegrator.preflight(
+                    codingTaskId, requirementId, TaskExecutionType.CODING_TASK, loopId, 1, prompt, workspaceId, baseCommit);
+            run.setInvocationKey(preflight.invocationKey());
+            if (preflight.executionId() != null) {
+                run.setExecutionId(preflight.executionId());
+                run.setObservedPlanVersion(1);
+            }
+            return preflight;
+        } catch (Exception e) {
+            log.warn("coding-task progress preflight failed; continue without ledger. taskId={}", codingTaskId, e);
+            return new CodingTaskProgressIntegrator.ProgressPreflight(null, null, null, null);
         }
-        CodingTaskProgressIntegrator.ProgressPreflight preflight = codingTaskProgressIntegrator.preflight(
-                codingTaskId, requirementId, TaskExecutionType.CODING_TASK, loopId, 1, prompt, workspaceId, baseCommit);
-        run.setInvocationKey(preflight.invocationKey());
-        if (preflight.executionId() != null) {
-            run.setExecutionId(preflight.executionId());
-            run.setObservedPlanVersion(1);
-            run.setResumeFromCheckpointId(codingTaskProgressIntegrator.resolveResumeCheckpoint(preflight.executionId()));
-        }
-        return preflight;
-    }
-
-    private void completeSkippedRun(Run run, CodingTask task, boolean schedulerManaged) {
-        Date now = new Date();
-        String summary = "Execution 已全部验证，跳过重复 Agent 调用";
-        run.setState(RunState.SUCCEEDED);
-        run.setTerminalReason(RunTerminalReason.SUCCEEDED);
-        run.setFinishedDate(now);
-        run.setSummary(summary);
-        runDao.save(run);
-        codingTaskProgressIntegrator.appendTerminalObservation(run, true, summary, null);
-        if (schedulerManaged) {
-            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                    task.getId(), true, null));
-            return;
-        }
-        task.setStatus(CodingTaskStatus.SUCCEEDED);
-        codingTaskDao.save(task);
     }
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason) {
@@ -426,7 +394,7 @@ public class CodingTaskExecutionService {
         }
         runDao.save(persistedRun);
 
-        codingTaskProgressIntegrator.appendTerminalObservation(persistedRun, success, summary, failureReason);
+        appendTerminalObservationBestEffort(persistedRun, success, summary, failureReason);
 
         if (schedulerManaged) {
             eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
@@ -471,7 +439,7 @@ public class CodingTaskExecutionService {
         }
     }
 
-    private String buildExecutionPrompt(CodingTask task, String userPrompt) {
+    private String buildExecutionPrompt(CodingTask task, String userPrompt, Run run) {
         Requirement requirement = requirementService.findOne(task.getRequirementId());
         ExecutionPlan plan = task.getExecutionPlanId() == null ? null : executionPlanDao.findOne(task.getExecutionPlanId());
         RequirementDesignContext context = resolveContext(requirement);
@@ -494,25 +462,126 @@ public class CodingTaskExecutionService {
                             .append("] ").append(Objects.toString(comment.getContent(), "")).append('\n'));
         }
 
-        Run lastFailed = findLastFailedRun(task.getId());
-        if (lastFailed != null && lastFailed.getFailureReason() != null) {
-            sb.append("上一次失败原因：").append(lastFailed.getFailureReason()).append('\n');
+        Run previousRun = run != null && run.getParentRunId() != null
+                ? runDao.findOne(run.getParentRunId()) : null;
+        if (previousRun != null) {
+            int recoveryAttemptNo = run == null
+                    ? Objects.requireNonNullElse(previousRun.getAttemptNo(), 1) + 1
+                    : Objects.requireNonNullElse(run.getAttemptNo(), 1);
+            sb.append("\n恢复执行上下文：\n");
+            sb.append("- 上一次 Run：").append(previousRun.getId())
+                    .append("，状态：").append(previousRun.getState())
+                    .append("，终止原因：").append(previousRun.getTerminalReason()).append('\n');
+            if (previousRun.getFailureReason() != null) {
+                sb.append("- 上一次失败原因：").append(previousRun.getFailureReason()).append('\n');
+            }
+            sb.append("- 这是同一计划任务的第 ")
+                    .append(recoveryAttemptNo)
+                    .append(" 次执行尝试。先检查现有代码、Git 差异和测试结果，保留已正确完成的部分，")
+                    .append("只继续未完成或未通过验收的部分；不要无条件重做整个任务。\n");
         }
         if (userPrompt != null && !userPrompt.isBlank()) {
             sb.append("用户补充提示：").append(userPrompt).append('\n');
         }
-        WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
-        if (workspace != null) {
-            com.changhong.onlinecode.service.memory.CodingTaskChangeResult changes =
-                    codingTaskChangeCollector.collect(workspace.getPath(), null);
-            if (changes.isSuccess()) {
+        String worktreePath = run == null ? null : run.getWorktreePath();
+        if (worktreePath == null) {
+            WorkspaceResolveResult workspace = workspaceManager.resolve(task.getProjectId());
+            worktreePath = workspace == null ? null : workspace.getPath();
+        }
+        if (worktreePath != null) {
+            CodingTaskChangeResult changes = codingTaskChangeCollector.collect(worktreePath, null);
+            if (changes != null && changes.isSuccess()) {
                 sb.append("当前工作区差异：").append(Objects.toString(changes.getDiffSummary(), "")).append('\n');
             }
         }
         sb.append("请在已解析的工作区中按上述上下文执行编码，只修改任务范围内的文件。");
-        sb.append("本任务必须在工作区落地至少一个代码或文档文件变更；");
-        sb.append("仅分析、说明、报告完成但不修改文件会被系统判定为开发失败。");
+        if (previousRun == null) {
+            sb.append("本任务必须在工作区落地至少一个代码或文档文件变更；");
+            sb.append("仅分析、说明、报告完成但不修改文件会被系统判定为开发失败。");
+        } else {
+            sb.append("恢复执行允许复用上一次 Run 已落地的有效变更，但必须检查并完成当前任务验收；");
+            sb.append("如果现有成果已经满足任务要求，不要为了制造新差异而重复改写，请运行必要验证并明确给出证据。");
+        }
         return sb.toString();
+    }
+
+    private void linkPreviousAttempt(Run run, Run previousRun) {
+        if (previousRun == null) {
+            run.setAttemptNo(1);
+            return;
+        }
+        run.setParentRunId(previousRun.getId());
+        run.setAttemptNo(Objects.requireNonNullElse(previousRun.getAttemptNo(), 1) + 1);
+    }
+
+    private Run findLatestRun(String codingTaskId) {
+        return runDao.findByCodingTaskId(codingTaskId).stream()
+                .max((left, right) -> Integer.compare(
+                        Objects.requireNonNullElse(left.getRunNo(), 0),
+                        Objects.requireNonNullElse(right.getRunNo(), 0)))
+                .orElse(null);
+    }
+
+    private List<String> resolveChangedFiles(Run run, WorkspaceChangeDetector.Snapshot baseline) {
+        Set<String> changedFiles = new LinkedHashSet<>(
+                workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath()));
+        if (changedFiles.isEmpty() && run.getParentRunId() != null) {
+            CodingTaskChangeResult uncommitted = codingTaskChangeCollector.collect(run.getWorktreePath(), null);
+            if (uncommitted != null && uncommitted.isSuccess()) {
+                changedFiles.addAll(uncommitted.getChangedFiles());
+            }
+            Run previousRun = runDao.findOne(run.getParentRunId());
+            if (previousRun != null && previousRun.getBaseCommit() != null) {
+                CodingTaskChangeResult committed = codingTaskChangeCollector.collect(
+                        run.getWorktreePath(), previousRun.getBaseCommit());
+                if (committed != null && committed.isSuccess()) {
+                    changedFiles.addAll(committed.getChangedFiles());
+                }
+            }
+        }
+        CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
+        if (task == null || task.getFileScope() == null || task.getFileScope().isEmpty()) {
+            return List.copyOf(changedFiles);
+        }
+        return changedFiles.stream().filter(path -> isInFileScope(path, task.getFileScope())).toList();
+    }
+
+    private boolean isInFileScope(String path, List<String> scopes) {
+        String normalizedPath = path.replace('\\', '/');
+        return scopes.stream().filter(Objects::nonNull).map(scope -> scope.replace('\\', '/'))
+                .map(scope -> scope.endsWith("/**") ? scope.substring(0, scope.length() - 3) : scope)
+                .map(scope -> scope.endsWith("/") ? scope.substring(0, scope.length() - 1) : scope)
+                .anyMatch(scope -> !scope.isBlank()
+                        && (normalizedPath.equals(scope) || normalizedPath.startsWith(scope + "/")));
+    }
+
+    private void recordProgressBestEffort(Run run, String summary, List<String> changedFiles) {
+        try {
+            if (!codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(run, summary, changedFiles)) {
+                log.warn("coding-task progress ledger update incomplete; task success is not blocked. runId={}", run.getId());
+            }
+        } catch (Exception e) {
+            log.warn("coding-task progress ledger update failed; task success is not blocked. runId={}", run.getId(), e);
+        }
+    }
+
+    private void appendTerminalObservationBestEffort(Run run, boolean success, String summary, String failureReason) {
+        try {
+            codingTaskProgressIntegrator.appendTerminalObservation(run, success, summary, failureReason);
+        } catch (Exception e) {
+            log.warn("coding-task terminal ledger observation failed; run settlement is not blocked. runId={}",
+                    run == null ? null : run.getId(), e);
+        }
+    }
+
+    private String safeProgressBrief(String executionId) {
+        try {
+            return Objects.requireNonNullElse(codingTaskProgressIntegrator.buildProgressBrief(executionId), "");
+        } catch (Exception e) {
+            log.warn("coding-task progress brief unavailable; continue with plan/workspace recovery. executionId={}",
+                    executionId, e);
+            return "";
+        }
     }
 
     private RequirementDesignContext resolveContext(Requirement requirement) {
@@ -530,15 +599,6 @@ public class CodingTaskExecutionService {
     private boolean isReady(RequirementDesignContext context) {
         return context != null
                 && context.getContextStatus() == com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus.READY;
-    }
-
-    private Run findLastFailedRun(String codingTaskId) {
-        List<Run> runs = runDao.findByCodingTaskId(codingTaskId);
-        return runs.stream()
-                .filter(r -> r.getState() == RunState.FAILED)
-                .reduce((a, b) -> Objects.requireNonNullElse(a.getRunNo(), 0)
-                        > Objects.requireNonNullElse(b.getRunNo(), 0) ? a : b)
-                .orElse(null);
     }
 
     private static String rootMessage(Throwable throwable) {

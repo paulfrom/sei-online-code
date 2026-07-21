@@ -158,7 +158,7 @@ public class Run extends BaseAuditableEntity {
     @Column(name = "finished_date")
     private Date finishedDate;
 
-    // ---- ADR-001 / V8：Execution 绑定、invocation 幂等、thread/turn、heartbeat、恢复点与验证 ----
+    // ---- Execution 观测、调用幂等、session 标识、heartbeat 与验证 ----
 
     /** 关联 TaskExecution；迁移期可空，新 Run 必填（数据模型 §5/§13）。 */
     @Column(name = "execution_id", length = 36)
@@ -183,10 +183,6 @@ public class Run extends BaseAuditableEntity {
 
     @Column(name = "observed_plan_version")
     private Integer observedPlanVersion;
-
-    /** 本次恢复点。 */
-    @Column(name = "resume_from_checkpoint_id", length = 36)
-    private String resumeFromCheckpointId;
 
     @Column(name = "latest_observation_id", length = 36)
     private String latestObservationId;

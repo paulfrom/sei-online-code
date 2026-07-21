@@ -10,6 +10,7 @@ import com.changhong.onlinecode.dto.enums.ExecutionStepStatus;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TaskExecutionStatus;
 import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
@@ -34,11 +35,10 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * ProgressReconciler —— ADR-001 §2/§6 超时对账与安全接管（EXE-007）。
+ * ProgressReconciler —— 超时后的内部账本对账与租约释放。
  *
- * <p>Run 超时不直接判定 CodingTask/Requirement 失败；先对账进度账本（step/workspace/effect），
- * 能证明完成则补记 APPLIED/VERIFIED；不能则释放过期 lease 开放安全接管；仅无可自动解决时标记
- * WAITING_HUMAN。settlement 使用稳定幂等键，重复补偿不重复副作用。</p>
+ * <p>Run 超时由执行层收敛为 FAILED/TIMEOUT；本服务只处理遗留的 step/workspace/effect 状态，
+ * 不决定 CodingTask 是否成功、是否跳过或何时重试。</p>
  *
  * @author sei-online-code
  */
@@ -70,8 +70,7 @@ public class ProgressReconciler {
     // ======================== reconcileTimedOutRun ========================
 
     /**
-     * 对账超时 Run（ADR-001 §2/§6）。Run→UNKNOWN + TERMINAL observation；
-     * 对账 IN_PROGRESS step→UNKNOWN；释放过期 lease。
+     * 对账超时 Run：确保 Run 为 FAILED/TIMEOUT，将仍在执行的内部 step 标记为 UNKNOWN，并释放租约。
      *
      * @param runId Run ID
      * @return 对账结果
@@ -82,9 +81,13 @@ public class ProgressReconciler {
         if (run == null) {
             return ReconciliationResult.notFound(runId);
         }
-        // Run→UNKNOWN（非 FAILED，ADR-001 §2）
+        // 兼容直接调用：超时 Run 必须是终态，不能继续以 RUNNING/UNKNOWN 表示仍在执行。
         if (run.getState() == RunState.RUNNING) {
-            run.setState(RunState.UNKNOWN);
+            run.setState(RunState.FAILED);
+            run.setTerminalReason(RunTerminalReason.TIMEOUT);
+            run.setFinishedDate(new Date());
+            run.setFailureSummary("运行超时（已终止）");
+            run.setFailureReason("Run 超时；恢复由对应 CodingTask 的计划重试负责");
             runDao.save(run);
         }
 
@@ -96,8 +99,8 @@ public class ProgressReconciler {
                     VerificationStatus.INCONCLUSIVE,
                     ObservationSourceType.RECONCILER,
                     null,
-                    "Run 超时已收口（ProgressReconciler），待对账",
-                    "超时时间窗口内未收到 heartbeat；进度账本对账后将决定续作或接管",
+                    "Run 超时已终止，内部账本状态已进入对账",
+                    "恢复由 CodingTask 计划重试负责；账本只记录证据并释放内部租约",
                     null, null, null, executionId);
         }
 

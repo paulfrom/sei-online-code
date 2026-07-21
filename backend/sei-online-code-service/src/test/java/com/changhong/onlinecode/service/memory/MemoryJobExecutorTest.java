@@ -79,10 +79,16 @@ class MemoryJobExecutorTest {
         writerService = mock(PlatformMemoryWriterService.class);
         changeCollector = mock(CodingTaskChangeCollector.class);
         updateAssembler = mock(CodingTaskMemoryUpdateAssembler.class);
+        com.changhong.onlinecode.config.OcConfig ocConfig =
+                mock(com.changhong.onlinecode.config.OcConfig.class);
+        when(ocConfig.getLargeChangeThreshold()).thenReturn(50);
+        when(ocConfig.getCriticalHitsThreshold()).thenReturn(3);
+        when(ocConfig.getCriticalPaths()).thenReturn(java.util.Set.of(
+                "build.gradle", "settings.gradle", "package.json", "pnpm-workspace.yaml",
+                "bootstrap", "routes/", ".sql"));
         executor = new MemoryJobExecutor(memoryJobService, projectDao, codingTaskDao, runDao, workspaceMemoryDao,
                 agentMemoryTemplateService, scannerService, workspaceMemoryService, writerService,
-                changeCollector, updateAssembler, 50, 3,
-                "build.gradle,settings.gradle,package.json,pnpm-workspace.yaml,bootstrap,routes/,.sql");
+                changeCollector, updateAssembler, ocConfig);
     }
 
     @Test

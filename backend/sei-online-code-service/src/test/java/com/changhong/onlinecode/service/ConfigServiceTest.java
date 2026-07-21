@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.agent.WorkspaceManager;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import org.junit.jupiter.api.Test;
 
@@ -22,8 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ConfigServiceTest {
 
+    private final OcConfig ocConfig = new OcConfig();
+
     /** resolveWorkspaceRoot 不触碰 dao/entityManager，传 null 即可纯逻辑单测。 */
-    private final ConfigService service = new ConfigService(null);
+    private final ConfigService service = new ConfigService(null, ocConfig);
 
     @Test
     void trimsWhitespaceFromConfigWorkspaceRoot() {
@@ -70,8 +73,8 @@ class ConfigServiceTest {
     }
 
     private void setEnvWorkspaceRoot(String value) throws Exception {
-        Field f = ConfigService.class.getDeclaredField("envWorkspaceRoot");
+        Field f = OcConfig.class.getDeclaredField("workspaceRoot");
         f.setAccessible(true);
-        f.set(service, value);
+        f.set(ocConfig, value);
     }
 }

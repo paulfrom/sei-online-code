@@ -121,8 +121,8 @@ public class CompensationService {
     }
 
     /**
-     * 标记超时 Run 为 UNKNOWN（EXE-007：不再直接 FAILED），调用 ProgressReconciler 对账。
-     * Run 状态改为 UNKNOWN 并追加 TERMINAL observation，不直接判定 CodingTask/Requirement 失败。
+     * 将超时 Run 收敛为带 TIMEOUT 原因的失败终态，并调用 ProgressReconciler 对账内部步骤。
+     * 计划内 CodingTask 同步进入可重试失败态，由后续补偿周期按原计划和原工作区恢复。
      */
     @Transactional(rollbackFor = Exception.class)
     public void timeoutRuns(Date now) {
@@ -134,16 +134,19 @@ public class CompensationService {
             if (startedAt == null || startedAt.after(deadline)) {
                 continue;
             }
-            if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.UNKNOWN) == 0) {
+            if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.FAILED) == 0) {
                 continue;
             }
-            run.setState(RunState.UNKNOWN);
+            run.setState(RunState.FAILED);
             run.setTerminalReason(RunTerminalReason.TIMEOUT);
             run.setFinishedDate(now);
-            run.setFailureSummary("运行超时（已进入 UNKNOWN，待对账）");
-            run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes + " 分钟未结束；进度账本对账后将决定续作或接管");
+            run.setFailureSummary("运行超时（已终止，等待按原计划恢复）");
+            run.setFailureReason("补偿器检测到 Run 超过 " + runTimeoutMinutes
+                    + " 分钟未结束；系统将保留原工作区成果并重试同一计划任务");
             runDao.save(run);
-            log.info("compensation runNo {} loopId {} 超时→UNKNOWN（EXE-007 对账流程）", run.getRunNo(), run.getLoopId());
+            markTimedOutCodingTaskRecoverable(run, now);
+            log.info("compensation runNo {} loopId {} 超时→FAILED/TIMEOUT，等待计划任务恢复",
+                    run.getRunNo(), run.getLoopId());
 
             // EXE-007: 调用 ProgressReconciler 对账
             try {
@@ -159,14 +162,32 @@ public class CompensationService {
                         && requirement.getStatus() == RequirementStatus.PRD_CONFIRMED
                         && requirement.getAutomationStatus() == RequirementAutomationStatus.PLANNING
                         && Objects.equals(requirement.getActiveLoopId(), run.getLoopId())) {
-                    log.info("PM agent 超时→UNKNOWN，requirement {} 仍保持 PLANNING，待对账后人工干预或自动续作",
+                    log.info("PM agent 超时→FAILED/TIMEOUT，requirement {} 仍保持 PLANNING，待补偿续作",
                             requirement.getId());
                 }
             }
 
             compensationLogService.record("RUN", run.getId(), "TIMEOUT_RUN_RECONCILE", true,
-                    "超时 Run→UNKNOWN，已触发对账", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
+                    "超时 Run 已终止并触发对账", run.getFailureReason(), TriggerSource.SCHEDULED_COMPENSATION);
         }
+    }
+
+    private void markTimedOutCodingTaskRecoverable(Run run, Date now) {
+        if (run.getCodingTaskId() == null) {
+            return;
+        }
+        CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
+        if (task == null || task.getStatus() != CodingTaskStatus.RUNNING) {
+            return;
+        }
+        if (run.getLoopId() != null && task.getLoopId() != null
+                && !Objects.equals(run.getLoopId(), task.getLoopId())) {
+            return;
+        }
+        task.setStatus(CodingTaskStatus.FAILED);
+        failureInfoSupport.markCodingTaskFailure(task, run.getFailureSummary(), run.getFailureReason(),
+                TriggerSource.SCHEDULED_COMPENSATION, now);
+        codingTaskDao.save(task);
     }
 
     /**
@@ -314,29 +335,6 @@ public class CompensationService {
         if (plan == null || (plan.getStatus() != ExecutionPlanStatus.READY
                 && plan.getStatus() != ExecutionPlanStatus.DEVELOPING)) {
             return;
-        }
-        // EXE-007: 先对账 Execution 进度——有 VERIFIED steps 则从 nextAction 续作
-        if (requirement.getActiveLoopId() != null) {
-            try {
-                ProgressReconciler.ExecutionReconciliation reconciliation =
-                        progressReconciler.reconcileExecutionByRequirement(requirement.getId(), requirement.getActiveLoopId());
-                if (reconciliation != null && reconciliation.allVerified()) {
-                    log.info("recoverDevelopment: requirement {} Execution 全部 VERIFIED，跳过编码重试 → 推进验证",
-                            requirement.getId());
-                    TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
-                            requirement.getId(), requirement.getActiveLoopId()));
-                    return;
-                }
-                if (reconciliation != null && reconciliation.recoveredBlocked() > 0) {
-                    log.info("recoverDevelopment: requirement {} 已自动解除 {} 个阻塞步骤 → 恢复开发调度",
-                            requirement.getId(), reconciliation.recoveredBlocked());
-                    TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
-                            requirement.getId(), requirement.getActiveLoopId()));
-                    return;
-                }
-            } catch (Exception e) {
-                log.warn("recoverDevelopment: Execution 对账异常 requirement={}", requirement.getId(), e);
-            }
         }
         boolean waitingForRetryWindow = false;
         List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirement.getId()).stream()

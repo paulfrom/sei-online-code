@@ -39,7 +39,9 @@ public interface ExecutionStepDao extends BaseEntityDao<ExecutionStep> {
      * 成功时生成新 owner/claimToken、捕获 fencingToken、递增 attempt_count/version、首次 claim 记录 startedAt。
      * 返回更新条数（1=claim 成功，0=版本冲突或状态不可 claim）。
      */
-    @Modifying
+    // claimStep() 在同一事务中先读取实体版本再执行批量 UPDATE；必须清理一级缓存，
+    // 否则 ProgressService 随后的 findOne 会拿到更新前的 claimToken，下一次 markApplied 必然 STALE_OWNER。
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE ExecutionStep s SET s.status = :inProgress, "
             + "s.ownerRunId = :runId, s.claimToken = :claimToken, "
             + "s.workspaceFencingToken = :fencingToken, s.leaseExpiresAt = :leaseExpiresAt, "
@@ -149,7 +151,7 @@ public interface ExecutionStepDao extends BaseEntityDao<ExecutionStep> {
     /**
      * 自动恢复可重试 BLOCKED step：清理 owner/claim/lease 并回到 PENDING，等待新 Run claim。
      */
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE ExecutionStep s SET s.status = :pending, s.ownerRunId = NULL, s.claimToken = NULL, "
             + "s.workspaceFencingToken = NULL, s.leaseExpiresAt = NULL, s.evidenceData = :evidenceData, "
             + "s.version = s.version + 1, s.lastEditedDate = CURRENT_TIMESTAMP "

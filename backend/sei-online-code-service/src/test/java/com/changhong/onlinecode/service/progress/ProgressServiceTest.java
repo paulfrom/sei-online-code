@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.jpa.repository.Modifying;
 
 import java.util.Date;
 import java.util.Optional;
@@ -114,6 +115,23 @@ class ProgressServiceTest {
     }
 
     // ============================ claim step (CAS) ============================
+
+    /** claim 后必须清理 JPA 一级缓存，否则回读的是更新前的 owner/token，后续 markApplied 会稳定失败。 */
+    @Test
+    void claimStep_bulkUpdateClearsPersistenceContextBeforeReload() {
+        assertBulkUpdateClearsPersistenceContext("claimStep");
+        assertBulkUpdateClearsPersistenceContext("unblockForRetry");
+    }
+
+    private void assertBulkUpdateClearsPersistenceContext(String methodName) {
+        Modifying modifying = java.util.Arrays.stream(ExecutionStepDao.class.getMethods())
+                .filter(method -> method.getName().equals(methodName))
+                .findFirst()
+                .orElseThrow()
+                .getAnnotation(Modifying.class);
+        assertTrue(modifying.clearAutomatically(), methodName + " must clear the persistence context");
+        assertTrue(modifying.flushAutomatically(), methodName + " must flush before the bulk update");
+    }
 
     /** CAS 成功：claim 返回 OK，claimToken 已生成，snapshotVersion 递增。 */
     @Test

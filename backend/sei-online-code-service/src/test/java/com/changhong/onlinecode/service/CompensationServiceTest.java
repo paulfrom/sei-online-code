@@ -13,6 +13,7 @@ import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
+import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
@@ -21,6 +22,7 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
 import com.changhong.onlinecode.service.progress.ProgressService;
+import com.changhong.onlinecode.config.OcConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -52,6 +54,7 @@ class CompensationServiceTest {
     private RequirementCommentService requirementCommentService;
     private ProgressReconciler progressReconciler;
     private ProgressService progressService;
+    private OcConfig ocConfig;
     private PlatformTransactionManager transactionManager;
     private CompensationService service;
 
@@ -70,12 +73,14 @@ class CompensationServiceTest {
         requirementCommentService = mock(RequirementCommentService.class);
         progressReconciler = mock(ProgressReconciler.class);
         progressService = mock(ProgressService.class);
+        ocConfig = mock(OcConfig.class);
+        when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
         transactionManager = mock(PlatformTransactionManager.class);
         service = new CompensationService(requirementDao, requirementDesignContextDao,
                 executionPlanDao, codingTaskDao, runDao,
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
-                requirementCommentService, progressReconciler, progressService, transactionManager);
+                requirementCommentService, progressReconciler, progressService, ocConfig, transactionManager);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -218,7 +223,7 @@ class CompensationServiceTest {
     }
 
     @Test
-    void timedOutDevelopmentRun_becomesUnknownAndKeepsTaskForReconciliation() {
+    void timedOutDevelopmentRun_becomesTimeoutFailureAndMakesTaskRecoverable() {
         Date now = new Date();
         Run run = new Run();
         run.setId("run-1");
@@ -229,19 +234,22 @@ class CompensationServiceTest {
         task.setId("task-1");
         task.setStatus(CodingTaskStatus.RUNNING);
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
-        when(runDao.updateStateIfMatch("run-1", RunState.RUNNING, RunState.UNKNOWN)).thenReturn(1);
+        when(runDao.updateStateIfMatch("run-1", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
+        when(codingTaskDao.findOne("task-1")).thenReturn(task);
 
         service.timeoutRuns(now);
 
-        assertEquals(RunState.UNKNOWN, run.getState());
-        assertEquals(CodingTaskStatus.RUNNING, task.getStatus());
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.TIMEOUT, run.getTerminalReason());
+        assertEquals(CodingTaskStatus.FAILED, task.getStatus());
         verify(progressReconciler).reconcileTimedOutRun("run-1");
-        verify(codingTaskDao, never()).save(task);
-        verify(failureInfoSupport, never()).markCodingTaskFailure(any(), any(), any(), any(), any());
+        verify(codingTaskDao).save(task);
+        verify(failureInfoSupport).markCodingTaskFailure(eq(task), any(), any(),
+                eq(TriggerSource.SCHEDULED_COMPENSATION), eq(now));
     }
 
     @Test
-    void timedOutPlanningRun_becomesUnknownWithoutFailingRequirement() {
+    void timedOutPlanningRun_becomesTimeoutFailureWithoutFailingRequirement() {
         Date now = new Date();
         Run run = new Run();
         run.setId("run-plan");
@@ -252,12 +260,13 @@ class CompensationServiceTest {
         run.setStartedDate(new Date(now.getTime() - 31 * 60_000L));
         Requirement requirement = requirement("req-plan", RequirementAutomationStatus.PLANNING);
         when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
-        when(runDao.updateStateIfMatch("run-plan", RunState.RUNNING, RunState.UNKNOWN)).thenReturn(1);
+        when(runDao.updateStateIfMatch("run-plan", RunState.RUNNING, RunState.FAILED)).thenReturn(1);
         when(requirementDao.findOne("req-plan")).thenReturn(requirement);
 
         service.timeoutRuns(now);
 
-        assertEquals(RunState.UNKNOWN, run.getState());
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(RunTerminalReason.TIMEOUT, run.getTerminalReason());
         assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
         verify(progressReconciler).reconcileTimedOutRun("run-plan");
         verify(failureInfoSupport, never()).markRequirementFailure(any(), any(), any(), any(), any(), any(), any());

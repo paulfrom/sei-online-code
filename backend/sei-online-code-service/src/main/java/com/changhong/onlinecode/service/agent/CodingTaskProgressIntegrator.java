@@ -1,86 +1,61 @@
 package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.dao.RunDao;
-import com.changhong.onlinecode.dao.ExecutionCheckpointDao;
-import com.changhong.onlinecode.dto.enums.ExecutionCheckpointType;
-import com.changhong.onlinecode.dto.enums.ExecutionPhase;
-import com.changhong.onlinecode.dto.enums.ExecutionStepStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.TaskExecutionType;
 import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.VerificationStatus;
-import com.changhong.onlinecode.dto.progress.CurrentStepView;
 import com.changhong.onlinecode.dto.progress.ExecutionProgressSnapshot;
-import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.StepSummary;
-import com.changhong.onlinecode.dto.progress.WriteAuthorization;
-import com.changhong.onlinecode.entity.ExecutionStep;
 import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.onlinecode.entity.TaskExecution;
 import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.sei.core.util.JsonUtils;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * 把 CodingTask 调度与 ProgressService 账本接线的协调器（EXE-004 batch 1，附加、未接入热路径）。
+ * 把 CodingTask Run 与 ProgressService 观测账本接线的协调器。
  *
  * <p>职责：
  * <ul>
  *   <li>计算稳定 executionKey（数据模型 §4：taskType + businessTaskId + loopId + planVersion + inputHash 的 SHA-256）；</li>
  *   <li>{@link ProgressService#findOrCreateExecution} 绑定稳定 Execution；</li>
- *   <li>读取 snapshot 判断是否已全部 VERIFIED（已完成则跳过模型启动，ADR-001 §1）；</li>
+ *   <li>提供只读进度摘要，并记录 Run 的过程证据与终态；</li>
  *   <li>解析 invocation：存在活跃 Run 则复用其 invocationKey（幂等重入），否则生成新 UUID（最小可确定唯一 id）。</li>
  * </ul>
  *
  * <p>本类不创建 Run（Run 构造仍由 CodingTaskExecutionService 负责，保留其 workspace/runNumber 逻辑）；
- * 仅产出 {@link ProgressPreflight} 供 batch 2 在 dispatch 入口消费。</p>
+ * 账本不拥有 CodingTask 的执行步骤，也不决定 Agent 是否启动或任务是否成功。</p>
  *
  * @author sei-online-code
  */
 @Service
-@Slf4j
 public class CodingTaskProgressIntegrator {
 
     /** Git 仓库尚无首个提交时使用的基线占位，与 WorkspaceManager#getCurrentHead 保持一致。 */
     private static final String UNBORN_HEAD = "0000000000000000000000000000000000000000";
 
-    private static final String IMPLEMENT_STEP_KEY = "implement:coding-task";
-    private static final String VERIFY_STEP_KEY = "verify:coding-task";
-
     private final ProgressService progressService;
     private final RunDao runDao;
-    private final ExecutionCheckpointDao executionCheckpointDao;
 
-    public CodingTaskProgressIntegrator(ProgressService progressService, RunDao runDao,
-                                        ExecutionCheckpointDao executionCheckpointDao) {
+    public CodingTaskProgressIntegrator(ProgressService progressService, RunDao runDao) {
         this.progressService = progressService;
         this.runDao = runDao;
-        this.executionCheckpointDao = executionCheckpointDao;
-    }
-
-    /** 解析 Execution 最近 checkpoint 作为本次 Run 的恢复点（ADR-001 §4 resumeFromCheckpoint）。 */
-    public String resolveResumeCheckpoint(String executionId) {
-        if (executionId == null) {
-            return null;
-        }
-        return executionCheckpointDao.findTopByExecutionIdOrderBySequenceNoDesc(executionId)
-                .map(ExecutionCheckpoint::getId).orElse(null);
     }
 
     /**
-     * Agent 启动前的进度 preflight（ADR-001 §1：已完成 Execution 不启动模型）。
+     * Agent 启动前绑定观测 Execution。绑定结果只用于审计，不参与调度决策。
      *
      * @param codingTaskId           编码任务 ID（业务任务 ID）
      * @param requirementId          需求 ID
@@ -90,15 +65,16 @@ public class CodingTaskProgressIntegrator {
      * @param prompt                 本次 prompt（参与 inputHash）
      * @param requirementWorkspaceId 需求工作区 ID
      * @param baseCommit             基线 commit
-     * @return preflight 上下文（executionId/snapshot/shouldSkip/invocationKey/reusedRunId）
+     * @return preflight 上下文（executionId/executionKey/invocationKey/reusedRunId）
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProgressPreflight preflight(String codingTaskId, String requirementId, TaskExecutionType taskType,
                                        String loopId, Integer planVersion, String prompt,
                                        String requirementWorkspaceId, String baseCommit) {
         InvocationResolution invocation = resolveInvocation(codingTaskId);
         if (requirementWorkspaceId == null || loopId == null) {
             // RequirementWorkspace（EXE-005）或 loop 未就绪：延迟 Execution 绑定，仅记录 invocationKey，保持既有调度行为
-            return new ProgressPreflight(null, null, null, false, invocation.invocationKey(), invocation.reusedRunId());
+            return new ProgressPreflight(null, null, invocation.invocationKey(), invocation.reusedRunId());
         }
         int effectivePlanVersion = planVersion == null ? 1 : planVersion;
         String inputHash = sha256(prompt == null ? "" : prompt);
@@ -109,24 +85,14 @@ public class CodingTaskProgressIntegrator {
         TaskExecution execution = progressService.findOrCreateExecution(executionKey, taskType, codingTaskId,
                 null, requirementId, loopId, inputHash, effectivePlanVersion,
                 requirementWorkspaceId, effectiveBaseCommit);
-        if (taskType == TaskExecutionType.CODING_TASK) {
-            declareFixedCodingTaskSteps(execution.getId(), effectivePlanVersion, inputHash);
-        }
-        ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(execution.getId());
-
-        boolean shouldSkip = shouldSkipExecution(snapshot);
-        if (shouldSkip) {
-            log.info("coding-task progress preflight: execution {} all required steps verified, skip model start. taskId={}",
-                    execution.getId(), codingTaskId);
-        }
-        return new ProgressPreflight(execution.getId(), executionKey, snapshot, shouldSkip,
+        return new ProgressPreflight(execution.getId(), executionKey,
                 invocation.invocationKey(), invocation.reusedRunId());
     }
 
     /**
-     * 构造进度简报，注入 Agent brief（ADR-001 §4：把 progress 与 nextActions 注入 brief）。
-     * 已完成步骤会被跳过，提示 Agent 勿重复实现。executionId 为空时返回空串（向后兼容）。
+     * 构造只读账本摘要。摘要仅供 Agent 参考，执行计划与工作区现场始终优先。
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public String buildProgressBrief(String executionId) {
         if (executionId == null) {
             return "";
@@ -135,14 +101,15 @@ public class CodingTaskProgressIntegrator {
         if (snapshot == null) {
             return "";
         }
-        StringBuilder brief = new StringBuilder("\n执行进度（已完成步骤会被跳过，请勿重复实现）：\n");
         StepSummary summary = snapshot.getStepSummary();
+        if ((summary == null || summary.getRequired() == 0) && snapshot.getNextAction() == null) {
+            return "";
+        }
+        StringBuilder brief = new StringBuilder("\n账本历史（仅供参考，不替代执行计划和工作区检查）：\n");
         if (summary != null) {
-            brief.append("- 必填步骤：").append(summary.getRequired())
+            brief.append("- 历史步骤：").append(summary.getRequired())
                     .append("，已验证：").append(summary.getVerified())
-                    .append("，已应用：").append(summary.getApplied())
-                    .append("，未知：").append(summary.getUnknown())
-                    .append("，阻塞：").append(summary.getBlocked()).append('\n');
+                    .append("，未知：").append(summary.getUnknown()).append('\n');
         }
         if (snapshot.getNextAction() != null) {
             brief.append("- 下一步：").append(snapshot.getNextAction()).append('\n');
@@ -155,34 +122,20 @@ public class CodingTaskProgressIntegrator {
      * 仅记录，不判 Execution 完成（Execution 完成由 ProgressService markVerified 控制）。
      * workspace 未绑定（executionId 为空）时跳过；写入失败不影响 Run 收口（best-effort）。
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void appendTerminalObservation(Run run, boolean success, String summary, String failureReason) {
         if (run == null || run.getExecutionId() == null) {
             return;
         }
-        try {
-            progressService.appendObservation(
-                    run.getId(),
-                    RunObservationType.TERMINAL,
-                    success ? VerificationStatus.CONFIRMED : VerificationStatus.CONTRADICTED,
-                    ObservationSourceType.SYSTEM,
-                    null,
-                    success ? summary : failureReason,
-                    null, null, null, null,
-                    run.getExecutionId());
-        } catch (Exception e) {
-            log.warn("appendTerminalObservation failed runId={}", run.getId(), e);
-        }
-    }
-
-    /** Execution 全部必填步骤已 VERIFIED 且无当前步骤 → 跳过模型启动。空 Execution（无步骤）不跳过。 */
-    private boolean shouldSkipExecution(ExecutionProgressSnapshot snapshot) {
-        if (snapshot == null || snapshot.getStepSummary() == null) {
-            return false;
-        }
-        StepSummary summary = snapshot.getStepSummary();
-        return summary.getRequired() > 0
-                && summary.getVerified() == summary.getRequired()
-                && snapshot.getCurrentStep() == null;
+        progressService.appendObservation(
+                run.getId(),
+                RunObservationType.TERMINAL,
+                success ? VerificationStatus.CONFIRMED : VerificationStatus.CONTRADICTED,
+                ObservationSourceType.SYSTEM,
+                null,
+                success ? summary : failureReason,
+                null, null, null, null,
+                run.getExecutionId());
     }
 
     /**
@@ -203,81 +156,25 @@ public class CodingTaskProgressIntegrator {
     }
 
     /**
-     * Phase 2 桥接：在动态步骤协议落地前，为 CodingTask 声明两个稳定固定步骤，保证账本不是空壳。
-     */
-    private void declareFixedCodingTaskSteps(String executionId, int planVersion, String inputHash) {
-        progressService.declareStep(executionId, IMPLEMENT_STEP_KEY, ExecutionPhase.IMPLEMENT, planVersion,
-                "执行编码任务", "Agent 在工作区完成本 CodingTask 的文件变更", inputHash, true);
-        progressService.declareStep(executionId, VERIFY_STEP_KEY, ExecutionPhase.VERIFY, planVersion,
-                "验证编码任务", "确认本 CodingTask 的工作区变更满足执行结果判定", inputHash, true);
-    }
-
-    /**
-     * Agent 成功后把固定步骤推进到 VERIFIED。动态 step/tool 协议尚未接入前，这让重复 Run 能通过账本跳过。
+     * Agent 成功后追加一条包含变更文件的过程证据。记录失败由调用方降级为告警。
      *
-     * @return true 表示所有可推进步骤均完成；false 表示账本推进失败，应阻断旧式成功收口。
+     * @return true 表示无需记录或记录成功
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean recordSuccessfulCodingTaskCompletion(Run run, String summary, List<String> changedFiles) {
         if (run == null || run.getExecutionId() == null) {
-            return false;
+            return true;
         }
-        for (int i = 0; i < 4; i++) {
-            ExecutionProgressSnapshot snapshot = progressService.generateSnapshot(run.getExecutionId());
-            CurrentStepView current = snapshot == null ? null : snapshot.getCurrentStep();
-            if (current == null) {
-                return true;
-            }
-            if (!advanceCurrentStep(run, current, summary, changedFiles)) {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private boolean advanceCurrentStep(Run run, CurrentStepView current, String summary, List<String> changedFiles) {
-        WriteAuthorization auth = new WriteAuthorization();
-        auth.setRunId(run.getId());
-        auth.setFencingToken(0L);
-        if (current.getStatus() != ExecutionStepStatus.APPLIED) {
-            ProgressOperationResult<ExecutionStep> claim = progressService.claimStep(
-                    current.getStepId(), auth, new Date(System.currentTimeMillis() + 15 * 60_000L));
-            if (!claim.isOk() || claim.getData() == null) {
-                log.warn("recordSuccessfulCodingTaskCompletion claim failed runId={}, stepKey={}, status={}",
-                        run.getId(), current.getStepKey(), claim.getStatus());
-                return false;
-            }
-            auth.setClaimToken(claim.getData().getClaimToken());
-            auth.setFencingToken(claim.getData().getWorkspaceFencingToken());
-            ProgressOperationResult<ExecutionStep> applied = progressService.markApplied(current.getStepId(), auth);
-            if (!applied.isOk()) {
-                log.warn("recordSuccessfulCodingTaskCompletion markApplied failed runId={}, stepKey={}, status={}",
-                        run.getId(), current.getStepKey(), applied.getStatus());
-                return false;
-            }
-            appendStepCheckpoint(run, current, auth, ExecutionCheckpointType.APPLIED, summary, changedFiles);
-        }
-        ProgressOperationResult<ExecutionStep> verified = progressService.markVerified(current.getStepId(), auth);
-        if (!verified.isOk()) {
-            log.warn("recordSuccessfulCodingTaskCompletion markVerified failed runId={}, stepKey={}, status={}",
-                    run.getId(), current.getStepKey(), verified.getStatus());
-            return false;
-        }
-        appendStepCheckpoint(run, current, auth, ExecutionCheckpointType.VERIFIED, summary, changedFiles);
+        progressService.appendObservation(run.getId(), RunObservationType.CHECKPOINT,
+                VerificationStatus.CONFIRMED, ObservationSourceType.SYSTEM, null, summary, null,
+                null, null, evidencePayload(changedFiles), run.getExecutionId());
         return true;
     }
 
-    private void appendStepCheckpoint(Run run, CurrentStepView current, WriteAuthorization auth,
-                                      ExecutionCheckpointType type, String summary, List<String> changedFiles) {
-        progressService.appendCheckpoint(current.getStepId(), run.getExecutionId(), auth, type,
-                checkpointPayload(type, summary, changedFiles), null, null, null);
-    }
-
-    private String checkpointPayload(ExecutionCheckpointType type, String summary, List<String> changedFiles) {
+    private String evidencePayload(List<String> changedFiles) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("schemaVersion", 1);
-            payload.put("checkpointType", type.name());
-            payload.put("summary", summary);
             payload.put("changedFiles", changedFiles == null ? List.of() : changedFiles);
             return JsonUtils.mapper().writeValueAsString(payload);
         } catch (Exception e) {
@@ -311,8 +208,8 @@ public class CodingTaskProgressIntegrator {
     }
 
     /** Agent 启动前进度 preflight 结果。 */
-    public record ProgressPreflight(String executionId, String executionKey, ExecutionProgressSnapshot snapshot,
-                                    boolean shouldSkip, String invocationKey, String reusedRunId) {
+    public record ProgressPreflight(String executionId, String executionKey,
+                                    String invocationKey, String reusedRunId) {
     }
 
     private record InvocationResolution(String invocationKey, String reusedRunId) {

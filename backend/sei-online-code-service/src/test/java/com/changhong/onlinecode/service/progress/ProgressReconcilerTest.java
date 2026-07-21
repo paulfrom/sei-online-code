@@ -49,7 +49,7 @@ class ProgressReconcilerTest {
     // ======================== reconcileTimedOutRun ========================
 
     @Test
-    void reconcileTimedOutRun_runningToUnknown_callsReconciler() {
+    void reconcileTimedOutRun_runningToFailedTimeout_callsReconciler() {
         Run run = new Run();
         run.setId(RUN_ID);
         run.setState(RunState.RUNNING);
@@ -63,6 +63,8 @@ class ProgressReconcilerTest {
 
         assertNotNull(result);
         assertEquals(RUN_ID, result.runId());
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals(com.changhong.onlinecode.dto.enums.RunTerminalReason.TIMEOUT, run.getTerminalReason());
         verify(runDao).save(run);
     }
 

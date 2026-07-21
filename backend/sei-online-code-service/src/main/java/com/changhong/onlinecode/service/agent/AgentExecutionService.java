@@ -119,7 +119,7 @@ public class AgentExecutionService {
         }
     }
 
-    /** 把 CLI runner 返回的 session 线程/轮次写入 Run（ADR-001 §4：保存 threadId/turnId 以支持恢复）。 */
+    /** 保存 CLI session 标识用于审计；当前恢复 Run 仍会启动新 session，不依赖这些字段续作。 */
     private void persistSessionIds(Run run, CliRunResult result) {
         if (result == null || run == null || run.getId() == null) {
             return;

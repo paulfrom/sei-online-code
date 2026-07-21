@@ -402,7 +402,8 @@ class WorkspaceManagerTest {
             return null;
         }).when(gitApi).cloneRepository(eq(projectRepo.toUri().toString()), any(Path.class));
         WorkspaceManager workspaceManager = new WorkspaceManager(
-                projectDao, configService, new ScaffoldGenerator(), gitApi);
+                projectDao, configService, new ScaffoldGenerator(), gitApi,
+                mock(com.changhong.onlinecode.config.OcConfig.class));
 
         PlatformConfig config = new PlatformConfig();
         config.setWorkspaceRoot(tempDir.resolve("workspaces-project-git").toString());

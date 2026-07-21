@@ -20,6 +20,7 @@ import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
+import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.sei.core.dto.ResultData;
@@ -95,7 +96,7 @@ class CodingTaskExecutionServiceTest {
         codingTaskProgressIntegrator = mock(com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.class);
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
-                        null, null, null, false, "inv-test", null));
+                        null, null, "inv-test", null));
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
                         any(Run.class), any(), any()))
                 .thenReturn(true);
@@ -416,52 +417,6 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_preflightSkip_completesRunWithoutStartingAgent() {
-        CodingTask task = new CodingTask();
-        task.setId("task-skip");
-        task.setRequirementId("req-skip");
-        task.setProjectId("project-skip");
-        task.setStatus(CodingTaskStatus.PENDING);
-        task.setAssignedAgent("backend-dev-agent");
-
-        Agent agent = new Agent();
-        agent.setName("backend-dev-agent");
-        agent.setCliTool("codex");
-
-        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
-                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
-        when(agentWorkspace.path()).thenReturn(tempDir);
-        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
-
-        AtomicReference<Run> savedRun = new AtomicReference<>();
-        when(codingTaskDao.findOne("task-skip")).thenReturn(task);
-        when(runDao.findByCodingTaskId("task-skip")).thenReturn(java.util.List.of());
-        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
-            Run run = invocation.getArgument(0);
-            if (run.getId() == null) {
-                run.setId("run-skip");
-            }
-            savedRun.set(run);
-            return run;
-        });
-        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
-        when(agentExecutionService.workspace(eq("project-skip"), anyString())).thenReturn(agentWorkspace);
-        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-skip");
-        when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
-                        "exec-skip", "key-skip", null, true, "inv-skip", null));
-
-        ResultData<CodingTaskDto> result = service.executePlanTask("task-skip", "backend-dev-agent", "prompt");
-
-        assertTrue(result.successful());
-        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
-        assertEquals("Execution 已全部验证，跳过重复 Agent 调用", savedRun.get().getSummary());
-        verify(agentExecutionService, never()).executeAsync(anyString(), any());
-        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                "task-skip", true, null));
-    }
-
-    @Test
     void executePlanTask_defersAgentExecutionUntilTransactionCommit() {
         CodingTask task = new CodingTask();
         task.setId("task-after-commit");
@@ -659,7 +614,7 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_ledgerRecordFailure_marksDevelopmentFailed() throws Exception {
+    void executePlanTask_ledgerRecordFailure_doesNotBlockDevelopmentSuccess() throws Exception {
         CodingTask task = new CodingTask();
         task.setId("task-ledger-fail");
         task.setRequirementId("req-ledger-fail");
@@ -691,8 +646,13 @@ class CodingTaskExecutionServiceTest {
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(agentExecutionService.workspace(eq("project-ledger-fail"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
+        when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("ledger unavailable"));
         when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(any(Run.class), any(), any()))
                 .thenReturn(false);
+        org.mockito.Mockito.doThrow(new IllegalStateException("observation unavailable"))
+                .when(codingTaskProgressIntegrator).appendTerminalObservation(
+                        any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any());
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated-ledger-fail.txt"), "hello");
@@ -704,11 +664,79 @@ class CodingTaskExecutionServiceTest {
                 "task-ledger-fail", "backend-dev-agent", "prompt");
 
         assertTrue(result.successful());
-        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
         assertEquals("任务已完成", savedRun.get().getSummary());
-        assertEquals("进度账本更新失败，已阻断旧式成功收口", savedRun.get().getFailureReason());
+        assertNull(savedRun.get().getFailureReason());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                "task-ledger-fail", false, "进度账本更新失败，已阻断旧式成功收口"));
+                "task-ledger-fail", true, null));
+    }
+
+    @Test
+    void executePlanTask_retryLinksPreviousRunAndReusesExistingWorkspaceChanges() {
+        CodingTask task = new CodingTask();
+        task.setId("task-recovery");
+        task.setRequirementId("req-recovery");
+        task.setProjectId("project-recovery");
+        task.setStatus(CodingTaskStatus.FAILED);
+        task.setAssignedAgent("backend-dev-agent");
+        task.setFileScope(java.util.List.of("backend"));
+
+        Run previousRun = new Run();
+        previousRun.setId("run-recovery-1");
+        previousRun.setRunNo(1);
+        previousRun.setAttemptNo(1);
+        previousRun.setState(RunState.FAILED);
+        previousRun.setFailureReason("执行超时");
+        previousRun.setBaseCommit("base-recovery");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+
+        AtomicReference<Run> currentRun = new AtomicReference<>();
+        when(codingTaskDao.findOne("task-recovery")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-recovery")).thenReturn(java.util.List.of(previousRun));
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId("run-recovery-2");
+            }
+            currentRun.set(saved);
+            return saved;
+        });
+        when(runDao.findOne("run-recovery-1")).thenReturn(previousRun);
+        when(runDao.findOne("run-recovery-2")).thenAnswer(invocation -> currentRun.get());
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-recovery"), anyString())).thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-recovery");
+        CodingTaskChangeResult existingChanges = new CodingTaskChangeResult();
+        existingChanges.setSuccess(true);
+        existingChanges.setChangedFiles(java.util.List.of("backend/Recovered.java"));
+        existingChanges.setDiffSummary("backend/Recovered.java already changed");
+        when(changeCollector.collect(eq(tempDir.toString()), any())).thenReturn(existingChanges);
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
+                        currentRun.get().getId(), "现有实现验证通过", true, null)));
+
+        ResultData<CodingTaskDto> result = service.executePlanTask(
+                "task-recovery", "backend-dev-agent", "继续未完成部分", TriggerSource.USER_ACTION);
+
+        assertTrue(result.successful());
+        assertEquals("run-recovery-1", currentRun.get().getParentRunId());
+        assertEquals(2, currentRun.get().getAttemptNo());
+        assertEquals(RunState.SUCCEEDED, currentRun.get().getState());
+        ArgumentCaptor<AgentExecutionRequest> requestCaptor = ArgumentCaptor.forClass(AgentExecutionRequest.class);
+        verify(agentExecutionService).executeAsync(eq("backend-dev-agent"), requestCaptor.capture());
+        assertEquals("run-recovery-1", requestCaptor.getValue().getParentRunId());
+        assertEquals(2, requestCaptor.getValue().getAttemptNo());
+        assertTrue(requestCaptor.getValue().getPrompt().contains("保留已正确完成的部分"));
+        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                "task-recovery", true, null));
     }
 
     @Test
@@ -725,9 +753,9 @@ class CodingTaskExecutionServiceTest {
         when(requirementService.findOne("req-prompt")).thenReturn(requirement);
 
         Method method = CodingTaskExecutionService.class.getDeclaredMethod(
-                "buildExecutionPrompt", CodingTask.class, String.class);
+                "buildExecutionPrompt", CodingTask.class, String.class, Run.class);
         method.setAccessible(true);
-        String prompt = (String) method.invoke(service, task, null);
+        String prompt = (String) method.invoke(service, task, null, new Run());
 
         assertTrue(prompt.contains("必须在工作区落地至少一个代码或文档文件变更"));
         assertTrue(prompt.contains("不修改文件会被系统判定为开发失败"));
