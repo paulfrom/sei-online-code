@@ -203,6 +203,29 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
+    void schedule_ignoresSameTaskKeyFromStaleLoopWhenResolvingDependencies() {
+        Requirement req = requirement("req-1", "loop-2");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+
+        CodingTask staleDependency = task(
+                "old-dependency", "BE-002", "backend", List.of(), CodingTaskStatus.STALE);
+        staleDependency.setLoopId("loop-1");
+        CodingTask currentDependency = task(
+                "current-dependency", "BE-002", "backend", List.of(), CodingTaskStatus.SUCCEEDED);
+        currentDependency.setLoopId("loop-2");
+        CodingTask blockedTask = task(
+                "current-task", "BE-004", "backend", List.of("BE-002"), CodingTaskStatus.BLOCKED);
+        blockedTask.setLoopId("loop-2");
+        when(codingTaskDao.findByRequirementId("req-1"))
+                .thenReturn(List.of(staleDependency, currentDependency, blockedTask));
+
+        scheduler.schedule("req-1");
+
+        assertEquals(CodingTaskStatus.PENDING, blockedTask.getStatus());
+        verify(executionService).executePlanTask(eq("current-task"), anyString(), anyString());
+    }
+
+    @Test
     void schedule_validationTaskLoopChangesDuringValidation_marksTaskStale() {
         List<CodingTaskStatus> savedStatuses = new ArrayList<>();
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {

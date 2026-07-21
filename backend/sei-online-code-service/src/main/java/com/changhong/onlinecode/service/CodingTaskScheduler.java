@@ -95,19 +95,25 @@ public class CodingTaskScheduler {
         }
         String currentLoopId = requirement.getActiveLoopId();
 
-        List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirementId);
-        Map<String, CodingTask> taskByKey = tasks.stream()
-                .filter(t -> t.getPlanTaskKey() != null)
-                .collect(Collectors.toMap(CodingTask::getPlanTaskKey, t -> t, (a, b) -> a));
+        List<CodingTask> allTasks = codingTaskDao.findByRequirementId(requirementId);
 
         // 1. 过期 loopId 任务标记 STALE
-        for (CodingTask task : tasks) {
+        for (CodingTask task : allTasks) {
             if (task.getLoopId() != null && !Objects.equals(task.getLoopId(), currentLoopId)
                     && task.getStatus() != CodingTaskStatus.STALE) {
                 task.setStatus(CodingTaskStatus.STALE);
                 codingTaskDao.save(task);
             }
         }
+
+        // 后续依赖解析与调度只能使用当前 loop。历史 loop 可能存在相同 planTaskKey，
+        // 若混入依赖图会把当前已成功依赖误判为旧任务的 STALE 状态。
+        List<CodingTask> tasks = allTasks.stream()
+                .filter(task -> Objects.equals(task.getLoopId(), currentLoopId))
+                .toList();
+        Map<String, CodingTask> taskByKey = tasks.stream()
+                .filter(task -> task.getPlanTaskKey() != null)
+                .collect(Collectors.toMap(CodingTask::getPlanTaskKey, task -> task));
 
         // 2. 收集当前占用 lane 和 fileScope 的活动任务
         List<CodingTask> activeTasks = tasks.stream()

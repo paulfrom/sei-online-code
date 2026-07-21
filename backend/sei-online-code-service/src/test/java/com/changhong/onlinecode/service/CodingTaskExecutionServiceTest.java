@@ -25,6 +25,7 @@ import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
+import com.changhong.sei.core.utils.TransactionUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -48,6 +49,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -463,6 +465,72 @@ class CodingTaskExecutionServiceTest {
             verify(agentExecutionService).executeAsync(eq("backend-dev-agent"), any());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void executePlanTask_defersAgentExecutionWhenNewTransactionStartsInsideOuterAfterCommit() {
+        CodingTask task = new CodingTask();
+        task.setId("task-nested-after-commit");
+        task.setRequirementId("req-nested-after-commit");
+        task.setProjectId("project-nested-after-commit");
+        task.setStatus(CodingTaskStatus.PENDING);
+        task.setAssignedAgent("backend-dev-agent");
+
+        Agent agent = new Agent();
+        agent.setName("backend-dev-agent");
+        agent.setCliTool("codex");
+
+        com.changhong.onlinecode.agent.AgentWorkspace agentWorkspace =
+                mock(com.changhong.onlinecode.agent.AgentWorkspace.class);
+        when(agentWorkspace.path()).thenReturn(tempDir);
+        when(agentWorkspace.pathString()).thenReturn(tempDir.toString());
+        when(codingTaskDao.findOne("task-nested-after-commit")).thenReturn(task);
+        when(runDao.findByCodingTaskId("task-nested-after-commit")).thenReturn(List.of());
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-nested-after-commit");
+            }
+            return run;
+        });
+        when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
+        when(agentExecutionService.workspace(eq("project-nested-after-commit"), anyString()))
+                .thenReturn(agentWorkspace);
+        when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-nested-after-commit");
+        when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
+                .thenReturn(new CompletableFuture<>());
+
+        AtomicReference<List<TransactionSynchronization>> innerSynchronizations = new AtomicReference<>();
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            TransactionUtil.afterCommit(() -> {
+                // 模拟外层 afterCommit 中通过 REQUIRES_NEW 开启的独立调度事务。
+                TransactionSynchronizationManager.initSynchronization();
+                try {
+                    ResultData<CodingTaskDto> result = service.executePlanTask(
+                            "task-nested-after-commit", "backend-dev-agent", "prompt");
+                    assertTrue(result.successful());
+                    verify(agentExecutionService, never()).executeAsync(anyString(), any());
+                    innerSynchronizations.set(List.copyOf(
+                            TransactionSynchronizationManager.getSynchronizations()));
+                } finally {
+                    TransactionSynchronizationManager.clearSynchronization();
+                }
+            });
+            List<TransactionSynchronization> outerSynchronizations = List.copyOf(
+                    TransactionSynchronizationManager.getSynchronizations());
+            TransactionSynchronizationManager.clearSynchronization();
+
+            outerSynchronizations.forEach(TransactionSynchronization::afterCommit);
+            verify(agentExecutionService, never()).executeAsync(anyString(), any());
+
+            innerSynchronizations.get().forEach(TransactionSynchronization::afterCommit);
+            verify(agentExecutionService).executeAsync(eq("backend-dev-agent"), any());
+        } finally {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.clearSynchronization();
+            }
         }
     }
 

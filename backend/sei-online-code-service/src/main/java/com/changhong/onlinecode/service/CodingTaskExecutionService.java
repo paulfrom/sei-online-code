@@ -34,12 +34,13 @@ import com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator;
 import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import com.changhong.sei.core.utils.TransactionUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Date;
 import java.util.LinkedHashSet;
@@ -225,7 +226,7 @@ public class CodingTaskExecutionService {
 
     private void startAgentAfterCommit(String agentName, AgentExecutionRequest request, Run run, CodingTask task,
                                        WorkspaceChangeDetector.Snapshot baseline, boolean schedulerManaged) {
-        TransactionUtil.afterCommit(() -> {
+        runAfterCurrentTransactionCommit(() -> {
             CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName, request);
             future.thenAccept(result -> {
                 CompletionDecision decision = decideCompletion(run, result, baseline);
@@ -235,6 +236,26 @@ public class CodingTaskExecutionService {
                 finishRun(run, task, false, rootMessage(e), rootMessage(e), schedulerManaged);
                 return null;
             });
+        });
+    }
+
+    /**
+     * 在当前事务真正提交后启动外部进程。
+     *
+     * <p>不能使用 sei-core {@code TransactionUtil.afterCommit}：当本方法位于另一个
+     * after-commit 回调开启的 {@code REQUIRES_NEW} 事务中时，该工具会因其
+     * {@code IN_COMMIT} 标记而立即执行，导致 Agent 在 Run 提交前查询不到记录。</p>
+     */
+    private void runAfterCurrentTransactionCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
         });
     }
 

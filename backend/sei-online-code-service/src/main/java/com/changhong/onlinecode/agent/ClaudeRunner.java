@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * ClaudeRunner 骨架（B7）。参考 multica {@code server/pkg/agent/claude.go}。
@@ -177,11 +178,40 @@ public class ClaudeRunner implements CliRunner {
         if (process == null) {
             return false;
         }
+        if (!terminateProcessTree(process)) {
+            throw new IllegalStateException("Claude 进程树未能终止: runId=" + runId);
+        }
+        return true;
+    }
+
+    boolean terminateProcessTree(Process process) {
+        List<ProcessHandle> descendants = process.descendants().toList();
+        descendants.forEach(ProcessHandle::destroy);
         process.destroy();
+        if (awaitTermination(process, descendants, 2)) {
+            return true;
+        }
+        descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
         if (process.isAlive()) {
             process.destroyForcibly();
         }
-        return true;
+        return awaitTermination(process, descendants, 3);
+    }
+
+    private boolean awaitTermination(Process process, List<ProcessHandle> descendants, long timeoutSeconds) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (System.nanoTime() < deadline) {
+            if (!process.isAlive() && descendants.stream().noneMatch(ProcessHandle::isAlive)) {
+                return true;
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return !process.isAlive() && descendants.stream().noneMatch(ProcessHandle::isAlive);
     }
 
     /**

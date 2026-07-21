@@ -6,9 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link CodexRunner} 单元测试。
@@ -79,5 +81,29 @@ class CodexRunnerTest {
 
         assertEquals(tempDir.resolve(".agent_context").resolve("codex-home").resolve("run-1"), codexHome);
         assertFalse(runner.shouldDeleteCodexHome(tempDir.toString(), "run-1"));
+    }
+
+    @Test
+    void terminateProcessTree_waitsForParentAndDescendantExit() throws Exception {
+        Process process = new ProcessBuilder("bash", "-c", "sleep 60 & wait").start();
+        ProcessHandle descendant = awaitDescendant(process);
+
+        CodexRunner runner = new CodexRunner("/tmp/fake-codex");
+
+        assertTrue(runner.terminateProcessTree(process));
+        assertFalse(process.isAlive());
+        assertFalse(descendant.isAlive());
+    }
+
+    private ProcessHandle awaitDescendant(Process process) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            ProcessHandle descendant = process.descendants().findFirst().orElse(null);
+            if (descendant != null) {
+                return descendant;
+            }
+            Thread.sleep(25);
+        }
+        throw new IllegalStateException("测试子进程未启动");
     }
 }

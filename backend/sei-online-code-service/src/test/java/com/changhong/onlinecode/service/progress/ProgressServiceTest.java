@@ -7,11 +7,15 @@ import com.changhong.onlinecode.dao.RunObservationDao;
 import com.changhong.onlinecode.dao.TaskExecutionDao;
 import com.changhong.onlinecode.dto.enums.ExecutionCheckpointType;
 import com.changhong.onlinecode.dto.enums.ExecutionStepStatus;
+import com.changhong.onlinecode.dto.enums.ObservationSourceType;
+import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.TaskExecutionType;
+import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.WriteAuthorization;
 import com.changhong.onlinecode.entity.ExecutionCheckpoint;
 import com.changhong.onlinecode.entity.ExecutionStep;
+import com.changhong.onlinecode.entity.RunObservation;
 import com.changhong.onlinecode.entity.TaskExecution;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +29,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import java.util.Date;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -224,6 +229,24 @@ class ProgressServiceTest {
         assertThrows(IllegalStateException.class, () ->
                 progressService.appendCheckpoint("s1", "exec-1", auth("run-1", "tok"),
                         ExecutionCheckpointType.PROGRESS, "payload", null, null, null));
+    }
+
+    // ============================ observation ============================
+
+    /** summary 按 Unicode 字符截断，不能在非 BMP 字符的代理对中间切开。 */
+    @Test
+    void appendObservation_overlongUnicodeSummary_truncatesTo500CodePoints() {
+        when(runObservationDao.findTopByRunIdOrderBySequenceNoDesc("run-1")).thenReturn(Optional.empty());
+        when(runObservationDao.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        String summary = "a".repeat(499) + "😀" + "tail";
+
+        RunObservation saved = progressService.appendObservation(
+                "run-1", RunObservationType.TERMINAL, VerificationStatus.CONFIRMED,
+                ObservationSourceType.SYSTEM, null, summary, null,
+                null, null, null, null);
+
+        assertEquals(500, saved.getSummary().codePointCount(0, saved.getSummary().length()));
+        assertEquals("a".repeat(499) + "😀", saved.getSummary());
     }
 
     // ============================ fixtures ============================

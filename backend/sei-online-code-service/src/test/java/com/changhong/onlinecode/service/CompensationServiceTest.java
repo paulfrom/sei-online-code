@@ -20,6 +20,7 @@ import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
 import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.onlinecode.config.OcConfig;
@@ -35,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,6 +56,7 @@ class CompensationServiceTest {
     private RequirementCommentService requirementCommentService;
     private ProgressReconciler progressReconciler;
     private ProgressService progressService;
+    private AgentExecutionService agentExecutionService;
     private OcConfig ocConfig;
     private PlatformTransactionManager transactionManager;
     private CompensationService service;
@@ -73,6 +76,7 @@ class CompensationServiceTest {
         requirementCommentService = mock(RequirementCommentService.class);
         progressReconciler = mock(ProgressReconciler.class);
         progressService = mock(ProgressService.class);
+        agentExecutionService = mock(AgentExecutionService.class);
         ocConfig = mock(OcConfig.class);
         when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
         transactionManager = mock(PlatformTransactionManager.class);
@@ -80,7 +84,8 @@ class CompensationServiceTest {
                 executionPlanDao, codingTaskDao, runDao,
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
-                requirementCommentService, progressReconciler, progressService, ocConfig, transactionManager);
+                requirementCommentService, progressReconciler, progressService, agentExecutionService,
+                ocConfig, transactionManager);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -242,6 +247,7 @@ class CompensationServiceTest {
         assertEquals(RunState.FAILED, run.getState());
         assertEquals(RunTerminalReason.TIMEOUT, run.getTerminalReason());
         assertEquals(CodingTaskStatus.FAILED, task.getStatus());
+        verify(agentExecutionService).cancel("run-1");
         verify(progressReconciler).reconcileTimedOutRun("run-1");
         verify(codingTaskDao).save(task);
         verify(failureInfoSupport).markCodingTaskFailure(eq(task), any(), any(),
@@ -271,6 +277,26 @@ class CompensationServiceTest {
         verify(progressReconciler).reconcileTimedOutRun("run-plan");
         verify(failureInfoSupport, never()).markRequirementFailure(any(), any(), any(), any(), any(), any(), any());
         verify(requirementDao, never()).save(requirement);
+    }
+
+    @Test
+    void timedOutRun_processTerminationFailureDoesNotOpenRetry() {
+        Date now = new Date();
+        Run run = new Run();
+        run.setId("run-still-alive");
+        run.setCodingTaskId("task-still-alive");
+        run.setState(RunState.RUNNING);
+        run.setStartedDate(new Date(now.getTime() - 31 * 60_000L));
+        when(runDao.findByState(RunState.RUNNING)).thenReturn(List.of(run));
+        doThrow(new IllegalStateException("process still alive"))
+                .when(agentExecutionService).cancel("run-still-alive");
+
+        service.timeoutRuns(now);
+
+        assertEquals(RunState.RUNNING, run.getState());
+        verify(runDao, never()).updateStateIfMatch(
+                "run-still-alive", RunState.RUNNING, RunState.FAILED);
+        verify(codingTaskDao, never()).findOne("task-still-alive");
     }
 
     @Test

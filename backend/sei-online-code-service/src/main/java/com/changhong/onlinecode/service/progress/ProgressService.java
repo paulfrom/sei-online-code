@@ -55,6 +55,8 @@ import java.util.UUID;
 @Slf4j
 public class ProgressService {
 
+    private static final int OBSERVATION_SUMMARY_MAX_CODE_POINTS = 500;
+
     /** 可被 claim 的步骤状态：未开始或失败/阻塞/未知后重试（ADR-001 §6）。 */
     private static final EnumSet<ExecutionStepStatus> CLAIMABLE_STATUSES = EnumSet.of(
             ExecutionStepStatus.PENDING,
@@ -351,7 +353,7 @@ public class ProgressService {
         observation.setVerificationStatus(verificationStatus);
         observation.setSourceType(sourceType);
         observation.setSourceId(sourceId);
-        observation.setSummary(summary);
+        observation.setSummary(truncateByCodePoints(summary, OBSERVATION_SUMMARY_MAX_CODE_POINTS));
         observation.setDetail(detail);
         observation.setStepId(stepId);
         observation.setCheckpointId(checkpointId);
@@ -362,6 +364,14 @@ public class ProgressService {
             bumpSnapshot(executionId);
         }
         return saved;
+    }
+
+    private static String truncateByCodePoints(String value, int maxCodePoints) {
+        if (value == null || value.codePointCount(0, value.length()) <= maxCodePoints) {
+            return value;
+        }
+        int endIndex = value.offsetByCodePoints(0, maxCodePoints);
+        return value.substring(0, endIndex);
     }
 
     // ============================ Snapshot ============================

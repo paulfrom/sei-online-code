@@ -26,6 +26,7 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.config.OcConfig;
+import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
 import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.sei.core.utils.TransactionUtil;
@@ -65,6 +66,7 @@ public class CompensationService {
     private final RequirementCommentService requirementCommentService;
     private final ProgressReconciler progressReconciler;
     private final ProgressService progressService;
+    private final AgentExecutionService agentExecutionService;
     private final OcConfig ocConfig;
     private final TransactionTemplate transactionTemplate;
 
@@ -81,6 +83,7 @@ public class CompensationService {
                                RequirementCommentService requirementCommentService,
                                ProgressReconciler progressReconciler,
                                ProgressService progressService,
+                               AgentExecutionService agentExecutionService,
                                OcConfig ocConfig,
                                PlatformTransactionManager transactionManager) {
         this.requirementDao = requirementDao;
@@ -96,6 +99,7 @@ public class CompensationService {
         this.requirementCommentService = requirementCommentService;
         this.progressReconciler = progressReconciler;
         this.progressService = progressService;
+        this.agentExecutionService = agentExecutionService;
         this.ocConfig = ocConfig;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -132,6 +136,14 @@ public class CompensationService {
         for (Run run : runList) {
             Date startedAt = run.getStartedDate();
             if (startedAt == null || startedAt.after(deadline)) {
+                continue;
+            }
+            try {
+                // threadId 是会话审计标识，不代表本地进程存活。必须先按 runId
+                // 终止并等待 runner 持有的整个进程树退出，才能开放同一工作区重试。
+                agentExecutionService.cancel(run.getId());
+            } catch (Exception e) {
+                log.error("超时 Run 的 Agent 进程未能终止，暂不开放重试: runId={}", run.getId(), e);
                 continue;
             }
             if (runDao.updateStateIfMatch(run.getId(), RunState.RUNNING, RunState.FAILED) == 0) {
