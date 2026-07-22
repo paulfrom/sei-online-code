@@ -19,8 +19,6 @@ import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.entity.TaskHandoffSnapshot;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
-import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
-import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
@@ -71,7 +69,6 @@ class CodingTaskExecutionServiceTest {
     private RunNumberService runNumberService;
     private CodingTaskChangeCollector changeCollector;
     private com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator codingTaskProgressIntegrator;
-    private WorkspaceChangeDetector workspaceChangeDetector;
     private CodingTaskExecutionService service;
     private TaskHandoffSnapshotDao taskHandoffSnapshotDao;
     @org.junit.jupiter.api.io.TempDir
@@ -94,7 +91,6 @@ class CodingTaskExecutionServiceTest {
         runNumberService = mock(RunNumberService.class);
         when(runNumberService.assign(any(Run.class))).thenAnswer(invocation -> invocation.getArgument(0));
         changeCollector = mock(CodingTaskChangeCollector.class);
-        workspaceChangeDetector = new WorkspaceChangeDetector();
         requirementService = mock(RequirementService.class);
         com.changhong.onlinecode.dao.RequirementWorkspaceDao requirementWorkspaceDao =
                 mock(com.changhong.onlinecode.dao.RequirementWorkspaceDao.class);
@@ -103,7 +99,7 @@ class CodingTaskExecutionServiceTest {
                 .thenReturn(new com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator.ProgressPreflight(
                         null, null, "inv-test", null));
         org.mockito.Mockito.lenient().when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(
-                        any(Run.class), any(), any()))
+                        any(Run.class), any()))
                 .thenReturn(true);
         com.changhong.onlinecode.service.progress.WorkspaceLeaseService workspaceLeaseService =
                 mock(com.changhong.onlinecode.service.progress.WorkspaceLeaseService.class);
@@ -124,7 +120,6 @@ class CodingTaskExecutionServiceTest {
                 memoryJobService,
                 workspaceMemoryService,
                 changeCollector,
-                workspaceChangeDetector,
                 eventPublisher,
                 codingTaskProgressIntegrator,
                 workspaceLeaseService,
@@ -565,7 +560,7 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_runnerCompletesWithoutWorkspaceChanges_marksDevelopmentFailed() {
+    void executePlanTask_runnerCompletesWithoutWorkspaceChanges_marksDevelopmentSucceeded() {
         CodingTask task = new CodingTask();
         task.setId("task-empty");
         task.setRequirementId("req-empty");
@@ -597,10 +592,6 @@ class CodingTaskExecutionServiceTest {
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(agentExecutionService.workspace(eq("project-empty"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-1");
-        CodingTaskChangeResult noChanges = new CodingTaskChangeResult();
-        noChanges.setSuccess(true);
-        noChanges.setChangedFiles(java.util.List.of());
-        when(changeCollector.collect(tempDir.toString(), "base-1")).thenReturn(noChanges);
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
                         savedRun.get().getId(), "任务已完成", true, null)));
@@ -608,10 +599,10 @@ class CodingTaskExecutionServiceTest {
         ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
 
         assertTrue(result.successful());
-        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
         assertEquals("任务已完成", savedRun.get().getSummary());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                "task-empty", false, "开发代理未在指定工作区产生代码或文档变更"));
+                "task-empty", true, null));
     }
 
     @Test
@@ -746,7 +737,7 @@ class CodingTaskExecutionServiceTest {
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn(null);
         when(codingTaskProgressIntegrator.preflight(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("ledger unavailable"));
-        when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(any(Run.class), any(), any()))
+        when(codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(any(Run.class), any()))
                 .thenReturn(false);
         org.mockito.Mockito.doThrow(new IllegalStateException("observation unavailable"))
                 .when(codingTaskProgressIntegrator).appendTerminalObservation(
@@ -812,11 +803,6 @@ class CodingTaskExecutionServiceTest {
         when(agentService.findByName("backend-dev-agent")).thenReturn(agent);
         when(agentExecutionService.workspace(eq("project-recovery"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-recovery");
-        CodingTaskChangeResult existingChanges = new CodingTaskChangeResult();
-        existingChanges.setSuccess(true);
-        existingChanges.setChangedFiles(java.util.List.of("backend/Recovered.java"));
-        existingChanges.setDiffSummary("backend/Recovered.java already changed");
-        when(changeCollector.collect(eq(tempDir.toString()), any())).thenReturn(existingChanges);
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
                         currentRun.get().getId(), "现有实现验证通过", true, null)));

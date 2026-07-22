@@ -11,7 +11,6 @@ import com.changhong.onlinecode.dto.progress.StepSummary;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.TaskExecution;
 import com.changhong.onlinecode.service.progress.ProgressService;
-import com.changhong.sei.core.util.JsonUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,9 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -155,31 +152,16 @@ public class CodingTaskProgressIntegrator {
         return new InvocationResolution(UUID.randomUUID().toString(), null);
     }
 
-    /**
-     * Agent 成功后追加一条包含变更文件的过程证据。记录失败由调用方降级为告警。
-     *
-     * @return true 表示无需记录或记录成功
-     */
+    /** Agent 成功后追加过程检查点。记录失败由调用方降级为告警。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean recordSuccessfulCodingTaskCompletion(Run run, String summary, List<String> changedFiles) {
+    public boolean recordSuccessfulCodingTaskCompletion(Run run, String summary) {
         if (run == null || run.getExecutionId() == null) {
             return true;
         }
         progressService.appendObservation(run.getId(), RunObservationType.CHECKPOINT,
                 VerificationStatus.CONFIRMED, ObservationSourceType.SYSTEM, null, summary, null,
-                null, null, evidencePayload(changedFiles), run.getExecutionId());
+                null, null, null, run.getExecutionId());
         return true;
-    }
-
-    private String evidencePayload(List<String> changedFiles) {
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("schemaVersion", 1);
-            payload.put("changedFiles", changedFiles == null ? List.of() : changedFiles);
-            return JsonUtils.mapper().writeValueAsString(payload);
-        } catch (Exception e) {
-            return "{\"schemaVersion\":1}";
-        }
     }
 
     /** 数据模型 §4：executionKey = sha256(taskType|businessTaskId|loopId|planVersion|inputHash)。 */

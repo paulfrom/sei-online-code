@@ -1,0 +1,310 @@
+{
+  "project_name": "SEI Online Code 运行期 Agent 失败审阅与调度修正",
+  "description": "失败 agent 必须由 pm-agent 决定重试、调整计划或转人工；禁止补偿器越权重试，并统一工作区并发与长事务边界。明确排除当前数据修复。",
+  "architecture_decisions": [
+    {
+      "decision": "执行状态与 PM 交付审阅状态分离",
+      "rationale": "避免 CodingTaskStatus 同时承担执行、审阅和计划决策语义，并支持按 delivery Run 幂等审阅。",
+      "alternatives_considered": [
+        "继续扩展 CodingTaskStatus",
+        "只在计划全部结束后执行最终 PM 验收"
+      ]
+    },
+    {
+      "decision": "任务交付结束立即进入 PM 审阅门禁",
+      "rationale": "满足 PM 审阅后再调度下游任务的运行期望，防止失败自动重试和级联失败。",
+      "alternatives_considered": [
+        "补偿器固定重试三次后再交给 PM",
+        "失败任务与无关任务继续并行"
+      ]
+    },
+    {
+      "decision": "工作区繁忙返回 DEFERRED 而非 FAILED",
+      "rationale": "工作区互斥是调度条件，不是任务交付失败。",
+      "alternatives_considered": [
+        "维持 AgentExecutionService 普通失败返回",
+        "仅依赖 area 和 fileScope 并发控制"
+      ]
+    },
+    {
+      "decision": "agent 执行位于数据库事务之外",
+      "rationale": "保证运行状态及时提交，避免最长 1800 秒的数据库长事务。",
+      "alternatives_considered": [
+        "在 scheduler 事务内同步等待 Future"
+      ]
+    }
+  ],
+  "contracts": {
+    "task_review_decisions": [
+      "APPROVE",
+      "RETRY",
+      "REPLAN",
+      "WAIT_HUMAN"
+    ],
+    "failure_categories": [
+      "NONE",
+      "TRANSIENT_INFRA",
+      "DELIVERY_INCOMPLETE",
+      "VALIDATION_FAILED",
+      "UPSTREAM_INCOMPLETE",
+      "PLAN_DEFECT"
+    ],
+    "idempotency_key": [
+      "codingTaskId",
+      "deliveryRunId"
+    ]
+  },
+  "tasks": [
+    {
+      "id": "BE-RUN-001",
+      "agent": "backend-dev-agent",
+      "title": "交付审阅领域契约与持久化",
+      "description": "新增 TaskDeliveryReview、审阅状态、决策枚举、PM JSON DTO 和幂等唯一约束。",
+      "priority": 0,
+      "dependencies": [],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "codingTaskId + deliveryRunId 幂等创建",
+        "非法状态转换和非法失败 APPROVE 被拒绝",
+        "不引入 tenant 字段或租户过滤",
+        "单元测试覆盖状态机与并发重复创建"
+      ],
+      "artifacts_expected": [
+        "审阅实体与 DAO",
+        "审阅 DTO 和枚举",
+        "数据库建表定义",
+        "单元测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-api/src/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "BE-RUN-002",
+      "agent": "backend-dev-agent",
+      "title": "任务级 PM 审阅服务",
+      "description": "实现审阅事件、pm-agent 调用、结果解析与 APPROVE/RETRY/REPLAN/WAIT_HUMAN 决策应用。",
+      "priority": 0,
+      "dependencies": [
+        "BE-RUN-001"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "成功和失败任务都能生成审阅输入",
+        "失败任务不能被 APPROVE",
+        "PM 调用或解析失败进入 WAITING_HUMAN",
+        "RETRY 和 REPLAN 幂等",
+        "旧失败 Run 和报告不被覆盖"
+      ],
+      "artifacts_expected": [
+        "TaskDeliveryReviewService",
+        "PM review prompt 和解析器",
+        "审阅事件与监听器",
+        "单元测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "BE-RUN-003",
+      "agent": "backend-dev-agent",
+      "title": "验证任务异步化与事务拆分",
+      "description": "建立 claim/execute/finish 三阶段执行，禁止 scheduler 事务同步等待 test-agent。",
+      "priority": 0,
+      "dependencies": [
+        "BE-RUN-001"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "运行期间任务状态对其他事务可见为 VALIDATING",
+        "外部 CLI 执行不持有数据库事务",
+        "所有终止路径正确结算",
+        "使用有界专用线程池",
+        "完成后创建唯一审阅记录"
+      ],
+      "artifacts_expected": [
+        "ValidationTaskExecutionService",
+        "异步执行配置",
+        "事务与并发测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/validation/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CodingTaskScheduler.java",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "BE-RUN-004",
+      "agent": "backend-dev-agent",
+      "title": "统一工作区租约和 DEFERRED 语义",
+      "description": "让 scheduler 与 AgentExecutionService 使用同一 workspace lease，并将繁忙建模为延迟调度。",
+      "priority": 0,
+      "dependencies": [
+        "BE-RUN-001"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "同一 workspace 同时只有一个活动 agent",
+        "busy 任务保持 PENDING",
+        "busy 不创建失败 Run且不增加 retryCount",
+        "所有终止路径释放租约",
+        "不同 workspace 仍可并行"
+      ],
+      "artifacts_expected": [
+        "WorkspaceExecutionLeaseService",
+        "类型化 AgentExecutionResult",
+        "并发测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CodingTaskScheduler.java",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "BE-RUN-005",
+      "agent": "backend-dev-agent",
+      "title": "补偿策略收敛",
+      "description": "补偿器只恢复既有 PM RETRY 决策和明确瞬态故障，不再对业务失败作决定。",
+      "priority": 0,
+      "dependencies": [
+        "BE-RUN-001",
+        "BE-RUN-002"
+      ],
+      "estimated_complexity": "medium",
+      "acceptance_criteria": [
+        "VALIDATION_FAILED 不自动恢复",
+        "review 未完成不重试",
+        "WAITING_HUMAN 不补偿",
+        "丢失的已批准 RETRY 调度可以恢复",
+        "补偿日志记录决策来源和 deliveryRunId"
+      ],
+      "artifacts_expected": [
+        "新 recoverDevelopment 策略",
+        "失败分类与补偿单元测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CompensationService.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/FailureInfoSupport.java",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "BE-RUN-006",
+      "agent": "backend-dev-agent",
+      "title": "调度门禁与计划结算集成",
+      "description": "接入 review gate、审阅后的依赖满足条件以及 PM 决策后的恢复调度。",
+      "priority": 0,
+      "dependencies": [
+        "BE-RUN-002",
+        "BE-RUN-003",
+        "BE-RUN-004",
+        "BE-RUN-005"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "PENDING 或 REVIEWING 审阅阻止后续任务启动",
+        "依赖任务未 APPROVE 时下游不启动",
+        "全部任务审阅完成后才进入最终计划验收",
+        "REPLAN 创建修复任务和独立 test-agent 验收任务",
+        "重复调度事件不重复启动任务或审阅"
+      ],
+      "artifacts_expected": [
+        "scheduler review gate",
+        "计划结算集成",
+        "调度集成测试"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CodingTaskScheduler.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/RequirementAutomationService.java",
+        "backend/sei-online-code-service/src/test/"
+      ]
+    },
+    {
+      "id": "TEST-RUN-001",
+      "agent": "test-agent",
+      "title": "失败审阅与补偿策略后端验收",
+      "description": "独立执行任务级 PM 决策与补偿边界验收。",
+      "priority": 1,
+      "dependencies": [
+        "BE-RUN-006"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "失败后 PM 决策前零次自动重试",
+        "RETRY、REPLAN、WAIT_HUMAN 路径通过",
+        "VALIDATION_FAILED 不被自动补偿",
+        "重复事件保持幂等",
+        "报告命令、退出码、测试数、失败数和跳过数",
+        "全部测试通过且无未解释失败或跳过"
+      ],
+      "artifacts_expected": [
+        "test-agent 验收报告"
+      ],
+      "scope": [
+        "backend/"
+      ]
+    },
+    {
+      "id": "TEST-RUN-002",
+      "agent": "test-agent",
+      "title": "调度、租约与事务可见性验收",
+      "description": "独立执行 workspace 并发、DEFERRED 行为和事务可见性验收。",
+      "priority": 1,
+      "dependencies": [
+        "BE-RUN-006"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "同一 workspace 同时最多一个活动 agent",
+        "busy 任务保持 PENDING 且 retryCount 不变",
+        "不同 workspace 可并行",
+        "test-agent 运行时任务状态可见为 VALIDATING",
+        "agent 执行期间不存在 scheduler 长事务",
+        "全部测试通过且无未解释失败或跳过"
+      ],
+      "artifacts_expected": [
+        "test-agent 并发与事务验收报告"
+      ],
+      "scope": [
+        "backend/"
+      ]
+    }
+  ],
+  "non_functional_requirements": {
+    "reliability": [
+      "审阅事件和决定幂等",
+      "服务重启后可以恢复未完成审阅",
+      "业务失败不会无限自动重试"
+    ],
+    "consistency": [
+      "Run、CodingTask 和 Review 状态通过短事务结算",
+      "外部 agent 调用不位于数据库事务中"
+    ],
+    "observability": [
+      "日志包含 traceId、requirementId、loopId、planId、codingTaskId、deliveryRunId、reviewRunId",
+      "补偿日志记录决策来源"
+    ],
+    "security": [
+      "单租户设计，不增加 tenant_code",
+      "PM 输出严格 JSON 校验，不直接执行未校验动作"
+    ]
+  },
+  "testing_strategy": {
+    "unit_tests": "状态机、PM JSON 解析、失败分类、补偿策略、幂等处理",
+    "integration_tests": "事件到 PM 决策、补救计划创建、workspace 并发、事务可见性",
+    "acceptance_tests": "由 TEST-RUN-001 与 TEST-RUN-002 独立执行，不在编码任务后隐式触发"
+  },
+  "out_of_scope": [
+    "当前数据库 Run、CodingTask、ExecutionPlan 修复",
+    "历史数据回填",
+    "前端页面改造",
+    "业务验收标准调整"
+  ]
+}

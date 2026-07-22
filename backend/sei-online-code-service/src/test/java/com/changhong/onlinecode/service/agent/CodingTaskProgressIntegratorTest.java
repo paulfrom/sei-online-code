@@ -123,7 +123,7 @@ class CodingTaskProgressIntegratorTest {
         Run run = new Run();
         run.setId("run-no-execution");
 
-        boolean result = integrator.recordSuccessfulCodingTaskCompletion(run, "done", List.of("a.java"));
+        boolean result = integrator.recordSuccessfulCodingTaskCompletion(run, "done");
 
         assertTrue(result);
     }

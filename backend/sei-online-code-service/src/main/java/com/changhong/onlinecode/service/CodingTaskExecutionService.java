@@ -28,7 +28,6 @@ import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.entity.TaskHandoffSnapshot;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
-import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
@@ -45,10 +44,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Date;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -80,7 +77,6 @@ public class CodingTaskExecutionService {
     private final MemoryJobService memoryJobService;
     private final WorkspaceMemoryService workspaceMemoryService;
     private final CodingTaskChangeCollector codingTaskChangeCollector;
-    private final WorkspaceChangeDetector workspaceChangeDetector;
     private final ApplicationEventPublisher eventPublisher;
     private final CodingTaskProgressIntegrator codingTaskProgressIntegrator;
     private final WorkspaceLeaseService workspaceLeaseService;
@@ -148,11 +144,9 @@ public class CodingTaskExecutionService {
         run = runDao.save(run);
         String fullPrompt = buildExecutionPrompt(task, prompt, run) + safeProgressBrief(run.getExecutionId());
 
-        WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
-
         final Run trackedRun = run;
         AgentExecutionRequest request = buildRequest(run, task, fullPrompt, task.getAssignedAgent());
-        startAgentAfterCommit(task.getAssignedAgent(), request, trackedRun, task, baseline, false);
+        startAgentAfterCommit(task.getAssignedAgent(), request, trackedRun, task, false);
 
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
@@ -226,12 +220,11 @@ public class CodingTaskExecutionService {
         bindProgress(run, codingTaskId, task.getRequirementId(), task.getLoopId(), prompt, run.getBaseCommit());
         runNumberService.assign(run);
         run = runDao.save(run);
-        WorkspaceChangeDetector.Snapshot baseline = workspaceChangeDetector.snapshot(workspace.pathString());
 
         final Run trackedRun = run;
         String fullPrompt = buildExecutionPrompt(task, prompt, run) + safeProgressBrief(run.getExecutionId());
         AgentExecutionRequest request = buildRequest(run, task, fullPrompt, agentName);
-        startAgentAfterCommit(agentName, request, trackedRun, task, baseline, true);
+        startAgentAfterCommit(agentName, request, trackedRun, task, true);
 
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
@@ -243,11 +236,11 @@ public class CodingTaskExecutionService {
     }
 
     private void startAgentAfterCommit(String agentName, AgentExecutionRequest request, Run run, CodingTask task,
-                                       WorkspaceChangeDetector.Snapshot baseline, boolean schedulerManaged) {
+                                       boolean schedulerManaged) {
         runAfterCurrentTransactionCommit(() -> {
             CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName, request);
             future.thenAccept(result -> {
-                CompletionDecision decision = decideCompletion(run, result, baseline);
+                CompletionDecision decision = decideCompletion(run, result);
                 finishRun(run, task, decision.success(), decision.summary(), decision.failureReason(), schedulerManaged);
             }).exceptionally(e -> {
                 log.error("coding-task execute failed taskId={}", task.getId(), e);
@@ -277,8 +270,7 @@ public class CodingTaskExecutionService {
         });
     }
 
-    private CompletionDecision decideCompletion(Run run, AgentExecutionResult result,
-                                                WorkspaceChangeDetector.Snapshot baseline) {
+    private CompletionDecision decideCompletion(Run run, AgentExecutionResult result) {
         if (result == null) {
             return CompletionDecision.failed("执行返回空结果", "执行返回空结果");
         }
@@ -290,16 +282,7 @@ public class CodingTaskExecutionService {
         if (result.output() == null) {
             return CompletionDecision.failed(summary, "执行返回空结果");
         }
-        List<String> changedFiles = resolveChangedFiles(run, baseline);
-        if (changedFiles.isEmpty()) {
-            return CompletionDecision.failed(summary, "开发代理未在指定工作区产生代码或文档变更");
-        }
-        recordProgressBestEffort(run, summary, changedFiles);
-        if (log.isDebugEnabled()) {
-            log.debug("coding-task: detected workspace changes runId={}, files={}",
-                    run.getId(), changedFiles);
-            return CompletionDecision.ok(summary);
-        }
+        recordProgressBestEffort(run, summary);
         return CompletionDecision.ok(summary);
     }
 
@@ -595,42 +578,9 @@ public class CodingTaskExecutionService {
         return previousRun;
     }
 
-    private List<String> resolveChangedFiles(Run run, WorkspaceChangeDetector.Snapshot baseline) {
-        Set<String> changedFiles = new LinkedHashSet<>(
-                workspaceChangeDetector.changedFiles(baseline, run.getWorktreePath()));
-        if (changedFiles.isEmpty() && run.getParentRunId() != null) {
-            CodingTaskChangeResult uncommitted = codingTaskChangeCollector.collect(run.getWorktreePath(), null);
-            if (uncommitted != null && uncommitted.isSuccess()) {
-                changedFiles.addAll(uncommitted.getChangedFiles());
-            }
-            Run previousRun = runDao.findOne(run.getParentRunId());
-            if (previousRun != null && previousRun.getBaseCommit() != null) {
-                CodingTaskChangeResult committed = codingTaskChangeCollector.collect(
-                        run.getWorktreePath(), previousRun.getBaseCommit());
-                if (committed != null && committed.isSuccess()) {
-                    changedFiles.addAll(committed.getChangedFiles());
-                }
-            }
-        }
-        CodingTask task = codingTaskDao.findOne(run.getCodingTaskId());
-        if (task == null || task.getFileScope() == null || task.getFileScope().isEmpty()) {
-            return List.copyOf(changedFiles);
-        }
-        return changedFiles.stream().filter(path -> isInFileScope(path, task.getFileScope())).toList();
-    }
-
-    private boolean isInFileScope(String path, List<String> scopes) {
-        String normalizedPath = path.replace('\\', '/');
-        return scopes.stream().filter(Objects::nonNull).map(scope -> scope.replace('\\', '/'))
-                .map(scope -> scope.endsWith("/**") ? scope.substring(0, scope.length() - 3) : scope)
-                .map(scope -> scope.endsWith("/") ? scope.substring(0, scope.length() - 1) : scope)
-                .anyMatch(scope -> !scope.isBlank()
-                        && (normalizedPath.equals(scope) || normalizedPath.startsWith(scope + "/")));
-    }
-
-    private void recordProgressBestEffort(Run run, String summary, List<String> changedFiles) {
+    private void recordProgressBestEffort(Run run, String summary) {
         try {
-            if (!codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(run, summary, changedFiles)) {
+            if (!codingTaskProgressIntegrator.recordSuccessfulCodingTaskCompletion(run, summary)) {
                 log.warn("coding-task progress ledger update incomplete; task success is not blocked. runId={}", run.getId());
             }
         } catch (Exception e) {
