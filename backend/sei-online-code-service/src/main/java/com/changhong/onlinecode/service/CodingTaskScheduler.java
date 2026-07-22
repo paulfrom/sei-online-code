@@ -6,11 +6,14 @@ import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraph;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.AllArgsConstructor;
@@ -47,7 +50,8 @@ public class CodingTaskScheduler {
             CodingTaskStatus.RUNNING, CodingTaskStatus.VALIDATING);
     private static final Set<CodingTaskStatus> TERMINAL_STATUSES = EnumSet.of(
             CodingTaskStatus.SUCCEEDED, CodingTaskStatus.FAILED,
-            CodingTaskStatus.VALIDATION_FAILED, CodingTaskStatus.CANCELLED, CodingTaskStatus.STALE);
+            CodingTaskStatus.VALIDATION_FAILED, CodingTaskStatus.CANCELLED,
+            CodingTaskStatus.STALE, CodingTaskStatus.SUPERSEDED);
     private static final Set<CodingTaskStatus> FAILURE_STATUSES = EnumSet.of(
             CodingTaskStatus.FAILED, CodingTaskStatus.VALIDATION_FAILED,
             CodingTaskStatus.CANCELLED, CodingTaskStatus.STALE);
@@ -61,6 +65,7 @@ public class CodingTaskScheduler {
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
     private final RequirementCommentService requirementCommentService;
     private final ValidationLoopService validationLoopService;
+    private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
 
 
     /**
@@ -106,14 +111,19 @@ public class CodingTaskScheduler {
             }
         }
 
-        // 后续依赖解析与调度只能使用当前 loop。历史 loop 可能存在相同 planTaskKey，
-        // 若混入依赖图会把当前已成功依赖误判为旧任务的 STALE 状态。
-        List<CodingTask> tasks = allTasks.stream()
-                .filter(task -> Objects.equals(task.getLoopId(), currentLoopId))
-                .toList();
-        Map<String, CodingTask> taskByKey = tasks.stream()
-                .filter(task -> task.getPlanTaskKey() != null)
-                .collect(Collectors.toMap(CodingTask::getPlanTaskKey, task -> task));
+        // 修订期间旧计划仍可接收运行回调，但不能继续启动其下游任务。
+        // FAILED 也保持暂停，等待显式重试或新的评论触发下一次修订。
+        if (isSchedulingPaused(requirement)) {
+            log.debug("schedule paused for requirement {} while revision state is {}",
+                    requirementId, requirement.getRevisionState());
+            return;
+        }
+
+        // 只使用最新计划修订的有效图。解析器会把当前修订任务与显式 KEEP 的历史任务
+        // 组合为唯一 taskKey 图，避免同一 loop 的历史版本污染依赖解析。
+        EffectiveTaskGraph effectiveGraph = effectiveTaskGraphResolver.resolveLatest(requirementId, currentLoopId);
+        List<CodingTask> tasks = effectiveGraph.tasks();
+        Map<String, CodingTask> taskByKey = effectiveGraph.tasksByKey();
 
         // 2. 收集当前占用 lane 和 fileScope 的活动任务
         List<CodingTask> activeTasks = tasks.stream()
@@ -214,6 +224,11 @@ public class CodingTaskScheduler {
             log.info("onDevelopmentRunFinished: task {} loopId mismatch, mark stale", codingTaskId);
             task.setStatus(CodingTaskStatus.STALE);
             codingTaskDao.save(task);
+            schedule(task.getRequirementId());
+            return;
+        }
+        if (task.getStatus() == CodingTaskStatus.SUPERSEDED) {
+            log.info("onDevelopmentRunFinished: task {} was superseded, ignore late run result", codingTaskId);
             schedule(task.getRequirementId());
             return;
         }
@@ -349,6 +364,11 @@ public class CodingTaskScheduler {
     private boolean isCurrentLoop(CodingTask task) {
         Requirement current = requirementDao.findOne(task.getRequirementId());
         return current != null && Objects.equals(task.getLoopId(), current.getActiveLoopId());
+    }
+
+    private boolean isSchedulingPaused(Requirement requirement) {
+        RequirementRevisionState state = requirement.getRevisionState();
+        return state != null && state != RequirementRevisionState.NONE;
     }
 
     private static String firstNonBlank(String... values) {

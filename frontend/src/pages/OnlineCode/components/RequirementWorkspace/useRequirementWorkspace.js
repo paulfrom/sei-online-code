@@ -23,6 +23,7 @@ import {
   regeneratePrd,
   resumeRequirementAutomation,
   stopRequirementAutomation,
+  retryRequirementRevision,
 } from '@/services/requirement';
 // @ts-ignore JS service module has no declaration file
 import { findCommentsByRequirement } from '@/services/requirementComment';
@@ -48,8 +49,76 @@ const FAST_STATUSES = new Set([
 ]);
 const FAST_INTERVAL = 5000;
 const SLOW_INTERVAL = 30000;
+const ACTIVE_REVISION_STATES = new Set(['PENDING', 'SNAPSHOTTING', 'PLANNING', 'APPLYING']);
+const REVISION_STATE_ORDER = {
+  PENDING: 1,
+  SNAPSHOTTING: 2,
+  PLANNING: 3,
+  APPLYING: 4,
+  NONE: 5,
+  FAILED: 5,
+};
 
 const MR_STATUS_TYPES = new Set(['MR_CREATED', 'MR_UPDATED', 'MR_FAILED']);
+
+/**
+ * Optimistically project a revision progress event onto a fetched snapshot.
+ * Events from an older loop/revision are ignored; the next overview request
+ * remains authoritative and fills fields (such as appliedRevisionSeq) that are
+ * intentionally absent from the notification payload.
+ */
+export function mergeRevisionProgressEvent(snapshot, event) {
+  if (!snapshot || !event || typeof event !== 'object') return snapshot;
+  if (snapshot.activeLoopId && event.loopId && snapshot.activeLoopId !== event.loopId) {
+    return snapshot;
+  }
+  const incomingSeq = typeof event.revisionSeq === 'number' ? event.revisionSeq : null;
+  const currentSeq = typeof snapshot.revisionSeq === 'number' ? snapshot.revisionSeq : 0;
+  if (incomingSeq === null || incomingSeq < currentSeq) return snapshot;
+
+  const next = { ...snapshot, revisionSeq: incomingSeq };
+  if (typeof event.revisionState === 'string') {
+    next.revisionState = event.revisionState;
+    if (event.revisionState !== 'FAILED') {
+      next.revisionFailureReason = null;
+    }
+  }
+  if (event.revisionState === 'FAILED'
+    && Object.prototype.hasOwnProperty.call(event, 'revisionFailureReason')) {
+    next.revisionFailureReason = event.revisionFailureReason;
+  }
+  return next;
+}
+
+/**
+ * Reject an out-of-order event before optimistic state is updated. Revision
+ * states move forward within one token; the only legal restart is
+ * FAILED -> PENDING when the user retries that same token.
+ */
+export function shouldApplyRevisionProgressEvent(cursor, event) {
+  if (!event || typeof event.revisionSeq !== 'number' || !event.revisionState) return false;
+  if (!cursor) return true;
+  if (cursor.loopId && event.loopId && cursor.loopId !== event.loopId) return true;
+  if (event.revisionSeq !== cursor.revisionSeq) return event.revisionSeq > cursor.revisionSeq;
+
+  const incomingTime = Date.parse(event.occurredAt || '');
+  const currentTime = Date.parse(cursor.occurredAt || '');
+  const hasOrderedTime = Number.isFinite(incomingTime) && Number.isFinite(currentTime);
+  if (hasOrderedTime && incomingTime < currentTime) return false;
+
+  const currentState = cursor.revisionState;
+  const incomingState = event.revisionState;
+  if (currentState === 'FAILED' && incomingState === 'PENDING') {
+    return !hasOrderedTime || incomingTime >= currentTime;
+  }
+  if (currentState === 'NONE' || currentState === 'FAILED') {
+    return incomingState === currentState && (!hasOrderedTime || incomingTime >= currentTime);
+  }
+  const currentOrder = REVISION_STATE_ORDER[currentState] || 0;
+  const incomingOrder = REVISION_STATE_ORDER[incomingState] || 0;
+  if (incomingOrder < currentOrder) return false;
+  return !hasOrderedTime || incomingTime >= currentTime;
+}
 
 /**
  * Pure derivation of the delivery summary from a requirement and its comment
@@ -108,6 +177,7 @@ export function useRequirementWorkspace(requirementId) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sendingComment, setSendingComment] = useState(false);
+  const [retryingRevision, setRetryingRevision] = useState(false);
   // Authoritative aggregated progress snapshot (ExecutionProgressApi.findOverview).
   const [overview, setOverview] = useState(null);
   // True when the snapshot is past staleAfter or the progress WS is down.
@@ -119,6 +189,8 @@ export function useRequirementWorkspace(requirementId) {
   const cancelledRef = useRef(false);
   const timerRef = useRef(null);
   const commentInFlightRef = useRef(false);
+  const revisionRetryInFlightRef = useRef(false);
+  const revisionEventCursorRef = useRef(null);
   // Last overview snapshotVersion applied to the UI. Gates WS-triggered
   // refetch so a stale / duplicate / late event cannot roll the view back.
   const appliedSnapshotVersionRef = useRef(null);
@@ -214,7 +286,11 @@ export function useRequirementWorkspace(requirementId) {
   useEffect(() => {
     if (cancelledRef.current) return;
     const status = requirement ? requirement.automationStatus : null;
-    const interval = status && FAST_STATUSES.has(status) ? FAST_INTERVAL : SLOW_INTERVAL;
+    const revisionState = requirement ? requirement.revisionState : null;
+    const interval = (status && FAST_STATUSES.has(status))
+      || (revisionState && ACTIVE_REVISION_STATES.has(revisionState))
+      ? FAST_INTERVAL
+      : SLOW_INTERVAL;
 
     const arm = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -251,7 +327,7 @@ export function useRequirementWorkspace(requirementId) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requirement?.automationStatus, refresh]);
+  }, [requirement?.automationStatus, requirement?.revisionState, refresh]);
 
   // Version-gated refresh: only refetch when an event carries a higher
   // snapshotVersion than what the UI has already applied. Events without a
@@ -281,6 +357,16 @@ export function useRequirementWorkspace(requirementId) {
     const socket = subscribeRequirementProgress({
       requirementId,
       onEvent: (evt) => {
+        if (shouldApplyRevisionProgressEvent(revisionEventCursorRef.current, evt)) {
+          revisionEventCursorRef.current = {
+            loopId: evt.loopId,
+            revisionSeq: evt.revisionSeq,
+            revisionState: evt.revisionState,
+            occurredAt: evt.occurredAt,
+          };
+          safeSet(setRequirement, (current) => mergeRevisionProgressEvent(current, evt));
+          safeSet(setOverview, (current) => mergeRevisionProgressEvent(current, evt));
+        }
         maybeRefreshOnVersion(evt && evt.snapshotVersion);
       },
       onDisconnect: () => {
@@ -291,6 +377,7 @@ export function useRequirementWorkspace(requirementId) {
     return () => {
       socket.close();
       progressSocketRef.current = null;
+      revisionEventCursorRef.current = null;
     };
   }, [requirementId, maybeRefreshOnVersion, safeSet]);
 
@@ -384,6 +471,24 @@ export function useRequirementWorkspace(requirementId) {
           message.error((res && res.message) || '重试 MR 失败');
         }
       },
+      async retryRevision() {
+        if (!requirementId || revisionRetryInFlightRef.current) return;
+        revisionRetryInFlightRef.current = true;
+        safeSet(setRetryingRevision, true);
+        try {
+          const res = await retryRequirementRevision(requirementId);
+          if (!res || !res.success) {
+            throw new Error((res && res.message) || '重试计划修订失败');
+          }
+          message.success('已重新提交当前计划修订');
+          await refresh();
+        } catch (err) {
+          message.error((err && err.message) || '重试计划修订失败');
+        } finally {
+          revisionRetryInFlightRef.current = false;
+          safeSet(setRetryingRevision, false);
+        }
+      },
       refresh,
     }),
     [requirementId, refresh, safeSet],
@@ -401,6 +506,7 @@ export function useRequirementWorkspace(requirementId) {
     loading,
     error,
     sendingComment,
+    retryingRevision,
     activeLoopId,
     planVersion,
     actions,

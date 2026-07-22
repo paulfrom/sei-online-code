@@ -163,6 +163,9 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         dto.setPlanTaskKey(task.getPlanTaskKey());
         dto.setAssignedAgent(task.getAssignedAgent());
         dto.setLoopId(task.getLoopId());
+        dto.setRevisionSeq(task.getRevisionSeq());
+        dto.setSupersedesTaskId(task.getSupersedesTaskId());
+        dto.setDispositionReason(task.getDispositionReason());
         dto.setFailureSummary(task.getFailureSummary());
         dto.setCreatedDate(task.getCreatedDate());
         dto.setLastEditedDate(task.getLastEditedDate());

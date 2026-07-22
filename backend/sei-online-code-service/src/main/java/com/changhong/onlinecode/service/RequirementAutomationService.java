@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
@@ -12,6 +13,7 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.CodingTask;
@@ -22,10 +24,12 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
+import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
+import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import com.changhong.sei.core.util.JsonUtils;
 import com.changhong.sei.core.utils.TransactionUtil;
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -47,7 +51,6 @@ import java.util.UUID;
  * <p>负责在 PM 执行计划生成成功后持久化任务并启动调度器。</p>
  */
 @Service
-@AllArgsConstructor
 public class RequirementAutomationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAutomationService.class);
@@ -64,6 +67,41 @@ public class RequirementAutomationService {
     private final AgentExecutionService agentExecutionService;
     private final ValidationLoopService validationLoopService;
     private final FailureInfoSupport failureInfoSupport;
+    private final PlanRevisionStateService revisionStateService;
+    private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
+    private final OcConfig ocConfig;
+
+    public RequirementAutomationService(RequirementDao requirementDao,
+                                        CodingTaskDao codingTaskDao,
+                                        ApplicationEventPublisher eventPublisher,
+                                        ExecutionPlanDao executionPlanDao,
+                                        RequirementCommentService requirementCommentService,
+                                        RequirementDesignContextService requirementDesignContextService,
+                                        RunDao runDao,
+                                        RequirementDeliveryService requirementDeliveryService,
+                                        PmAgentClient pmAgentClient,
+                                        AgentExecutionService agentExecutionService,
+                                        ValidationLoopService validationLoopService,
+                                        FailureInfoSupport failureInfoSupport,
+                                        PlanRevisionStateService revisionStateService,
+                                        EffectiveTaskGraphResolver effectiveTaskGraphResolver,
+                                        OcConfig ocConfig) {
+        this.requirementDao = requirementDao;
+        this.codingTaskDao = codingTaskDao;
+        this.eventPublisher = eventPublisher;
+        this.executionPlanDao = executionPlanDao;
+        this.requirementCommentService = requirementCommentService;
+        this.requirementDesignContextService = requirementDesignContextService;
+        this.runDao = runDao;
+        this.requirementDeliveryService = requirementDeliveryService;
+        this.pmAgentClient = pmAgentClient;
+        this.agentExecutionService = agentExecutionService;
+        this.validationLoopService = validationLoopService;
+        this.failureInfoSupport = failureInfoSupport;
+        this.revisionStateService = revisionStateService;
+        this.effectiveTaskGraphResolver = effectiveTaskGraphResolver;
+        this.ocConfig = ocConfig;
+    }
 
     /**
      * PRD 确认后的自动化入口。当前实现生成结构化初始计划并启动调度；
@@ -93,30 +131,74 @@ public class RequirementAutomationService {
         RequirementComment comment = appendComment(requirementId, requirement.getActiveLoopId(),
                 RequirementCommentAuthorType.HUMAN, "human", RequirementCommentType.HUMAN_FEEDBACK,
                 content, metadataJson);
-        if (requirementDesignContextService != null) {
-            requirementDesignContextService.invalidate(requirementId);
-        }
+        requirementDesignContextService.invalidate(requirementId);
 
         if (isActive(requirement.getAutomationStatus())) {
-            String loopId = interruptActiveLoop(requirement, comment);
-            TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
-                    ExecutionPlanType.CHANGE_REQUEST,
-                    "人类评论中断当前自动化，PM 基于完整评论历史重规划。"));
+            if (isIncrementalCommentRevisionEnabled()) {
+                requestIncrementalRevision(requirement, comment);
+            } else {
+                fallbackToLegacyCommentReplan(requirement, comment);
+            }
         } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.COMPLETED) {
             String loopId = prepareLoop(requirement);
             TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
                     ExecutionPlanType.CHANGE_REQUEST,
                     "已完成需求收到人类评论，启动 CHANGE_REQUEST loop。"));
+        } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.FAILED
+                && isIncrementalCommentRevisionEnabled()
+                && canReviseCurrentLoop(requirement)) {
+            failureInfoSupport.clearRequirementFailure(requirement);
+            requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+            requirementDao.save(requirement);
+            requestIncrementalRevision(requirement, comment);
         } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.FAILED) {
-            if (failureInfoSupport != null) {
-                failureInfoSupport.clearRequirementFailure(requirement);
-            }
+            failureInfoSupport.clearRequirementFailure(requirement);
             String loopId = prepareLoop(requirement);
             TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
                     ExecutionPlanType.CHANGE_REQUEST,
                     "失败需求收到人类评论，重置失败状态并启动 CHANGE_REQUEST loop。"));
         }
         return comment;
+    }
+
+    private void requestIncrementalRevision(Requirement requirement, RequirementComment comment) {
+        String loopId = requirement.getActiveLoopId();
+        if (loopId == null || loopId.isBlank()) {
+            throw new IllegalStateException("当前需求没有可修订的 loop");
+        }
+        long revisionSeq = revisionStateService.request(requirement.getId(), loopId, comment.getId());
+        LOGGER.info("Plan revision requested requirementId={}, loopId={}, revisionSeq={}",
+                requirement.getId(), loopId, revisionSeq);
+        TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
+                new PlanRevisionRequestedEvent(requirement.getId(), loopId, revisionSeq)));
+    }
+
+    private boolean isIncrementalCommentRevisionEnabled() {
+        return ocConfig.isIncrementalCommentRevisionEnabled();
+    }
+
+    private void fallbackToLegacyCommentReplan(Requirement requirement, RequirementComment comment) {
+        String loopId = interruptActiveLoop(requirement, comment);
+        LOGGER.info("Incremental comment revision disabled; using legacy replan requirementId={}, loopId={}",
+                requirement.getId(), loopId);
+        TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirement.getId(), loopId,
+                ExecutionPlanType.CHANGE_REQUEST,
+                "人类评论已中断活跃自动化，启动 CHANGE_REQUEST loop。"));
+    }
+
+    private boolean canReviseCurrentLoop(Requirement requirement) {
+        if (requirement.getActiveLoopId() == null || requirement.getActiveLoopId().isBlank()) {
+            return false;
+        }
+        try {
+            ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                    requirement.getId(), requirement.getActiveLoopId());
+            return plan != null && !effectiveTaskGraphResolver.resolve(plan).tasks().isEmpty();
+        } catch (RuntimeException exception) {
+            LOGGER.warn("failed loop cannot be revised incrementally; falling back to a new loop. requirementId={}",
+                    requirement.getId());
+            return false;
+        }
     }
 
     /** 人工停止当前自动化，不触发重规划。 */
@@ -130,7 +212,7 @@ public class RequirementAutomationService {
             throw new IllegalStateException("当前状态不可停止自动化: " + requirement.getAutomationStatus());
         }
         String oldLoopId = requirement.getActiveLoopId();
-        if (executionPlanDao != null && oldLoopId != null) {
+        if (oldLoopId != null) {
             ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                     requirementId, oldLoopId);
             if (plan != null && !isPlanTerminal(plan.getStatus())) {
@@ -154,11 +236,12 @@ public class RequirementAutomationService {
 
     @Transactional(rollbackFor = Exception.class)
     public void onPlanTasksSettled(String requirementId) {
-        if (executionPlanDao == null || pmAgentClient == null || requirementCommentService == null) {
-            return;
-        }
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null || requirement.getActiveLoopId() == null) {
+            return;
+        }
+        if (requirement.getRevisionState() != null
+                && requirement.getRevisionState() != RequirementRevisionState.NONE) {
             return;
         }
         ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
@@ -166,9 +249,7 @@ public class RequirementAutomationService {
         if (plan == null || isPlanTerminal(plan.getStatus())) {
             return;
         }
-        List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirementId).stream()
-                .filter(t -> Objects.equals(t.getExecutionPlanId(), plan.getId()))
-                .toList();
+        List<CodingTask> tasks = effectiveTaskGraphResolver.resolve(plan).tasks();
         if (tasks.isEmpty() || tasks.stream().anyMatch(t -> !isTerminal(t.getStatus()))) {
             return;
         }
@@ -187,8 +268,7 @@ public class RequirementAutomationService {
 
         List<PlanTask> planTasks = parsePlanTasks(plan.getPlanJson());
         List<RequirementComment> previousComments = requirementCommentService.findByRequirementId(requirementId);
-        RequirementDesignContext context = requirementDesignContextService != null
-                ? requirementDesignContextService.findCurrentByRequirement(requirementId) : null;
+        RequirementDesignContext context = requirementDesignContextService.findCurrentByRequirement(requirementId);
 
         PmAgentClient.PmAcceptanceResult result = pmAgentClient.reviewAcceptance(
                 requirement, plan, planTasks, previousComments, context);
@@ -220,9 +300,7 @@ public class RequirementAutomationService {
             requirement.setAutomationStatus(RequirementAutomationStatus.DELIVERING);
             executionPlanDao.save(plan);
             requirementDao.save(requirement);
-            if (requirementDeliveryService != null) {
-                TransactionUtil.afterCommit(() -> requirementDeliveryService.deliver(requirementId, plan.getId()));
-            }
+            TransactionUtil.afterCommit(() -> requirementDeliveryService.deliver(requirementId, plan.getId()));
             return;
         }
 
@@ -252,10 +330,6 @@ public class RequirementAutomationService {
 
     public void executePreparedLoop(String requirementId, String loopId,
                                     ExecutionPlanType planType, String summary) {
-        if (executionPlanDao == null || requirementCommentService == null || pmAgentClient == null) {
-            LOGGER.warn("executePreparedLoop skipped because automation dependencies are not initialized");
-            return;
-        }
         Requirement requirement = requirementDao.findOne(requirementId);
         if (!isCurrentLoop(requirement, loopId)) {
             LOGGER.info("prepared loop skipped because it is stale. requirementId={}, loopId={}",
@@ -307,9 +381,7 @@ public class RequirementAutomationService {
                 planResult.tasks(), false);
         plan.setStatus(ExecutionPlanStatus.DEVELOPING);
         executionPlanDao.save(plan);
-        if (failureInfoSupport != null) {
-            failureInfoSupport.clearRequirementFailure(requirement);
-        }
+        failureInfoSupport.clearRequirementFailure(requirement);
         requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
         requirementDao.save(requirement);
         eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId()));
@@ -326,7 +398,7 @@ public class RequirementAutomationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean resumeDevelopmentLoop(String requirementId, String loopId) {
-        if (executionPlanDao == null || loopId == null || loopId.isBlank()) {
+        if (loopId == null || loopId.isBlank()) {
             return false;
         }
         Requirement requirement = requirementDao.findOne(requirementId);
@@ -384,7 +456,7 @@ public class RequirementAutomationService {
     }
 
     private String interruptActiveLoop(Requirement requirement, RequirementComment comment) {
-        if (executionPlanDao != null && requirement.getActiveLoopId() != null) {
+        if (requirement.getActiveLoopId() != null) {
             ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                     requirement.getId(), requirement.getActiveLoopId());
             if (plan != null) {
@@ -404,16 +476,11 @@ public class RequirementAutomationService {
     }
 
     private void cancelRunningRuns(String requirementId, String invalidatedByCommentId) {
-        if (runDao == null) {
-            return;
-        }
         for (Run run : runDao.findByRequirementIdAndState(requirementId, RunState.RUNNING)) {
             run.setCancelRequested(Boolean.TRUE);
             run.setInvalidatedByCommentId(invalidatedByCommentId);
             runDao.save(run);
-            if (agentExecutionService != null) {
-                agentExecutionService.cancel(run.getId());
-            }
+            agentExecutionService.cancel(run.getId());
         }
     }
 
@@ -472,9 +539,6 @@ public class RequirementAutomationService {
     }
 
     private RequirementDesignContext prepareContext(Requirement requirement) {
-        if (requirementDesignContextService == null) {
-            return null;
-        }
         try {
             RequirementDesignContext current = requirementDesignContextService.findCurrentByRequirement(requirement.getId());
             if (current != null && current.getContextStatus() == RequirementDesignContextStatus.READY) {
@@ -495,9 +559,6 @@ public class RequirementAutomationService {
                                              RequirementCommentType commentType,
                                              String content,
                                              String metadataJson) {
-        if (requirementCommentService == null) {
-            return null;
-        }
         return requirementCommentService.append(requirementId, loopId, authorType, authorName,
                 commentType, content, metadataJson);
     }

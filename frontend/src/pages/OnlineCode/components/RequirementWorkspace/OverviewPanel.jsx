@@ -46,6 +46,25 @@ const useStyles = createStyles(({ token, css }) => ({
     color: ${token.colorTextSecondary};
     font-size: ${token.fontSizeSM}px;
   `,
+  revisionStatus: css`
+    display: flex;
+    flex-direction: column;
+    gap: ${token.marginXS}px;
+    padding-top: ${token.paddingXS}px;
+    border-top: 1px solid ${token.colorBorderSecondary};
+  `,
+  revisionMain: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: ${token.marginXS}px;
+  `,
+  revisionReason: css`
+    color: ${token.colorError};
+    font-size: ${token.fontSizeSM}px;
+    overflow-wrap: anywhere;
+  `,
   card: css`
     display: flex;
     align-items: center;
@@ -115,6 +134,15 @@ const TASK_STATUS_META = {
   CANCELLED: { color: 'warning', label: '已取消' },
   STALE: { color: 'default', label: '已过期' },
   BLOCKED: { color: 'orange', label: '阻塞' },
+  SUPERSEDED: { color: 'default', label: '已被修订替代' },
+};
+
+const REVISION_STATE_META = {
+  PENDING: { color: 'processing', label: '等待修订' },
+  SNAPSHOTTING: { color: 'processing', label: '正在保存执行现场' },
+  PLANNING: { color: 'processing', label: 'PM 正在调整计划' },
+  APPLYING: { color: 'processing', label: '正在应用计划调整' },
+  FAILED: { color: 'error', label: '计划修订失败' },
 };
 
 const RUN_STATE_META = {
@@ -168,8 +196,10 @@ const planProgress = (tasks) => {
  *   resumeEnabled: boolean,
  *   resuming?: boolean,
  *   stopping?: boolean,
+ *   retryingRevision?: boolean,
  *   onResume?: () => void,
  *   onStop?: () => void,
+ *   onRetryRevision?: () => void,
  *   onOpenPanel?: (key: 'plan'|'task'|'run'|'delivery'|'progress') => void,
  * }} props
  */
@@ -187,8 +217,10 @@ const OverviewPanel = ({
   resumeEnabled,
   resuming = false,
   stopping = false,
+  retryingRevision = false,
   onResume,
   onStop,
+  onRetryRevision,
   onOpenPanel,
 }) => {
   const { styles } = useStyles();
@@ -196,6 +228,23 @@ const OverviewPanel = ({
   const automationMeta = requirement?.automationStatus
     ? AUTOMATION_STATUS_META[requirement.automationStatus]
     : { color: 'default', label: '-' };
+
+  const requirementRevisionSeq = Number(requirement?.revisionSeq) || 0;
+  const overviewRevisionSeq = Number(overview?.revisionSeq) || 0;
+  const revisionSource = overviewRevisionSeq >= requirementRevisionSeq ? overview : requirement;
+  const revisionSeq = Math.max(requirementRevisionSeq, overviewRevisionSeq);
+  const appliedRevisionSeq = Math.max(
+    Number(requirement?.appliedRevisionSeq) || 0,
+    Number(overview?.appliedRevisionSeq) || 0,
+  );
+  const revisionState = revisionSource?.revisionState || 'NONE';
+  const revisionFailureReason = revisionSource?.revisionFailureReason
+    || requirement?.revisionFailureReason
+    || null;
+  const revisionMeta = REVISION_STATE_META[revisionState] || null;
+  const revisionApplied = revisionSeq > 0
+    && revisionState === 'NONE'
+    && appliedRevisionSeq >= revisionSeq;
 
   const parsedPlan = useMemo(() => parsePlanJson(plan?.planJson), [plan?.planJson]);
 
@@ -242,7 +291,7 @@ const OverviewPanel = ({
   const open = (key) => () => onOpenPanel && onOpenPanel(key);
 
   // Compact status-distribution Tags for the task card (only non-zero).
-  const taskTags = ['RUNNING', 'FAILED', 'VALIDATION_FAILED', 'BLOCKED', 'SUCCEEDED']
+  const taskTags = ['RUNNING', 'FAILED', 'VALIDATION_FAILED', 'BLOCKED', 'SUCCEEDED', 'SUPERSEDED']
     .filter((s) => taskStats[s] > 0)
     .map((s) => (
       <Tag key={s} color={TASK_STATUS_META[s].color}>
@@ -281,6 +330,33 @@ const OverviewPanel = ({
           <span>Loop：{shorten(activeLoopId)}</span>
           {typeof planVersion === 'number' && <span>Plan v{planVersion}</span>}
         </div>
+        {revisionSeq > 0 && (revisionMeta || revisionApplied) && (
+          <div className={styles.revisionStatus} role="status" aria-live="polite">
+            <div className={styles.revisionMain}>
+              <span>
+                计划修订 v{revisionSeq}：{' '}
+                <Tag color={revisionApplied ? 'green' : revisionMeta?.color}>
+                  {revisionApplied ? '已应用，当前 Loop 继续执行' : revisionMeta?.label}
+                </Tag>
+              </span>
+              {revisionState === 'FAILED' && (
+                <Button
+                  size="small"
+                  danger
+                  icon={<ReloadOutlined />}
+                  loading={retryingRevision}
+                  disabled={retryingRevision}
+                  onClick={onRetryRevision}
+                >
+                  重试修订
+                </Button>
+              )}
+            </div>
+            {revisionState === 'FAILED' && revisionFailureReason && (
+              <div className={styles.revisionReason}>{revisionFailureReason}</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Execution progress — authoritative ledger view */}

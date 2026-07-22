@@ -12,6 +12,10 @@ import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.RequirementAutomationService;
+import com.changhong.onlinecode.dto.revision.PlanPatch;
+import com.changhong.onlinecode.service.revision.contract.PlanPatchValidationException;
+import com.changhong.onlinecode.service.revision.contract.PlanPatchValidator;
+import com.changhong.onlinecode.service.revision.contract.PlanRevisionInput;
 import com.changhong.sei.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
@@ -46,6 +50,7 @@ public class PmAgentClient {
     private static final String AGENT_NAME = "pm-agent";
     private static final long PLAN_TIMEOUT_SECONDS = 600;
     private static final long ACCEPT_TIMEOUT_SECONDS = 600;
+    private static final PlanPatchValidator PLAN_PATCH_VALIDATOR = new PlanPatchValidator();
 
     private final RunDao runDao;
     private final AgentExecutionService agentExecutionService;
@@ -96,6 +101,50 @@ public class PmAgentClient {
         }
         markRunSucceeded(execution.runId());
         return result;
+    }
+
+    /**
+     * Generates a task-level incremental patch without changing the existing full-plan API.
+     * The immutable input is a point-in-time snapshot, so the caller can reject this result
+     * later if its revision token is no longer current.
+     */
+    public PlanPatch generatePlanPatch(Requirement requirement,
+                                       PlanRevisionInput input,
+                                       RequirementDesignContext context) {
+        Objects.requireNonNull(requirement, "requirement is required");
+        Objects.requireNonNull(input, "revision input is required");
+        if (!Objects.equals(requirement.getId(), input.requirementId())) {
+            throw new IllegalArgumentException("requirement does not match revision input");
+        }
+
+        String prompt = buildPlanPatchPrompt(input, context);
+        log.info("pm agent incremental plan prompt: requirementId={}, loopId={}, revisionSeq={}",
+                input.requirementId(), input.loopId(), input.revisionSeq());
+        AgentExecutionResult execution = executeAgent(requirement.getProjectId(), input.requirementId(),
+                input.loopId(), prompt, context == null ? null : context.getId(),
+                context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
+
+        if (!execution.succeeded()) {
+            settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
+                    execution.failureReason(), "pm-agent 增量计划调用失败"));
+            return null;
+        }
+        if (execution.runId() == null || execution.output() == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 增量计划调用失败、取消或无输出");
+            return null;
+        }
+        if (isCancellationRequested(execution.runId())) {
+            markRunCancelled(execution.runId());
+            return null;
+        }
+
+        PlanPatch patch = parsePlanPatchJson(execution.output(), input);
+        if (patch == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 返回内容无法解析为有效 PlanPatch JSON");
+            return null;
+        }
+        markRunSucceeded(execution.runId());
+        return patch;
     }
 
     /**
@@ -334,6 +383,57 @@ public class PmAgentClient {
         return sb.toString();
     }
 
+    private String buildPlanPatchPrompt(PlanRevisionInput input, RequirementDesignContext context) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are pm-agent. Revise the active execution plan incrementally in the same loop.\n");
+        sb.append("Preserve completed and running work whenever the user's comments do not affect it. ")
+                .append("Return a task-level patch, not a replacement full plan.\n\n");
+        sb.append("## Revision Snapshot\n");
+        try {
+            sb.append(JsonUtils.mapper().writerWithDefaultPrettyPrinter().writeValueAsString(input));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("revision input cannot be serialized", e);
+        }
+        sb.append("\n\n## Context\n");
+        sb.append("memoryContextId: ").append(context == null ? "n/a" : context.getId()).append("\n");
+        sb.append("workspaceMemoryId: ").append(context == null ? "n/a" : context.getWorkspaceMemoryId()).append("\n\n");
+        sb.append("Rules:\n");
+        sb.append("- Use only KEEP, AMEND, ADD, SUPERSEDE, or REVALIDATE.\n");
+        sb.append("- KEEP preserves an existing task and has no replacement task fields.\n");
+        sb.append("- SUPERSEDE retires an existing task and has no replacement task fields.\n");
+        sb.append("- AMEND reuses an existing task's results but defines its replacement task.\n");
+        sb.append("- ADD defines a new task and must not have sourceTaskId.\n");
+        sb.append("- REVALIDATE defines a test-agent task for an existing source task.\n");
+        sb.append("- Every non-ADD operation must use a sourceTaskId present in tasks.\n");
+        sb.append("- Every dependency must refer to a taskKey produced by KEEP, AMEND, ADD, or REVALIDATE.\n");
+        sb.append("- Dependencies must form a DAG.\n");
+        sb.append("- frontend file scopes start with frontend/; backend scopes start with backend/.\n");
+        sb.append("- AMEND and ADD use frontend-dev-agent/frontend or backend-dev-agent/backend.\n");
+        sb.append("- Validation uses test-agent and an explicit non-empty frontend/ or backend/ file scope.\n\n");
+        sb.append("Return only valid JSON with this exact structure:\n");
+        sb.append("{\n");
+        sb.append("  \"requirementId\": \"").append(input.requirementId()).append("\",\n");
+        sb.append("  \"loopId\": \"").append(input.loopId()).append("\",\n");
+        sb.append("  \"revisionSeq\": ").append(input.revisionSeq()).append(",\n");
+        sb.append("  \"basePlanId\": \"").append(input.basePlanId()).append("\",\n");
+        sb.append("  \"basePlanVersion\": ").append(input.basePlanVersion()).append(",\n");
+        sb.append("  \"summary\": \"string\",\n");
+        sb.append("  \"operations\": [{\n");
+        sb.append("    \"taskKey\": \"string\",\n");
+        sb.append("    \"action\": \"KEEP|AMEND|ADD|SUPERSEDE|REVALIDATE\",\n");
+        sb.append("    \"sourceTaskId\": \"existing task id or null for ADD\",\n");
+        sb.append("    \"title\": \"required for AMEND/ADD/REVALIDATE, otherwise null\",\n");
+        sb.append("    \"description\": \"required for AMEND/ADD/REVALIDATE, otherwise null\",\n");
+        sb.append("    \"area\": \"frontend|backend|full-stack|validation\",\n");
+        sb.append("    \"fileScope\": [\"backend/...\"],\n");
+        sb.append("    \"dependsOn\": [\"output taskKey\"],\n");
+        sb.append("    \"assignedAgent\": \"frontend-dev-agent|backend-dev-agent|test-agent\",\n");
+        sb.append("    \"reason\": \"string\"\n");
+        sb.append("  }]\n");
+        sb.append("}\n");
+        return sb.toString();
+    }
+
     private PmPlanResult parsePlanJson(String json, String requirementId, String loopId) {
         try {
             JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(json));
@@ -413,6 +513,22 @@ public class PmAgentClient {
             return new PmAcceptanceResult(accepted, summary, findings, remediationTasks);
         } catch (Exception e) {
             LOGGER.warn("pm-agent acceptance JSON parse failed", e);
+            return null;
+        }
+    }
+
+    private PlanPatch parsePlanPatchJson(String json, PlanRevisionInput input) {
+        try {
+            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(json));
+            PlanPatch patch = JsonUtils.mapper().treeToValue(root, PlanPatch.class);
+            return PLAN_PATCH_VALIDATOR.validate(input, patch);
+        } catch (PlanPatchValidationException e) {
+            LOGGER.warn("pm-agent PlanPatch validation failed: requirementId={}, loopId={}, revisionSeq={}, reason={}",
+                    input.requirementId(), input.loopId(), input.revisionSeq(), e.getMessage());
+            return null;
+        } catch (Exception e) {
+            LOGGER.warn("pm-agent PlanPatch JSON parse failed: requirementId={}, loopId={}, revisionSeq={}",
+                    input.requirementId(), input.loopId(), input.revisionSeq(), e);
             return null;
         }
     }

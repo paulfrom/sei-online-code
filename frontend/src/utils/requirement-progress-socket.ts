@@ -2,9 +2,8 @@
  * Requirement progress WebSocket client.
  *
  * Subscribes to /ws/requirement/{requirementId}/progress (ADR-001 §11 /
- * 计划 §3). Events only signal "refresh" — they carry snapshotVersion but no
- * authoritative state. The consumer refetches the overview when a higher
- * snapshotVersion arrives; on disconnect the consumer falls back to polling.
+ * 计划 §3). Events can optimistically update revision state and also trigger an
+ * authoritative overview refresh. On disconnect the consumer falls back to polling.
  *
  * Differs from run-log-socket: progress frames are a single JSON object per
  * message (not NDJSON), and this client auto-reconnects with a bounded delay
@@ -15,6 +14,10 @@
 export interface RequirementProgressEvent {
   eventType?: string;
   requirementId?: string;
+  loopId?: string | null;
+  revisionSeq?: number | null;
+  revisionState?: 'NONE' | 'PENDING' | 'SNAPSHOTTING' | 'PLANNING' | 'APPLYING' | 'FAILED' | string | null;
+  revisionFailureReason?: string | null;
   entityId?: string | null;
   snapshotVersion?: number | null;
   occurredAt?: string | null;

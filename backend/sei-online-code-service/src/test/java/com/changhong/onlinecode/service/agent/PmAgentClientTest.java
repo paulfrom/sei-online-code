@@ -5,6 +5,8 @@ import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.dto.revision.PlanPatch;
+import com.changhong.onlinecode.service.revision.contract.PlanRevisionInput;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -20,6 +22,73 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class PmAgentClientTest {
+
+    @Test
+    void generatePlanPatch_includesCompleteSnapshotAndAcceptsValidPatch() {
+        RunDao runDao = mock(RunDao.class);
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
+        Run run = new Run();
+        run.setId("run-patch");
+        run.setState(RunState.RUNNING);
+        when(runDao.findOne("run-patch")).thenReturn(run);
+        AtomicReference<AgentExecutionRequest> captured = new AtomicReference<>();
+        when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenAnswer(invocation -> {
+            captured.set(invocation.getArgument(1));
+            return new AgentExecutionResult("run-patch", """
+                    ```json
+                    {"requirementId":"req-1","loopId":"loop-1","revisionSeq":2,
+                    "basePlanId":"plan-1","basePlanVersion":1,"summary":"保留后端",
+                    "operations":[{"taskKey":"BE-1","action":"KEEP","sourceTaskId":"task-be",
+                    "reason":"不受评论影响"}]}
+                    ```
+                    """, true, null);
+        });
+        Requirement requirement = new Requirement();
+        requirement.setId("req-1");
+        requirement.setProjectId("project-1");
+        PlanRevisionInput input = revisionInput();
+
+        PlanPatch result = new PmAgentClient(runDao, agentExecutionService)
+                .generatePlanPatch(requirement, input, null);
+
+        assertNotNull(result);
+        assertEquals("KEEP", result.getOperations().get(0).getAction().name());
+        assertEquals(RunState.SUCCEEDED, run.getState());
+        String prompt = captured.get().getPrompt();
+        assertTrue(prompt.contains("完整评论内容"));
+        assertTrue(prompt.contains("\\\"goal\\\":\\\"base\\\""));
+        assertTrue(prompt.contains("已完成接口实现"));
+        assertTrue(prompt.contains("backend/src/Api.java"));
+    }
+
+    @Test
+    void generatePlanPatch_invalidDagMarksRunFailed() {
+        RunDao runDao = mock(RunDao.class);
+        AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
+        Run run = new Run();
+        run.setId("run-invalid-patch");
+        run.setState(RunState.RUNNING);
+        when(runDao.findOne("run-invalid-patch")).thenReturn(run);
+        when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult("run-invalid-patch", """
+                    {"requirementId":"req-1","loopId":"loop-1","revisionSeq":2,
+                    "basePlanId":"plan-1","basePlanVersion":1,"summary":"bad",
+                    "operations":[{"taskKey":"NEW","action":"ADD","reason":"change","title":"new",
+                    "description":"new","area":"backend","fileScope":["backend/"],
+                    "dependsOn":["MISSING"],"assignedAgent":"backend-dev-agent"}]}
+                    """, true, null));
+        Requirement requirement = new Requirement();
+        requirement.setId("req-1");
+        requirement.setProjectId("project-1");
+
+        PlanPatch result = new PmAgentClient(runDao, agentExecutionService)
+                .generatePlanPatch(requirement, revisionInput(), null);
+
+        assertNull(result);
+        assertEquals(RunState.FAILED, run.getState());
+        assertEquals("pm-agent 返回内容无法解析为有效 PlanPatch JSON", run.getFailureReason());
+    }
 
     @Test
     void generatePlan_passesPersistedRunIdToRunnerAndRejectsCancelledResult() {
@@ -224,5 +293,17 @@ class PmAgentClientTest {
         Method method = PmAgentClient.class.getDeclaredMethod("parseAcceptanceJson", String.class);
         method.setAccessible(true);
         return (PmAgentClient.PmAcceptanceResult) method.invoke(client, json);
+    }
+
+    private PlanRevisionInput revisionInput() {
+        return new PlanRevisionInput("req-1", "loop-1", 2, "plan-1", 1,
+                "title", "description", "prd", "{\"goal\":\"base\"}",
+                List.of(new PlanRevisionInput.CommentSnapshot(
+                        "HUMAN", "HUMAN_FEEDBACK", "human", "完整评论内容")),
+                List.of(new PlanRevisionInput.TaskSnapshot("task-be", "BE-1", "后端接口", "实现接口",
+                        "backend-dev-agent", "backend", List.of(), List.of("backend/"), List.of("通过"),
+                        "SUCCEEDED", "已完成接口实现")),
+                List.of(new PlanRevisionInput.HandoffSnapshot("task-be", "run-be", "SUCCEEDED", "完成",
+                        List.of("backend/src/Api.java"), "+ api", "全部步骤完成")));
     }
 }

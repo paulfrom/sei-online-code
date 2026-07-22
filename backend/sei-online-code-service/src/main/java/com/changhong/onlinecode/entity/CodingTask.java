@@ -34,7 +34,8 @@ import java.util.List;
 @Table(name = "oc_coding_task", indexes = {
         @Index(name = "idx_coding_task_project", columnList = "project_id"),
         @Index(name = "idx_coding_task_requirement", columnList = "requirement_id"),
-        @Index(name = "idx_coding_task_status", columnList = "status")
+        @Index(name = "idx_coding_task_status", columnList = "status"),
+        @Index(name = "idx_coding_task_requirement_revision", columnList = "requirement_id, loop_id, revision_seq")
 })
 @Access(AccessType.FIELD)
 public class CodingTask extends BaseAuditableEntity {
@@ -85,6 +86,18 @@ public class CodingTask extends BaseAuditableEntity {
     /** 自动化循环 ID，loopId 变化时任务标记为 STALE。 */
     @Column(name = "loop_id", length = 64)
     private String loopId;
+
+    /** 创建或复用该任务的计划修订序号。 */
+    @Column(name = "revision_seq", nullable = false)
+    private Long revisionSeq = 0L;
+
+    /** AMEND 创建新任务时指向被替代的旧任务。 */
+    @Column(name = "supersedes_task_id", length = 36)
+    private String supersedesTaskId;
+
+    /** PM 对 KEEP、AMEND 或 SUPERSEDE 的任务级判断原因。 */
+    @Column(name = "disposition_reason", columnDefinition = "TEXT")
+    private String dispositionReason;
 
     @Column(name = "failure_summary", columnDefinition = "TEXT")
     private String failureSummary;

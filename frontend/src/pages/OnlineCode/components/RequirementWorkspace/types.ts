@@ -18,6 +18,9 @@ export type RequirementAutomationStatus =
   | 'ACCEPTING' | 'DELIVERING' | 'INTERRUPTED' | 'WAITING_HUMAN'
   | 'COMPLETED' | 'FAILED';
 
+export type RequirementRevisionState =
+  | 'NONE' | 'PENDING' | 'SNAPSHOTTING' | 'PLANNING' | 'APPLYING' | 'FAILED';
+
 export type RequirementStatus = 'PRD_GENERATING' | 'PRD_REVIEW' | 'PRD_CONFIRMED' | 'FAILED';
 
 export interface RequirementDto {
@@ -27,6 +30,9 @@ export interface RequirementDto {
   memoryValidationStatus?: 'NOT_RUN'|'PASSED'|'WARNING'|'FAILED' | null;
   memoryValidationResultJson?: string | null;
   activeLoopId?: string | null;
+  revisionSeq?: number | null; appliedRevisionSeq?: number | null;
+  revisionState?: RequirementRevisionState | null;
+  revisionTriggerCommentId?: string | null; revisionFailureReason?: string | null;
   acceptedAt?: string | null; acceptedByAgent?: string | null;
   deliveryBranch?: string | null; deliveryCommitHash?: string | null;
   deliveryMrUrl?: string | null; deliveryTargetBranch?: string | null;
@@ -69,17 +75,21 @@ export interface ExecutionPlanDto {
   version?: number; planType: ExecutionPlanType; status: ExecutionPlanStatus;
   planJson?: string | null; summary?: string | null; createdByAgent?: string | null;
   memoryContextId?: string | null; workspaceMemoryId?: string | null; createdDate: string;
+  basePlanId?: string | null; triggerCommentId?: string | null;
+  revisionSeq?: number | null; changeSetJson?: string | null;
 }
 
 export type CodingTaskStatus =
   | 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
-  | 'VALIDATION_FAILED' | 'CANCELLED' | 'STALE' | 'BLOCKED';
+  | 'VALIDATION_FAILED' | 'CANCELLED' | 'STALE' | 'BLOCKED' | 'SUPERSEDED';
 export interface CodingTaskDto {
   id: string; projectId: string; requirementId: string; status: CodingTaskStatus;
   title: string; description?: string | null; fileScope?: string[] | null;
   area?: string | null; dependsOn?: string[] | null;
   executionPlanId?: string | null; planTaskKey?: string | null;
   assignedAgent?: string | null; loopId?: string | null;
+  revisionSeq?: number | null; supersedesTaskId?: string | null;
+  dispositionReason?: string | null;
   failureSummary?: string | null; createdDate: string; lastEditedDate: string;
 }
 

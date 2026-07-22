@@ -5,6 +5,7 @@ import com.changhong.sei.core.dao.BaseEntityDao;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * ExecutionPlan DAO。
@@ -19,4 +20,7 @@ public interface ExecutionPlanDao extends BaseEntityDao<ExecutionPlan> {
     ExecutionPlan findTopByRequirementIdAndLoopIdOrderByVersionDesc(String requirementId, String loopId);
 
     long countByRequirementIdAndLoopId(String requirementId, String loopId);
+
+    Optional<ExecutionPlan> findByRequirementIdAndLoopIdAndRevisionSeq(
+            String requirementId, String loopId, Long revisionSeq);
 }

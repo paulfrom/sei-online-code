@@ -89,6 +89,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     loading,
     error,
     sendingComment,
+    retryingRevision,
     activeLoopId,
     planVersion,
     actions,
@@ -242,8 +243,10 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
       resumeEnabled={resumeEnabled}
       resuming={resuming}
       stopping={stopping}
+      retryingRevision={retryingRevision}
       onResume={handleResume}
       onStop={handleStop}
+      onRetryRevision={actions.retryRevision}
       onOpenPanel={handleOpenPanel}
     />
   );

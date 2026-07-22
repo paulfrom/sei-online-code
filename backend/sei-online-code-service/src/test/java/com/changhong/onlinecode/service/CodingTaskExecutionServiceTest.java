@@ -4,6 +4,7 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
+import com.changhong.onlinecode.dao.TaskHandoffSnapshotDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
@@ -16,6 +17,7 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.entity.TaskHandoffSnapshot;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
@@ -71,6 +73,7 @@ class CodingTaskExecutionServiceTest {
     private com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator codingTaskProgressIntegrator;
     private WorkspaceChangeDetector workspaceChangeDetector;
     private CodingTaskExecutionService service;
+    private TaskHandoffSnapshotDao taskHandoffSnapshotDao;
     @org.junit.jupiter.api.io.TempDir
     Path tempDir;
 
@@ -104,6 +107,7 @@ class CodingTaskExecutionServiceTest {
                 .thenReturn(true);
         com.changhong.onlinecode.service.progress.WorkspaceLeaseService workspaceLeaseService =
                 mock(com.changhong.onlinecode.service.progress.WorkspaceLeaseService.class);
+        taskHandoffSnapshotDao = mock(TaskHandoffSnapshotDao.class);
         service = new CodingTaskExecutionService(
                 codingTaskDao,
                 runDao,
@@ -124,7 +128,8 @@ class CodingTaskExecutionServiceTest {
                 eventPublisher,
                 codingTaskProgressIntegrator,
                 workspaceLeaseService,
-                requirementWorkspaceDao
+                requirementWorkspaceDao,
+                taskHandoffSnapshotDao
         );
     }
 
@@ -151,6 +156,31 @@ class CodingTaskExecutionServiceTest {
         verify(runDao, never()).save(any(Run.class));
         verify(codingTaskDao, never()).save(any(CodingTask.class));
         verify(memoryJobService, never()).submit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void finishRun_cancelledByRevisionPreservesSummaryAndSupersededTask() throws Exception {
+        Run callbackRun = new Run();
+        callbackRun.setId("run-revision");
+        CodingTask callbackTask = new CodingTask();
+        callbackTask.setId("task-source");
+        Run persistedRun = new Run();
+        persistedRun.setId("run-revision");
+        persistedRun.setState(RunState.RUNNING);
+        persistedRun.setCancelRequested(true);
+        CodingTask persistedTask = new CodingTask();
+        persistedTask.setId("task-source");
+        persistedTask.setStatus(CodingTaskStatus.SUPERSEDED);
+        when(runDao.findOne("run-revision")).thenReturn(persistedRun);
+        when(codingTaskDao.findOne("task-source")).thenReturn(persistedTask);
+
+        invokeFinishRun(callbackRun, callbackTask, false, "已完成接口层，测试尚未运行");
+
+        assertEquals(RunState.CANCELLED, persistedRun.getState());
+        assertEquals("已完成接口层，测试尚未运行", persistedRun.getSummary());
+        assertEquals(CodingTaskStatus.SUPERSEDED, persistedTask.getStatus());
+        verify(runDao).save(persistedRun);
+        verify(codingTaskDao, never()).save(persistedTask);
     }
 
     @Test
@@ -827,6 +857,51 @@ class CodingTaskExecutionServiceTest {
 
         assertTrue(prompt.contains("必须在工作区落地至少一个代码或文档文件变更"));
         assertTrue(prompt.contains("不修改文件会被系统判定为开发失败"));
+    }
+
+    @Test
+    void amendedTaskUsesSourceRunAndIncludesHandoffSnapshot() throws Exception {
+        CodingTask amended = new CodingTask();
+        amended.setId("task-amended");
+        amended.setRequirementId("req-amended");
+        amended.setProjectId("project-amended");
+        amended.setTitle("adjusted task");
+        amended.setDescription("continue implementation");
+        amended.setSupersedesTaskId("task-source");
+        when(runDao.findByCodingTaskId("task-amended")).thenReturn(List.of());
+        Run sourceRun = new Run();
+        sourceRun.setId("run-source");
+        sourceRun.setRunNo(3);
+        sourceRun.setAttemptNo(2);
+        sourceRun.setState(RunState.CANCELLED);
+        when(runDao.findByCodingTaskId("task-source")).thenReturn(List.of(sourceRun));
+
+        Method previousMethod = CodingTaskExecutionService.class
+                .getDeclaredMethod("findPreviousRun", CodingTask.class);
+        previousMethod.setAccessible(true);
+        assertEquals(sourceRun, previousMethod.invoke(service, amended));
+
+        Requirement requirement = new Requirement();
+        requirement.setId("req-amended");
+        when(requirementService.findOne("req-amended")).thenReturn(requirement);
+        when(runDao.findOne("run-source")).thenReturn(sourceRun);
+        TaskHandoffSnapshot snapshot = new TaskHandoffSnapshot();
+        snapshot.setCodingTaskId("task-source");
+        snapshot.setRunSummary("接口已经完成");
+        snapshot.setDiffSummary("2 files changed");
+        when(taskHandoffSnapshotDao.findTopByCodingTaskIdOrderByRevisionSeqDesc("task-source"))
+                .thenReturn(java.util.Optional.of(snapshot));
+        Run current = new Run();
+        current.setParentRunId("run-source");
+
+        Method promptMethod = CodingTaskExecutionService.class.getDeclaredMethod(
+                "buildExecutionPrompt", CodingTask.class, String.class, Run.class);
+        promptMethod.setAccessible(true);
+        String prompt = (String) promptMethod.invoke(service, amended, null, current);
+
+        assertTrue(prompt.contains("修订交接快照"));
+        assertTrue(prompt.contains("接口已经完成"));
+        assertTrue(prompt.contains("2 files changed"));
     }
 
     private void invokeFinishRun(Run run, CodingTask task, boolean success, String reason) throws Exception {

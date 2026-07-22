@@ -100,10 +100,17 @@ public class ExecutionProgressQueryService {
         overview.setRequirementId(requirementId);
         if (requirement != null) {
             overview.setAutomationStatus(requirement.getAutomationStatus());
+            overview.setActiveLoopId(requirement.getActiveLoopId());
+            overview.setRevisionSeq(requirement.getRevisionSeq());
+            overview.setAppliedRevisionSeq(requirement.getAppliedRevisionSeq());
+            overview.setRevisionState(requirement.getRevisionState());
+            overview.setRevisionFailureReason(requirement.getRevisionFailureReason());
             overview.setMrStatus(requirement.getDeliveryMrUrl() == null || requirement.getDeliveryMrUrl().isBlank()
                     ? "NOT_SUBMITTED" : "SUBMITTED");
         }
-        overview.setActiveLoopId(workspace == null ? null : workspace.getActiveLoopId());
+        if (requirement == null) {
+            overview.setActiveLoopId(workspace == null ? null : workspace.getActiveLoopId());
+        }
         overview.setPlanVersion(execution == null ? null : execution.getPlanVersion());
         overview.setSnapshotVersion(workspace == null ? null : workspace.getSnapshotVersion());
         overview.setWorkspace(toWorkspaceDto(workspace, serverTime));

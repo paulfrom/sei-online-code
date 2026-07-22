@@ -2,6 +2,7 @@ package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -60,6 +61,21 @@ public class RequirementDto extends BaseEntityDto {
 
     @Schema(description = "当前自动化循环 ID")
     private String activeLoopId;
+
+    @Schema(description = "当前计划修订序号")
+    private Long revisionSeq;
+
+    @Schema(description = "已应用的计划修订序号")
+    private Long appliedRevisionSeq;
+
+    @Schema(description = "计划修订状态")
+    private RequirementRevisionState revisionState;
+
+    @Schema(description = "触发当前修订的评论 ID")
+    private String revisionTriggerCommentId;
+
+    @Schema(description = "计划修订失败原因")
+    private String revisionFailureReason;
 
     @Schema(description = "验收时间")
     private Date acceptedAt;

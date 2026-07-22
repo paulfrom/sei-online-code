@@ -25,7 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 @Table(name = "oc_execution_plan", indexes = {
         @Index(name = "idx_execution_plan_requirement", columnList = "requirement_id"),
         @Index(name = "idx_execution_plan_loop", columnList = "loop_id"),
-        @Index(name = "idx_execution_plan_status", columnList = "status")
+        @Index(name = "idx_execution_plan_status", columnList = "status"),
+        @Index(name = "idx_execution_plan_requirement_revision", columnList = "requirement_id, loop_id, revision_seq")
 })
 @Access(AccessType.FIELD)
 @Data
@@ -65,6 +66,18 @@ public class ExecutionPlan extends BaseAuditableEntity {
 
     @Column(name = "workspace_memory_id", length = 36)
     private String workspaceMemoryId;
+
+    @Column(name = "base_plan_id", length = 36)
+    private String basePlanId;
+
+    @Column(name = "trigger_comment_id", length = 36)
+    private String triggerCommentId;
+
+    @Column(name = "revision_seq", nullable = false)
+    private Long revisionSeq = 0L;
+
+    @Column(name = "change_set_json", columnDefinition = "TEXT")
+    private String changeSetJson;
 
     @Override
     @Transient

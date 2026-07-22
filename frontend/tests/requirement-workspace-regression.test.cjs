@@ -87,3 +87,55 @@ test('frontend contracts no longer expose the retired detailed-design flow or ma
   assert.doesNotMatch(local, /onRun:\s*\(t: CodingTaskDto\)/);
   assert.doesNotMatch(hook, /async\s+runTask\s*\(/);
 });
+
+test('active-loop comments describe incremental revision instead of interrupting all automation', () => {
+  const composer = read('src/pages/OnlineCode/components/RequirementWorkspace/CommentComposer.jsx');
+  assert.match(composer, /评论将在当前 Loop 内增量调整计划/);
+  assert.match(composer, /completed: false,[\s\S]*dangerous: false/);
+  assert.doesNotMatch(composer, /发送评论将中断当前自动化并触发 PM 重规划/);
+  assert.match(composer, /COMPLETED:[\s\S]*创建变更请求 loop/);
+});
+
+test('revision progress is displayed from authoritative fields and failed revision can be retried once', () => {
+  const sharedTypes = read('src/services/onlineCodeTypes.ts');
+  const localTypes = read('src/pages/OnlineCode/components/RequirementWorkspace/types.ts');
+  const service = read('src/services/requirement.js');
+  const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
+  const overview = read('src/pages/OnlineCode/components/RequirementWorkspace/OverviewPanel.jsx');
+  const container = read('src/pages/OnlineCode/components/RequirementWorkspace/index.tsx');
+
+  for (const source of [sharedTypes, localTypes]) {
+    assert.match(source, /revisionSeq/);
+    assert.match(source, /appliedRevisionSeq/);
+    assert.match(source, /revisionState/);
+    assert.match(source, /revisionFailureReason/);
+  }
+  assert.match(service, /requirement\/\$\{id\}\/revision\/retry/);
+  assert.match(hook, /revisionRetryInFlightRef\.current/);
+  assert.match(hook, /retryRequirementRevision\(requirementId\)/);
+  assert.match(overview, /SNAPSHOTTING:[\s\S]*正在保存执行现场/);
+  assert.match(overview, /PLANNING:[\s\S]*PM 正在调整计划/);
+  assert.match(overview, /APPLYING:[\s\S]*正在应用计划调整/);
+  assert.match(overview, /revisionState === 'FAILED'[\s\S]*重试修订/);
+  assert.match(overview, /已应用，当前 Loop 继续执行/);
+  assert.match(container, /onRetryRevision=\{actions\.retryRevision\}/);
+});
+
+test('websocket revision events merge forward only and still trigger authoritative refresh', () => {
+  const socket = read('src/utils/requirement-progress-socket.ts');
+  const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
+  assert.match(socket, /loopId\?: string \| null/);
+  assert.match(socket, /revisionSeq\?: number \| null/);
+  assert.match(socket, /revisionState\?:/);
+  assert.match(socket, /revisionFailureReason\?: string \| null/);
+  assert.match(hook, /incomingSeq < currentSeq/);
+  assert.match(hook, /snapshot\.activeLoopId !== event\.loopId/);
+  assert.match(hook, /event\.revisionState !== 'FAILED'[\s\S]*revisionFailureReason = null/);
+  assert.match(hook, /mergeRevisionProgressEvent\(current, evt\)/);
+  assert.match(hook, /maybeRefreshOnVersion\(evt && evt\.snapshotVersion\)/);
+  assert.match(hook, /shouldApplyRevisionProgressEvent\(revisionEventCursorRef\.current, evt\)/);
+  assert.match(hook, /currentState === 'NONE' \|\| currentState === 'FAILED'/);
+  assert.match(hook, /currentState === 'FAILED' && incomingState === 'PENDING'/);
+  assert.match(hook, /incomingOrder < currentOrder/);
+  assert.match(hook, /incomingTime < currentTime/);
+});

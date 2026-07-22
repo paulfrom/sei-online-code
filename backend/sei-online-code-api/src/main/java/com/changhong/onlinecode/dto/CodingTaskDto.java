@@ -55,6 +55,15 @@ public class CodingTaskDto extends BaseEntityDto {
     @Schema(description = "循环 ID")
     private String loopId;
 
+    @Schema(description = "任务所属修订序号")
+    private Long revisionSeq;
+
+    @Schema(description = "被当前任务替代的旧任务 ID")
+    private String supersedesTaskId;
+
+    @Schema(description = "任务被保留、修改或替代的原因")
+    private String dispositionReason;
+
     @Schema(description = "失败摘要")
     private String failureSummary;
 

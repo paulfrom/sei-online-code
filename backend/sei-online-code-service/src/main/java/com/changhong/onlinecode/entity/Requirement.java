@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.sei.core.entity.BaseAuditableEntity;
@@ -100,11 +101,28 @@ public class Requirement extends BaseAuditableEntity {
     @Column(name = "automation_status", nullable = false, length = 32)
     private RequirementAutomationStatus automationStatus = RequirementAutomationStatus.IDLE;
 
-    /**
-     * 当前自动化循环 ID，用于丢弃被中断 loop 的过期 agent 回调。
-     */
+    /** 当前交付周期 ID，用于隔离其他 loop 的过期 agent 回调。 */
     @Column(name = "active_loop_id", length = 64)
     private String activeLoopId;
+
+    /** 当前 loop 内最新收到的计划修订序号。 */
+    @Column(name = "revision_seq", nullable = false)
+    private Long revisionSeq = 0L;
+
+    /** 当前 loop 内已经原子应用成功的计划修订序号。 */
+    @Column(name = "applied_revision_seq", nullable = false)
+    private Long appliedRevisionSeq = 0L;
+
+    /** 独立于 automationStatus 的计划修订状态。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "revision_state", nullable = false, length = 32)
+    private RequirementRevisionState revisionState = RequirementRevisionState.NONE;
+
+    @Column(name = "revision_trigger_comment_id", length = 36)
+    private String revisionTriggerCommentId;
+
+    @Column(name = "revision_failure_reason", columnDefinition = "TEXT")
+    private String revisionFailureReason;
 
     @Column(name = "accepted_at")
     private Date acceptedAt;

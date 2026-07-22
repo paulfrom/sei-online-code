@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
+import com.changhong.onlinecode.dao.TaskHandoffSnapshotDao;
 import com.changhong.onlinecode.dto.CodingTaskDto;
 import com.changhong.onlinecode.dto.WorkspaceResolveResult;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
@@ -24,6 +25,7 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.entity.TaskHandoffSnapshot;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
 import com.changhong.onlinecode.service.memory.WorkspaceChangeDetector;
@@ -83,16 +85,25 @@ public class CodingTaskExecutionService {
     private final CodingTaskProgressIntegrator codingTaskProgressIntegrator;
     private final WorkspaceLeaseService workspaceLeaseService;
     private final RequirementWorkspaceDao requirementWorkspaceDao;
+    private final TaskHandoffSnapshotDao taskHandoffSnapshotDao;
 
     /**
      * Requests logical cancellation and best-effort process termination.
      */
     public void cancelRun(String runId) {
+        cancelRun(runId, null);
+    }
+
+    /** Requests cancellation and records the user comment that invalidated this run, when applicable. */
+    public void cancelRun(String runId, String invalidatedByCommentId) {
         Run run = runDao.findOne(runId);
         if (run == null) {
             return;
         }
         run.setCancelRequested(Boolean.TRUE);
+        if (invalidatedByCommentId != null && !invalidatedByCommentId.isBlank()) {
+            run.setInvalidatedByCommentId(invalidatedByCommentId);
+        }
         runDao.save(run);
         agentExecutionService.cancel(runId);
     }
@@ -146,6 +157,9 @@ public class CodingTaskExecutionService {
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
         dto.setStatus(task.getStatus());
+        dto.setRevisionSeq(task.getRevisionSeq());
+        dto.setSupersedesTaskId(task.getSupersedesTaskId());
+        dto.setDispositionReason(task.getDispositionReason());
         return ResultData.success(dto);
     }
 
@@ -185,7 +199,8 @@ public class CodingTaskExecutionService {
         codingTaskDao.save(task);
 
         Run run = new Run();
-        linkPreviousAttempt(run, findLatestRun(codingTaskId));
+        Run previousRun = findPreviousRun(task);
+        linkPreviousAttempt(run, previousRun);
         run.setCodingTaskId(codingTaskId);
         run.setRequirementId(task.getRequirementId());
         run.setLoopId(task.getLoopId());
@@ -221,6 +236,9 @@ public class CodingTaskExecutionService {
         CodingTaskDto dto = new CodingTaskDto();
         dto.setId(task.getId());
         dto.setStatus(task.getStatus());
+        dto.setRevisionSeq(task.getRevisionSeq());
+        dto.setSupersedesTaskId(task.getSupersedesTaskId());
+        dto.setDispositionReason(task.getDispositionReason());
         return ResultData.success(dto);
     }
 
@@ -383,9 +401,14 @@ public class CodingTaskExecutionService {
             persistedRun.setState(RunState.CANCELLED);
             persistedRun.setTerminalReason(RunTerminalReason.CANCELLED);
             persistedRun.setFinishedDate(now);
+            persistedRun.setSummary(firstNonBlank(summary, persistedRun.getSummary()));
+            persistedRun.setFailureReason(firstNonBlank(failureReason, persistedRun.getFailureReason()));
             runDao.save(persistedRun);
-            persistedTask.setStatus(CodingTaskStatus.CANCELLED);
-            codingTaskDao.save(persistedTask);
+            // 计划修订已将源任务替代时，晚到的进程回调不得把 SUPERSEDED 覆盖成 CANCELLED。
+            if (persistedTask.getStatus() != CodingTaskStatus.SUPERSEDED) {
+                persistedTask.setStatus(CodingTaskStatus.CANCELLED);
+                codingTaskDao.save(persistedTask);
+            }
             return;
         }
         if (persistedRun.getLoopId() != null && persistedTask.getLoopId() != null
@@ -500,6 +523,7 @@ public class CodingTaskExecutionService {
                     .append(recoveryAttemptNo)
                     .append(" 次执行尝试。先检查现有代码、Git 差异和测试结果，保留已正确完成的部分，")
                     .append("只继续未完成或未通过验收的部分；不要无条件重做整个任务。\n");
+            appendHandoffSnapshot(sb, task);
         }
         if (userPrompt != null && !userPrompt.isBlank()) {
             sb.append("用户补充提示：").append(userPrompt).append('\n');
@@ -526,6 +550,26 @@ public class CodingTaskExecutionService {
         return sb.toString();
     }
 
+    private void appendHandoffSnapshot(StringBuilder sb, CodingTask task) {
+        if (task.getSupersedesTaskId() == null || taskHandoffSnapshotDao == null) {
+            return;
+        }
+        taskHandoffSnapshotDao.findTopByCodingTaskIdOrderByRevisionSeqDesc(task.getSupersedesTaskId())
+                .ifPresent(snapshot -> {
+                    sb.append("- 修订交接快照（源任务 ").append(task.getSupersedesTaskId()).append("）：\n");
+                    appendSnapshotValue(sb, "运行摘要", snapshot.getRunSummary());
+                    appendSnapshotValue(sb, "差异统计", snapshot.getDiffStat());
+                    appendSnapshotValue(sb, "差异摘要", snapshot.getDiffSummary());
+                    appendSnapshotValue(sb, "进度账本", snapshot.getProgressSnapshotJson());
+                });
+    }
+
+    private void appendSnapshotValue(StringBuilder sb, String label, String value) {
+        if (value != null && !value.isBlank()) {
+            sb.append("  - ").append(label).append("：").append(value).append('\n');
+        }
+    }
+
     private void linkPreviousAttempt(Run run, Run previousRun) {
         if (previousRun == null) {
             run.setAttemptNo(1);
@@ -541,6 +585,14 @@ public class CodingTaskExecutionService {
                         Objects.requireNonNullElse(left.getRunNo(), 0),
                         Objects.requireNonNullElse(right.getRunNo(), 0)))
                 .orElse(null);
+    }
+
+    private Run findPreviousRun(CodingTask task) {
+        Run previousRun = findLatestRun(task.getId());
+        if (previousRun == null && task.getSupersedesTaskId() != null) {
+            previousRun = findLatestRun(task.getSupersedesTaskId());
+        }
+        return previousRun;
     }
 
     private List<String> resolveChangedFiles(Run run, WorkspaceChangeDetector.Snapshot baseline) {

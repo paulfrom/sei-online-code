@@ -12,6 +12,7 @@ import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RequirementDeliveryService;
 import com.changhong.onlinecode.service.RequirementService;
+import com.changhong.onlinecode.service.revision.PlanRevisionOrchestrationService;
 import com.changhong.sei.core.controller.BaseEntityController;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.dto.serach.PageResult;
@@ -42,6 +43,7 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     private final RequirementAutomationService requirementAutomationService;
     private final RequirementCommentService requirementCommentService;
     private final RequirementDeliveryService requirementDeliveryService;
+    private final PlanRevisionOrchestrationService planRevisionOrchestrationService;
 
 
     @Override
@@ -96,6 +98,16 @@ public class RequirementController extends BaseEntityController<Requirement, Req
             RequirementComment comment = requirementAutomationService.handleHumanComment(
                     id, request.getContent(), request.getMetadataJson());
             return ResultData.success(requirementCommentService.convertToDto(comment));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    @Override
+    public ResultData<RequirementDto> retryRevision(String id) {
+        try {
+            Requirement requirement = planRevisionOrchestrationService.retryFailed(id);
+            return ResultData.success(service.convertToDto(requirement));
         } catch (Exception e) {
             return ResultData.fail(e.getMessage());
         }

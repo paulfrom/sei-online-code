@@ -15,6 +15,14 @@ export type RequirementAutomationStatus =
   | 'IDLE' | 'PLANNING' | 'DEVELOPING' | 'VALIDATING' | 'ACCEPTING'
   | 'DELIVERING' | 'INTERRUPTED' | 'WAITING_HUMAN' | 'COMPLETED' | 'FAILED';
 
+export type RequirementRevisionState =
+  | 'NONE'
+  | 'PENDING'
+  | 'SNAPSHOTTING'
+  | 'PLANNING'
+  | 'APPLYING'
+  | 'FAILED';
+
 /** A product requirement document attached to a project. */
 export interface RequirementDto {
   id: string;
@@ -29,6 +37,11 @@ export interface RequirementDto {
   memoryValidationStatus?: 'NOT_RUN' | 'PASSED' | 'WARNING' | 'FAILED' | null;
   memoryValidationResultJson?: string | null;
   activeLoopId?: string | null;
+  revisionSeq?: number | null;
+  appliedRevisionSeq?: number | null;
+  revisionState?: RequirementRevisionState | null;
+  revisionTriggerCommentId?: string | null;
+  revisionFailureReason?: string | null;
   acceptedAt?: string | null;
   acceptedByAgent?: string | null;
   deliveryBranch?: string | null;
@@ -50,7 +63,8 @@ export type CodingTaskStatus =
   | 'FAILED'
   | 'VALIDATION_FAILED'
   | 'CANCELLED'
-  | 'STALE';
+  | 'STALE'
+  | 'SUPERSEDED';
 
 /** A concrete coding task generated from an execution plan. */
 export interface CodingTaskDto {
@@ -68,6 +82,9 @@ export interface CodingTaskDto {
   description?: string | null;
   fileScope: string[];
   failureSummary?: string | null;
+  revisionSeq?: number | null;
+  supersedesTaskId?: string | null;
+  dispositionReason?: string | null;
   createdDate: string;
   lastEditedDate: string;
 }

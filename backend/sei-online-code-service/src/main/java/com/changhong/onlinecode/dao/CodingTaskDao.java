@@ -38,6 +38,16 @@ public interface CodingTaskDao extends BaseEntityDao<CodingTask> {
      */
     CodingTask findByRequirementIdAndLoopIdAndPlanTaskKey(String requirementId, String loopId, String planTaskKey);
 
+    /** 按需求、loop 和修订序号查询该版新建的任务。 */
+    List<CodingTask> findByRequirementIdAndLoopIdAndRevisionSeq(
+            String requirementId, String loopId, Long revisionSeq);
+
+    /** All task revisions in a loop, including historical/superseded tasks. */
+    List<CodingTask> findByRequirementIdAndLoopId(String requirementId, String loopId);
+
+    /** Tasks physically attached to one execution-plan row. */
+    List<CodingTask> findByExecutionPlanId(String executionPlanId);
+
     /**
      * 仅当任务仍处于期望状态时切换状态，用于补偿/执行抢占。
      *

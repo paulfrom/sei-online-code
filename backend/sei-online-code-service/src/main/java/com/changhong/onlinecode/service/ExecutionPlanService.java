@@ -54,6 +54,10 @@ public class ExecutionPlanService extends BaseEntityService<ExecutionPlan> {
         dto.setCreatedByAgent(plan.getCreatedByAgent());
         dto.setMemoryContextId(plan.getMemoryContextId());
         dto.setWorkspaceMemoryId(plan.getWorkspaceMemoryId());
+        dto.setBasePlanId(plan.getBasePlanId());
+        dto.setTriggerCommentId(plan.getTriggerCommentId());
+        dto.setRevisionSeq(plan.getRevisionSeq());
+        dto.setChangeSetJson(plan.getChangeSetJson());
         dto.setCreatedDate(plan.getCreatedDate());
         return dto;
     }

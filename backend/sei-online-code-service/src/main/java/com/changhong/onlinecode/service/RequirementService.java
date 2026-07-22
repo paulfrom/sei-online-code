@@ -339,6 +339,11 @@ public class RequirementService extends BaseEntityService<Requirement> {
         dto.setMemoryValidationStatus(requirement.getMemoryValidationStatus());
         dto.setMemoryValidationResultJson(requirement.getMemoryValidationResultJson());
         dto.setActiveLoopId(requirement.getActiveLoopId());
+        dto.setRevisionSeq(requirement.getRevisionSeq());
+        dto.setAppliedRevisionSeq(requirement.getAppliedRevisionSeq());
+        dto.setRevisionState(requirement.getRevisionState());
+        dto.setRevisionTriggerCommentId(requirement.getRevisionTriggerCommentId());
+        dto.setRevisionFailureReason(requirement.getRevisionFailureReason());
         dto.setAcceptedAt(requirement.getAcceptedAt());
         dto.setAcceptedByAgent(requirement.getAcceptedByAgent());
         dto.setDeliveryBranch(requirement.getDeliveryBranch());

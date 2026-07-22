@@ -1,23 +1,4 @@
-/**
- * CommentComposer — bottom-of-stream input area (spec §5.3).
- *
- * Markdown editor with an interrupt-aware send button. The composer decides
- * the warning surface and interaction mode from `requirement.automationStatus`
- * (active automation) vs `requirement.status` (delivered):
- *
- *  - active automation (PLANNING/DEVELOPING/VALIDATING/ACCEPTING)
- *      → Alert 「发送评论将中断当前自动化并触发 PM 重规划」
- *      → Button `danger`, Modal.confirm 二次确认 → onSend
- *  - automationStatus === 'COMPLETED'
- *      → Alert 「当前需求已交付，提交评论将基于现有 MR / 分支创建变更请求 loop」
- *      → Button `danger`, Modal.confirm 二次确认 (创建变更) → onSend
- *  - otherwise (IDLE/WAITING_HUMAN/INTERRUPTED/FAILED/PRD_REVIEW/...)
- *      → no Alert, Button `primary`, direct onSend
- *
- * `INTERRUPT_WARNING` maps each automation mode to its user-facing copy. The
- * generic active-warning copy is shared across the four active modes; the
- * delivered branch uses a dedicated copy that is also keyed off `automationStatus`.
- */
+/** 评论输入：活跃需求增量修订，已完成需求确认创建变更 loop。 */
 import React, { useState } from 'react';
 import { Alert, Button, Modal } from '@ead/suid';
 import {
@@ -26,27 +7,15 @@ import {
 } from '@ead/suid-icons';
 import MarkdownEditor from '../MarkdownEditor';
 
-/**
- * User-facing warning copy keyed off `requirement.automationStatus` (the four
- * active automation stages plus the delivered `COMPLETED` state). Each entry is
- * the message shown in the Alert strip and quoted inside the Modal.confirm body
- * above the send button.
- *
- * The four active automation stages share the same interruption copy: PM
- * replanning consumes the comment regardless of which sub-stage was running,
- * so the text does not vary across them. The `COMPLETED` slot uses the change-request
- * copy and is gated together with the active states through a single lookup.
- */
-const INTERRUPT_WARNING = {
-  PLANNING: '发送评论将中断当前自动化并触发 PM 重规划',
-  DEVELOPING: '发送评论将中断当前自动化并触发 PM 重规划',
-  VALIDATING: '发送评论将中断当前自动化并触发 PM 重规划',
-  ACCEPTING: '发送评论将中断当前自动化并触发 PM 重规划',
+const COMMENT_WARNING = {
+  PLANNING: '评论将在当前 Loop 内增量调整计划；未受影响的任务会继续执行',
+  DEVELOPING: '评论将在当前 Loop 内增量调整计划；未受影响的任务会继续执行',
+  VALIDATING: '评论将在当前 Loop 内增量调整计划；未受影响的任务会继续执行',
+  ACCEPTING: '评论将在当前 Loop 内增量调整计划；未受影响的任务会继续执行',
   COMPLETED: '当前需求已交付，提交评论将基于现有 MR / 分支创建变更请求 loop',
 };
 
-/** Warning copy used when `requirement.automationStatus === 'COMPLETED'`. */
-const COMPLETED_WARNING = INTERRUPT_WARNING.COMPLETED;
+const COMPLETED_WARNING = COMMENT_WARNING.COMPLETED;
 
 const ACTIVE_AUTOMATION = [
   'PLANNING',
@@ -55,20 +24,15 @@ const ACTIVE_AUTOMATION = [
   'ACCEPTING',
 ];
 
-/**
- * Resolve the composer's interaction mode + warning copy from the requirement.
- * Returns `normal` (no warning, direct send) for every state that is neither
- * an active automation nor a delivered requirement.
- */
 function resolveMode(automationStatus) {
   if (automationStatus === 'COMPLETED') {
     return { warning: COMPLETED_WARNING, completed: true, dangerous: true };
   }
   if (automationStatus && ACTIVE_AUTOMATION.includes(automationStatus)) {
     return {
-      warning: INTERRUPT_WARNING[automationStatus] ?? null,
+      warning: COMMENT_WARNING[automationStatus] ?? null,
       completed: false,
-      dangerous: true,
+      dangerous: false,
     };
   }
   return { warning: null, completed: false, dangerous: false };
@@ -99,10 +63,10 @@ const CommentComposer = ({
       return;
     }
     Modal.confirm({
-      title: completed ? '确认创建变更请求？' : '确认中断自动化？',
+      title: '确认创建变更请求？',
       icon: <ExclamationCircleOutlined />,
       content: warning,
-      okText: completed ? '创建变更' : '发送并中断',
+      okText: '创建变更',
       cancelText: '取消',
       okButtonProps: { danger: true },
       onOk: () => doSend(content),
@@ -113,7 +77,7 @@ const CommentComposer = ({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {warning && (
         <Alert
-          type="warning"
+          type={completed ? 'warning' : 'info'}
           showIcon
           message={warning}
         />
@@ -142,4 +106,3 @@ const CommentComposer = ({
 };
 
 export default CommentComposer;
-export { INTERRUPT_WARNING, COMPLETED_WARNING };

@@ -47,6 +47,18 @@ public class ExecutionPlanDto extends BaseEntityDto {
     @Schema(description = "WorkspaceMemory ID")
     private String workspaceMemoryId;
 
+    @Schema(description = "基础执行计划 ID")
+    private String basePlanId;
+
+    @Schema(description = "触发修订的评论 ID")
+    private String triggerCommentId;
+
+    @Schema(description = "修订序号")
+    private Long revisionSeq;
+
+    @Schema(description = "任务级变更集 JSON")
+    private String changeSetJson;
+
     @Schema(description = "创建时间")
     private Date createdDate;
 }

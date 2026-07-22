@@ -46,9 +46,13 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     ResultData<RequirementDto> confirmCompletion(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/comments", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "追加 Requirement 评论", description = "人类评论会中断活跃自动化并触发 PM 重规划；已完成需求会启动 CHANGE_REQUEST loop")
+    @Operation(summary = "追加 Requirement 评论", description = "活跃需求在当前 loop 内增量修订计划；已完成需求会启动 CHANGE_REQUEST loop")
     ResultData<RequirementCommentDto> addComment(@PathVariable("id") String id,
                                                  @RequestBody @Valid CreateRequirementCommentRequest request);
+
+    @PostMapping(path = "{id}/revision/retry")
+    @Operation(summary = "重试计划修订", description = "仅允许重试当前 loop 中处于 FAILED 的最新修订，不递增 revisionSeq")
+    ResultData<RequirementDto> retryRevision(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/mr/retry")
     @Operation(summary = "重试 GitLab MR 交付", description = "修复 GitLab 配置后重试交付，不重新执行开发或验收")

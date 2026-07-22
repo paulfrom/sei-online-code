@@ -55,6 +55,14 @@ public class OcConfig {
     @Value("${onlinecode.compensation.run-timeout-minutes:30}")
     private long runTimeoutMinutes;
 
+    // ==================== Automation feature flags ====================
+
+    /**
+     * 人类评论是否在当前 loop 内触发增量计划修订。关闭时回退到原有的中断并新建 loop 行为。
+     */
+    @Value("${onlinecode.automation.incremental-comment-revision.enabled:true}")
+    private boolean incrementalCommentRevisionEnabled;
+
     // ==================== Memory 重建配置 ====================
 
     /** CodingTask 增量更新降级为全量重建的变更文件数阈值。默认 50。 */
@@ -109,6 +117,10 @@ public class OcConfig {
 
     public long getRunTimeoutMinutes() {
         return runTimeoutMinutes;
+    }
+
+    public boolean isIncrementalCommentRevisionEnabled() {
+        return incrementalCommentRevisionEnabled;
     }
 
     // ==================== Memory Rebuild Getter ====================

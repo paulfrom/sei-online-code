@@ -4,6 +4,7 @@ import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
@@ -21,16 +22,22 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
+import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
+import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraph;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -64,6 +71,9 @@ class RequirementAutomationServiceTest {
     private AgentExecutionService agentExecutionService;
     private ValidationLoopService validationLoopService;
     private FailureInfoSupport failureInfoSupport;
+    private PlanRevisionStateService revisionStateService;
+    private EffectiveTaskGraphResolver effectiveTaskGraphResolver;
+    private OcConfig ocConfig;
     private RequirementAutomationService service;
     private List<ExecutionPlanStatus> capturedPlanStatuses;
 
@@ -81,14 +91,27 @@ class RequirementAutomationServiceTest {
         agentExecutionService = mock(AgentExecutionService.class);
         validationLoopService = mock(ValidationLoopService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
+        revisionStateService = mock(PlanRevisionStateService.class);
+        effectiveTaskGraphResolver = mock(EffectiveTaskGraphResolver.class);
+        ocConfig = mock(OcConfig.class);
+        when(ocConfig.isIncrementalCommentRevisionEnabled()).thenReturn(true);
         capturedPlanStatuses = new ArrayList<>();
 
         service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher,
                 executionPlanDao, requirementCommentService, requirementDesignContextService,
                 runDao, requirementDeliveryService, pmAgentClient, agentExecutionService,
-                validationLoopService, failureInfoSupport);
+                validationLoopService, failureInfoSupport, revisionStateService,
+                effectiveTaskGraphResolver, ocConfig);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(revisionStateService.request(any(), any(), any())).thenReturn(1L);
+        when(effectiveTaskGraphResolver.resolve(any(ExecutionPlan.class))).thenAnswer(invocation -> {
+            ExecutionPlan plan = invocation.getArgument(0);
+            List<CodingTask> tasks = codingTaskDao.findByRequirementId(plan.getRequirementId()).stream()
+                    .filter(task -> plan.getId().equals(task.getExecutionPlanId()))
+                    .toList();
+            return new EffectiveTaskGraph(0L, tasks, Map.of());
+        });
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(inv -> inv.getArgument(0));
         doAnswer(inv -> {
             ExecutionPlan plan = inv.getArgument(0);
@@ -443,6 +466,76 @@ class RequirementAutomationServiceTest {
         service.handleHumanComment("req-comment", "请调整接口", null);
 
         verify(requirementDesignContextService).invalidate("req-comment");
+        verify(revisionStateService).request(eq("req-comment"), eq("loop-old"), any());
+        verify(runDao, never()).findByRequirementIdAndState(any(), any());
+        verify(agentExecutionService, never()).cancel(any());
+        assertEquals("loop-old", requirement.getActiveLoopId());
+        ArgumentCaptor<PlanRevisionRequestedEvent> eventCaptor =
+                ArgumentCaptor.forClass(PlanRevisionRequestedEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertEquals(1L, eventCaptor.getValue().revisionSeq());
+        assertEquals("loop-old", eventCaptor.getValue().loopId());
+    }
+
+    @Test
+    void humanComment_featureDisabledFallsBackToLegacyInterruptedNewLoop() {
+        when(ocConfig.isIncrementalCommentRevisionEnabled()).thenReturn(false);
+        Requirement requirement = new Requirement();
+        requirement.setId("req-legacy");
+        requirement.setActiveLoopId("loop-old");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        when(requirementDao.findOne("req-legacy")).thenReturn(requirement);
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc("req-legacy", "loop-old"))
+                .thenReturn(plan);
+        Run run = new Run();
+        run.setId("run-legacy");
+        run.setState(RunState.RUNNING);
+        when(runDao.findByRequirementIdAndState("req-legacy", RunState.RUNNING)).thenReturn(List.of(run));
+
+        service.handleHumanComment("req-legacy", "使用旧路径", null);
+
+        verify(revisionStateService, never()).request(any(), any(), any());
+        verify(agentExecutionService).cancel("run-legacy");
+        assertEquals(ExecutionPlanStatus.INTERRUPTED, plan.getStatus());
+        assertTrue(!"loop-old".equals(requirement.getActiveLoopId()));
+        verify(eventPublisher).publishEvent(any(RequirementAutomationLoopEvent.class));
+    }
+
+    @Test
+    void humanComment_completedRequirementRetainsNewLoopBehavior() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-completed");
+        requirement.setActiveLoopId("loop-completed");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-completed")).thenReturn(requirement);
+
+        service.handleHumanComment("req-completed", "增加导出功能", null);
+
+        assertTrue(!"loop-completed".equals(requirement.getActiveLoopId()));
+        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+        verify(revisionStateService, never()).request(any(), any(), any());
+        verify(eventPublisher).publishEvent(any(RequirementAutomationLoopEvent.class));
+    }
+
+    @Test
+    void humanComment_rollbackDoesNotPublishRevisionRequest() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-rollback");
+        requirement.setActiveLoopId("loop-rollback");
+        requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+        when(requirementDao.findOne("req-rollback")).thenReturn(requirement);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.handleHumanComment("req-rollback", "只在提交后处理", null);
+            verify(eventPublisher, never()).publishEvent(any(PlanRevisionRequestedEvent.class));
+            // Clearing synchronization without invoking afterCommit models transaction rollback.
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        verify(eventPublisher, never()).publishEvent(any(PlanRevisionRequestedEvent.class));
     }
 
     @Test

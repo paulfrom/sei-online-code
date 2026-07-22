@@ -18,10 +18,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Component
 public class RequirementProgressEventListener {
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onProgress(RequirementProgressEvent event) {
-        log.info("requirement progress event: requirementId={}, snapshotVersion={}, type={}",
-                event.getRequirementId(), event.getSnapshotVersion(), event.getEventType());
+        log.info("requirement progress event: requirementId={}, loopId={}, revisionSeq={}, "
+                        + "revisionState={}, snapshotVersion={}, type={}",
+                event.getRequirementId(), event.getLoopId(), event.getRevisionSeq(),
+                event.getRevisionState(), event.getSnapshotVersion(), event.getEventType());
         RequirementProgressWebSocketHub.broadcast(event);
     }
 }

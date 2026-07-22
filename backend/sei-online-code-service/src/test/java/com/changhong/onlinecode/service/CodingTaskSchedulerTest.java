@@ -4,12 +4,17 @@ import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraph;
+import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Propagation;
@@ -17,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +51,7 @@ class CodingTaskSchedulerTest {
     private ApplicationEventPublisher eventPublisher;
     private RequirementCommentService requirementCommentService;
     private ValidationLoopService validationLoopService;
+    private EffectiveTaskGraphResolver effectiveTaskGraphResolver;
     private CodingTaskScheduler scheduler;
 
     private final AtomicInteger savedTasks = new AtomicInteger(0);
@@ -57,14 +65,26 @@ class CodingTaskSchedulerTest {
         eventPublisher = mock(ApplicationEventPublisher.class);
         requirementCommentService = mock(RequirementCommentService.class);
         validationLoopService = mock(ValidationLoopService.class);
+        effectiveTaskGraphResolver = mock(EffectiveTaskGraphResolver.class);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
                 runDao, mock(CodingTaskChangeCollector.class),
-                eventPublisher, requirementCommentService, validationLoopService);
+                eventPublisher, requirementCommentService, validationLoopService,
+                effectiveTaskGraphResolver);
         when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
             savedTasks.incrementAndGet();
             return invocation.getArgument(0);
+        });
+        when(effectiveTaskGraphResolver.resolveLatest(anyString(), anyString())).thenAnswer(invocation -> {
+            String requirementId = invocation.getArgument(0);
+            String loopId = invocation.getArgument(1);
+            List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirementId).stream()
+                    .filter(task -> loopId.equals(task.getLoopId()))
+                    .toList();
+            Map<String, CodingTask> byKey = new LinkedHashMap<>();
+            tasks.forEach(task -> byKey.put(task.getPlanTaskKey(), task));
+            return new EffectiveTaskGraph(0L, tasks, byKey);
         });
     }
 
@@ -202,6 +222,101 @@ class CodingTaskSchedulerTest {
         verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
     }
 
+    @ParameterizedTest
+    @EnumSource(value = RequirementRevisionState.class, names = "NONE", mode = EnumSource.Mode.EXCLUDE)
+    void schedule_revisionStatePausesNewTasks(RequirementRevisionState revisionState) {
+        Requirement req = requirement("req-1", "loop-1");
+        req.setRevisionState(revisionState);
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask pending = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.PENDING);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(pending));
+
+        scheduler.schedule("req-1");
+
+        verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
+        verify(effectiveTaskGraphResolver, never()).resolveLatest(anyString(), anyString());
+        verify(eventPublisher, never()).publishEvent(any());
+        assertEquals(CodingTaskStatus.PENDING, pending.getStatus());
+    }
+
+    @Test
+    void onDevelopmentRunFinished_keepTaskSettlesButRevisionDoesNotLaunchDownstream() {
+        Requirement req = requirement("req-1", "loop-1");
+        req.setRevisionState(RequirementRevisionState.PLANNING);
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask running = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.RUNNING);
+        CodingTask downstream = task(
+                "task-b", "BE-002", "backend", List.of("BE-001"), CodingTaskStatus.PENDING);
+        when(codingTaskDao.findOne("task-a")).thenReturn(running);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(running, downstream));
+
+        scheduler.onDevelopmentRunFinished("task-a", true, null);
+
+        assertEquals(CodingTaskStatus.SUCCEEDED, running.getStatus());
+        assertEquals(CodingTaskStatus.PENDING, downstream.getStatus());
+        verify(executionService, never()).executePlanTask(eq("task-b"), anyString(), anyString());
+    }
+
+    @Test
+    void schedule_usesKeepSourceFromEffectiveGraphWhenSameLoopContainsDuplicateHistoricalKey() {
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask keepSource = task(
+                "keep-source", "BE-001", "backend", List.of(), CodingTaskStatus.SUCCEEDED);
+        keepSource.setRevisionSeq(1L);
+        CodingTask excludedHistoricalDuplicate = task(
+                "excluded-duplicate", "BE-001", "backend", List.of(), CodingTaskStatus.FAILED);
+        excludedHistoricalDuplicate.setRevisionSeq(2L);
+        CodingTask currentTask = task(
+                "current-task", "BE-002", "backend", List.of("BE-001"), CodingTaskStatus.PENDING);
+        currentTask.setRevisionSeq(2L);
+        when(codingTaskDao.findByRequirementId("req-1"))
+                .thenReturn(List.of(keepSource, excludedHistoricalDuplicate, currentTask));
+        when(effectiveTaskGraphResolver.resolveLatest("req-1", "loop-1"))
+                .thenReturn(graph(2L, keepSource, currentTask));
+
+        scheduler.schedule("req-1");
+
+        verify(executionService).executePlanTask(eq("current-task"), anyString(), anyString());
+        assertEquals(CodingTaskStatus.SUCCEEDED, keepSource.getStatus());
+        assertEquals(CodingTaskStatus.FAILED, excludedHistoricalDuplicate.getStatus());
+    }
+
+    @Test
+    void schedule_supersededTaskIsTerminalAndDoesNotFailDependentTask() {
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask superseded = task(
+                "old-task", "BE-001", "backend", List.of(), CodingTaskStatus.SUPERSEDED);
+        CodingTask dependent = task(
+                "dependent", "BE-002", "backend", List.of("BE-001"), CodingTaskStatus.PENDING);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(superseded, dependent));
+        when(effectiveTaskGraphResolver.resolveLatest("req-1", "loop-1"))
+                .thenReturn(graph(2L, superseded, dependent));
+
+        scheduler.schedule("req-1");
+
+        verify(executionService, never()).executePlanTask(eq("old-task"), anyString(), anyString());
+        verify(executionService, never()).executePlanTask(eq("dependent"), anyString(), anyString());
+        verify(codingTaskDao, never()).save(dependent);
+        assertEquals(CodingTaskStatus.PENDING, dependent.getStatus());
+    }
+
+    @Test
+    void onDevelopmentRunFinished_doesNotOverwriteSupersededTask() {
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask superseded = task(
+                "old-task", "BE-001", "backend", List.of(), CodingTaskStatus.SUPERSEDED);
+        when(codingTaskDao.findOne("old-task")).thenReturn(superseded);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(superseded));
+
+        scheduler.onDevelopmentRunFinished("old-task", false, "late failure");
+
+        assertEquals(CodingTaskStatus.SUPERSEDED, superseded.getStatus());
+        verify(codingTaskDao, never()).save(superseded);
+    }
+
     @Test
     void schedule_ignoresSameTaskKeyFromStaleLoopWhenResolvingDependencies() {
         Requirement req = requirement("req-1", "loop-2");
@@ -291,5 +406,13 @@ class CodingTaskSchedulerTest {
         task.setDescription("desc");
         task.setAssignedAgent("frontend".equals(area) ? "frontend-dev-agent" : "backend-dev-agent");
         return task;
+    }
+
+    private EffectiveTaskGraph graph(long revisionSeq, CodingTask... tasks) {
+        Map<String, CodingTask> byKey = new LinkedHashMap<>();
+        for (CodingTask task : tasks) {
+            byKey.put(task.getPlanTaskKey(), task);
+        }
+        return new EffectiveTaskGraph(revisionSeq, List.of(tasks), byKey);
     }
 }

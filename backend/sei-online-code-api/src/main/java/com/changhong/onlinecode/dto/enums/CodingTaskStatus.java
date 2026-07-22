@@ -35,5 +35,8 @@ public enum CodingTaskStatus {
     BLOCKED,
 
     /** 已过期（详细设计版本升级或 loopId 变化）。 */
-    STALE
+    STALE,
+
+    /** 已被同一 loop 内的新版计划替代，保留历史但不再调度。 */
+    SUPERSEDED
 }

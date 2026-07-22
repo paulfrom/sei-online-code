@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto.progress;
 
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -25,6 +26,10 @@ public class RequirementExecutionOverviewDto {
     private String mrStatus;
 
     private String activeLoopId;
+    private Long revisionSeq;
+    private Long appliedRevisionSeq;
+    private RequirementRevisionState revisionState;
+    private String revisionFailureReason;
     private Integer planVersion;
     private Long snapshotVersion;
 
