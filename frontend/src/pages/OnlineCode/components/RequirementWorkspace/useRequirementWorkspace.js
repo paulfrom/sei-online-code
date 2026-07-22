@@ -155,7 +155,11 @@ export function useRequirementWorkspace(requirementId) {
       );
 
       const ctRes = await findCodingTasksByPage({
-        filters: [{ fieldName: 'requirementId', value: requirementId, operator: 'EQ' }],
+        filters: [{ fieldName: 'requirementId', value: requirementId, operator: 'EQ' }, {
+          fieldName: 'status',
+          operator: 'NE',
+          value: 'STALE',
+        }],
         pageInfo: { page: 1, rows: 30 }
       });
       const tasks =

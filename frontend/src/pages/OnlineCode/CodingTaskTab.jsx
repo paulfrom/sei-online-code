@@ -117,15 +117,23 @@ const CodingTaskTab = ({ projectId }) => {
         value: projectId,
       });
     }
-    // if (currentUser?.account) {
-    //   filters.push({
-    //     fieldName: 'creatorAccount',
-    //     operator: 'EQ',
-    //     value: currentUser.account,
-    //   });
-    // }
+    // 状态筛选：选择具体状态时按 EQ 过滤；未选择(全部)时默认隐藏已过期(STALE)任务，
+    // 需要查看时可在下拉框中手动选择「已过期」。
+    if (statusFilter) {
+      filters.push({
+        fieldName: 'status',
+        operator: 'EQ',
+        value: statusFilter,
+      });
+    } else {
+      filters.push({
+        fieldName: 'status',
+        operator: 'eq',
+        value: 'STALE',
+      });
+    }
     return { filters };
-  }, [projectId]);
+  }, [projectId, statusFilter]);
 
   return (
     <div
