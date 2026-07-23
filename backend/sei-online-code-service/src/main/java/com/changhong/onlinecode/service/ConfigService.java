@@ -78,7 +78,7 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
      */
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<PlatformConfig> save(String workspaceRoot, String templateGitlabUrl) {
-        return save(workspaceRoot, templateGitlabUrl, null, null, null, null);
+        return save(workspaceRoot, templateGitlabUrl, null, null, null);
     }
 
     /**
@@ -87,7 +87,6 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<PlatformConfig> save(String workspaceRoot,
                                                       String templateGitlabUrl,
-                                                      String gitlabHost,
                                                       String gitlabToken,
                                                       String gitlabProjectId,
                                                       String gitlabTargetBranch) {
@@ -97,7 +96,6 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
             created.setId(PlatformConfig.FIXED_ID);
             created.setWorkspaceRoot(workspaceRoot);
             created.setTemplateGitlabUrl(templateGitlabUrl);
-            created.setGitlabHost(gitlabHost);
             created.setGitlabToken(gitlabToken);
             created.setGitlabProjectId(gitlabProjectId);
             created.setGitlabTargetBranch(isNotBlank(gitlabTargetBranch) ? gitlabTargetBranch : "main");
@@ -106,7 +104,6 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
         }
         existing.setWorkspaceRoot(workspaceRoot);
         existing.setTemplateGitlabUrl(templateGitlabUrl);
-        existing.setGitlabHost(gitlabHost);
         if (isNotBlank(gitlabToken)) {
             existing.setGitlabToken(gitlabToken);
         }
@@ -141,9 +138,6 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
      * 配置行 gitlabHost 非空优先 → 环境变量 {@code oc.gitlab.host} → {@code null}。
      */
     public String resolveGitlabHost(PlatformConfig config) {
-        if (config != null && isNotBlank(config.getGitlabHost())) {
-            return config.getGitlabHost().trim();
-        }
         if (isNotBlank(ocConfig.getGitlabHost())) {
             return ocConfig.getGitlabHost().trim();
         }

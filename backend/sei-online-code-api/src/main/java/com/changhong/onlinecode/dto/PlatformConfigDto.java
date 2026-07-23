@@ -3,6 +3,7 @@ package com.changhong.onlinecode.dto;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -12,6 +13,7 @@ import java.util.Date;
  * @author sei-online-code
  */
 @Data
+@EqualsAndHashCode(callSuper = false)
 @Schema(description = "平台配置 DTO（单例）")
 public class PlatformConfigDto extends BaseEntityDto {
 
@@ -22,9 +24,6 @@ public class PlatformConfigDto extends BaseEntityDto {
 
     @Schema(description = "模板 GitLab 仓库地址；空即走脚手架生成路径", example = "")
     private String templateGitlabUrl;
-
-    @Schema(description = "GitLab Host", example = "https://gitlab.example.com")
-    private String gitlabHost;
 
     @Schema(description = "交付 GitLab Project ID 或 path", example = "group/project")
     private String gitlabProjectId;

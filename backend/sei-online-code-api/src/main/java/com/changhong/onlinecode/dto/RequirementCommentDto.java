@@ -5,6 +5,7 @@ import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.sei.core.dto.BaseEntityDto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.Date;
 
@@ -12,6 +13,7 @@ import java.util.Date;
  * Requirement 评论 DTO。
  */
 @Data
+@EqualsAndHashCode(callSuper = false)
 @Schema(description = "Requirement 评论 DTO")
 public class RequirementCommentDto extends BaseEntityDto {
 

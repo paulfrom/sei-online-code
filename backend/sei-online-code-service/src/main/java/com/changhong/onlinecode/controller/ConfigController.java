@@ -36,8 +36,7 @@ public class ConfigController implements ConfigApi {
     @Override
     public ResultData<PlatformConfigDto> save(SavePlatformConfigRequest request) {
         OperateResultWithData<PlatformConfig> result =
-                service.save(request.getWorkspaceRoot(), request.getTemplateGitlabUrl(),
-                        request.getGitlabHost(), request.getGitlabToken(),
+                service.save(request.getWorkspaceRoot(), request.getTemplateGitlabUrl(), request.getGitlabToken(),
                         request.getGitlabProjectId(), request.getGitlabTargetBranch());
         if (result.notSuccessful()) {
             return ResultData.fail(result.getMessage());
@@ -56,7 +55,6 @@ public class ConfigController implements ConfigApi {
         dto.setId(config.getId());
         dto.setWorkspaceRoot(config.getWorkspaceRoot());
         dto.setTemplateGitlabUrl(config.getTemplateGitlabUrl());
-        dto.setGitlabHost(config.getGitlabHost());
         dto.setGitlabProjectId(config.getGitlabProjectId());
         dto.setGitlabTargetBranch(config.getGitlabTargetBranch());
         dto.setCreatedDate(config.getCreatedDate());
