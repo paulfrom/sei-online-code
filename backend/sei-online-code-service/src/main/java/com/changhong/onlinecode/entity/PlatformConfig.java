@@ -46,9 +46,9 @@ public class PlatformConfig extends BaseAuditableEntity {
     @Column(name = "template_gitlab_url", length = 500)
     private String templateGitlabUrl;
 
-    /** 交付 GitLab API Base URL。 */
-    @Column(name = "gitlab_api_base_url", length = 500)
-    private String gitlabApiBaseUrl;
+    /** GitLab Host。 */
+    @Column(name = "gitlab_host", length = 500)
+    private String gitlabHost;
 
     /** 交付 GitLab token。 */
     @Column(name = "gitlab_token", length = 500)

@@ -9,7 +9,6 @@ import com.changhong.onlinecode.dto.enums.WorkspaceSource;
 import com.changhong.onlinecode.entity.PlatformConfig;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
-import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.service.ConfigService;
 import com.changhong.onlinecode.service.GitApi;
 import com.changhong.sei.core.util.JsonUtils;
@@ -90,8 +89,6 @@ public class WorkspaceManager {
      * 否则多个 worker 会在业务执行槽登记前同时进入 git init/checkout。
      */
     private final ConcurrentMap<Path, ReentrantLock> workspaceLocks = new ConcurrentHashMap<>();
-    private final OcConfig ocConfig;
-
     @Autowired(required = false)
     private RequirementDao requirementDao;
 
@@ -100,16 +97,15 @@ public class WorkspaceManager {
 
     @Autowired
     public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator,
-                            GitApi gitApi, OcConfig ocConfig) {
+                            GitApi gitApi) {
         this.projectDao = projectDao;
         this.configService = configService;
         this.scaffoldGenerator = scaffoldGenerator;
         this.gitApi = gitApi;
-        this.ocConfig = ocConfig;
     }
 
     public WorkspaceManager(ProjectDao projectDao, ConfigService configService, ScaffoldGenerator scaffoldGenerator) {
-        this(projectDao, configService, scaffoldGenerator, null, null);
+        this(projectDao, configService, scaffoldGenerator, null);
     }
 
     void setRequirementDao(RequirementDao requirementDao) {
@@ -694,7 +690,9 @@ public class WorkspaceManager {
         Map<String, String> replaceData = buildReplaceData(project);
         Map<String, String> backendReplaceData = new HashMap<>(replaceData);
         putPackageData(backendReplaceData, derivePackageName(project));
-        String resolvedHost = nullToEmpty(templateRepo.host(), nullToEmpty(ocConfig.getGitlabHost()));
+        PlatformConfig platformConfig = configService.get();
+        String resolvedHost = nullToEmpty(
+                templateRepo.host(), nullToEmpty(configService.resolveGitlabHost(platformConfig)));
 
         try (InputStream is = getGitLabApi(resolvedHost).getRepositoryApi()
                 .getRepositoryArchive(templateRepo.projectPath(), null, Constants.ArchiveFormat.ZIP);
@@ -746,11 +744,13 @@ public class WorkspaceManager {
         if (resolvedHost.isBlank()) {
             throw new IllegalStateException("未配置 GitLab Host，无法初始化 GitLabApi");
         }
-        if (nullToEmpty(ocConfig.getGitlabToken()).isBlank()) {
+        PlatformConfig platformConfig = configService.get();
+        String token = configService.resolveGitlabToken(platformConfig);
+        if (nullToEmpty(token).isBlank()) {
             throw new IllegalStateException("未配置 oc.gitlab.token，无法拉取模板仓归档");
         }
         try {
-            GitLabApi gitLabApi = new GitLabApi(resolvedHost, ocConfig.getGitlabToken().trim());
+            GitLabApi gitLabApi = new GitLabApi(resolvedHost, token.trim());
             gitLabApi.setRequestTimeout(60 * 1000, 120 * 1000);
             return gitLabApi;
         } catch (Exception e) {

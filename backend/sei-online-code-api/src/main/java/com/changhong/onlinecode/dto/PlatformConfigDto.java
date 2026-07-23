@@ -23,8 +23,8 @@ public class PlatformConfigDto extends BaseEntityDto {
     @Schema(description = "模板 GitLab 仓库地址；空即走脚手架生成路径", example = "")
     private String templateGitlabUrl;
 
-    @Schema(description = "交付 GitLab API Base URL", example = "https://gitlab.example.com")
-    private String gitlabApiBaseUrl;
+    @Schema(description = "GitLab Host", example = "https://gitlab.example.com")
+    private String gitlabHost;
 
     @Schema(description = "交付 GitLab Project ID 或 path", example = "group/project")
     private String gitlabProjectId;

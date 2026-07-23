@@ -29,10 +29,6 @@ public class OcConfig {
     @Value("${oc.gitlab.host:}")
     private String gitlabHost;
 
-    /** GitLab API Base URL 环境覆盖。 */
-    @Value("${oc.gitlab.api-base-url:}")
-    private String gitlabApiBaseUrl;
-
     /** GitLab Personal Access Token。 */
     @Value("${oc.gitlab.token:}")
     private String gitlabToken;
@@ -119,10 +115,6 @@ public class OcConfig {
 
     public String getGitlabHost() {
         return gitlabHost;
-    }
-
-    public String getGitlabApiBaseUrl() {
-        return gitlabApiBaseUrl;
     }
 
     public String getGitlabToken() {

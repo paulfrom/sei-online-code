@@ -72,8 +72,29 @@ class ConfigServiceTest {
                 "纯空白 workspaceRoot 等同未配置，走 env-fallback");
     }
 
+    @Test
+    void resolvesGitlabHostFromConfigBeforeEnvironment() throws Exception {
+        setField("gitlabHost", " https://env.gitlab.example.com ");
+        PlatformConfig config = new PlatformConfig();
+        config.setGitlabHost(" https://db.gitlab.example.com ");
+
+        assertEquals("https://db.gitlab.example.com", service.resolveGitlabHost(config));
+    }
+
+    @Test
+    void resolvesGitlabHostFromEnvironmentWhenConfigBlank() throws Exception {
+        setField("gitlabHost", " https://env.gitlab.example.com ");
+
+        assertEquals("https://env.gitlab.example.com",
+                service.resolveGitlabHost(new PlatformConfig()));
+    }
+
     private void setEnvWorkspaceRoot(String value) throws Exception {
-        Field f = OcConfig.class.getDeclaredField("workspaceRoot");
+        setField("workspaceRoot", value);
+    }
+
+    private void setField(String fieldName, String value) throws Exception {
+        Field f = OcConfig.class.getDeclaredField(fieldName);
         f.setAccessible(true);
         f.set(ocConfig, value);
     }

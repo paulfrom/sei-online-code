@@ -9,6 +9,12 @@
 - `workspaceBaseBranch`：需求工作区的更新基线分支，默认 `main`。本期用于记录和展示；手动刷新不执行可能覆盖成果的 reset/rebase。
 - `deliveryTargetBranch`：创建或更新 GitLab MR 时使用的目标分支。项目未配置时回退平台 `oc.gitlab.target-branch`。
 
+## GitLab 平台配置
+
+- GitLab 服务地址只使用 `gitlabHost` / `oc.gitlab.host`，模板归档、仓库 API、分支、提交和 MR 操作共享同一地址。
+- `gitlabApiBaseUrl` / `oc.gitlab.api-base-url` 已删除，不提供兼容读取。
+- V12 迁移直接删除 `gitlab_api_base_url` 并新增 `gitlab_host`，不迁移旧值；升级后必须重新配置 GitLab Host。
+
 ## API
 
 ### POST `/requirement/{id}/workspace/refresh`

@@ -19,7 +19,7 @@ import java.util.Objects;
  *
  * <p>单例：{@link #get()} 缺失时补建默认行、{@link #save} 幂等 upsert 固定主键
  * {@link PlatformConfig#FIXED_ID} 的那一行。工作区根目录和 GitLab 配置均采用 env-with-fallback（backend 规则 #11）：
- * 配置行非空优先；否则回退同名环境变量（{@code oc.gitlab.api-base-url} / {@code oc.gitlab.token} / 等）；
+ * 配置行非空优先；否则回退同名环境变量（{@code oc.gitlab.host} / {@code oc.gitlab.token} / 等）；
  * 仍空则按各字段语义兜底（如 targetBranch 默认 {@code main}）。</p>
  *
  * <p>框架 {@code BaseEntityService.save} 对「预置且尚不存在的主键」会拒绝（视为非法更新），
@@ -87,7 +87,7 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<PlatformConfig> save(String workspaceRoot,
                                                       String templateGitlabUrl,
-                                                      String gitlabApiBaseUrl,
+                                                      String gitlabHost,
                                                       String gitlabToken,
                                                       String gitlabProjectId,
                                                       String gitlabTargetBranch) {
@@ -97,7 +97,7 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
             created.setId(PlatformConfig.FIXED_ID);
             created.setWorkspaceRoot(workspaceRoot);
             created.setTemplateGitlabUrl(templateGitlabUrl);
-            created.setGitlabApiBaseUrl(gitlabApiBaseUrl);
+            created.setGitlabHost(gitlabHost);
             created.setGitlabToken(gitlabToken);
             created.setGitlabProjectId(gitlabProjectId);
             created.setGitlabTargetBranch(isNotBlank(gitlabTargetBranch) ? gitlabTargetBranch : "main");
@@ -106,7 +106,7 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
         }
         existing.setWorkspaceRoot(workspaceRoot);
         existing.setTemplateGitlabUrl(templateGitlabUrl);
-        existing.setGitlabApiBaseUrl(gitlabApiBaseUrl);
+        existing.setGitlabHost(gitlabHost);
         if (isNotBlank(gitlabToken)) {
             existing.setGitlabToken(gitlabToken);
         }
@@ -137,15 +137,15 @@ public class ConfigService extends BaseEntityService<PlatformConfig> {
     }
 
     /**
-     * 解析生效的 GitLab API Base URL（env-with-fallback）：
-     * 配置行 gitlabApiBaseUrl 非空优先 → 环境变量 {@code oc.gitlab.api-base-url} → {@code null}。
+     * 解析生效的 GitLab Host（env-with-fallback）：
+     * 配置行 gitlabHost 非空优先 → 环境变量 {@code oc.gitlab.host} → {@code null}。
      */
-    public String resolveGitlabApiBaseUrl(PlatformConfig config) {
-        if (config != null && isNotBlank(config.getGitlabApiBaseUrl())) {
-            return config.getGitlabApiBaseUrl().trim();
+    public String resolveGitlabHost(PlatformConfig config) {
+        if (config != null && isNotBlank(config.getGitlabHost())) {
+            return config.getGitlabHost().trim();
         }
-        if (isNotBlank(ocConfig.getGitlabApiBaseUrl())) {
-            return ocConfig.getGitlabApiBaseUrl().trim();
+        if (isNotBlank(ocConfig.getGitlabHost())) {
+            return ocConfig.getGitlabHost().trim();
         }
         return null;
     }

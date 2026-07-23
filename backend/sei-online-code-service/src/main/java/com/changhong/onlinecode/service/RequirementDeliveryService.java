@@ -208,14 +208,14 @@ public class RequirementDeliveryService {
 
     private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan,
                                      boolean useCurrentWorkspaceBranch) throws Exception {
-        String gitlabApiBaseUrl = configService.resolveGitlabApiBaseUrl(null);
+        String gitlabHost = configService.resolveGitlabHost(null);
         String gitlabToken = configService.resolveGitlabToken(null);
         String gitlabProjectId = configService.resolveGitlabProjectId(null);
         String gitlabTargetBranch = resolveDeliveryTargetBranch(requirement);
-        if (isBlank(gitlabApiBaseUrl) || isBlank(gitlabToken) || isBlank(gitlabProjectId)) {
+        if (isBlank(gitlabHost) || isBlank(gitlabToken) || isBlank(gitlabProjectId)) {
             throw new IllegalStateException(
                     "GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填，" +
-                    "请通过环境变量 oc.gitlab.api-base-url / oc.gitlab.token / oc.gitlab.project-id 或平台配置页面设置");
+                    "请通过环境变量 oc.gitlab.host / oc.gitlab.token / oc.gitlab.project-id 或平台配置页面设置");
         }
         Path workspace = resolveDeliveryWorkspace(requirement, useCurrentWorkspaceBranch);
         String branch = resolveSourceBranch(requirement, workspace, useCurrentWorkspaceBranch);
@@ -262,7 +262,7 @@ public class RequirementDeliveryService {
             changedFiles = List.of();
         }
 
-        GitLabApi gitLabApi = new GitLabApi(gitlabApiBaseUrl, gitlabToken);
+        GitLabApi gitLabApi = new GitLabApi(gitlabHost, gitlabToken);
         Object projectId = gitlabProjectId;
         String title = "Requirement " + shortId(requirement.getId()) + ": " + requirement.getTitle();
         String description = "Automated delivery for requirement " + requirement.getId()

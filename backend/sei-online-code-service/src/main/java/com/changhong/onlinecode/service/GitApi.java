@@ -110,12 +110,12 @@ public class GitApi {
 
     public GitLabApi client(String host) {
         PlatformConfig config = configService.get();
-        String resolvedHost = blankToDefault(host, configService.resolveGitlabApiBaseUrl(config));
+        String resolvedHost = blankToDefault(host, configService.resolveGitlabHost(config));
         String token = configService.resolveGitlabToken(config);
         if (resolvedHost == null || resolvedHost.isBlank() || token == null || token.isBlank()) {
             throw new IllegalStateException(
                     "GitLab API 配置不完整：apiBaseUrl/token 必填，" +
-                    "请通过环境变量 oc.gitlab.api-base-url / oc.gitlab.token 或平台配置页面设置");
+                    "请通过环境变量 oc.gitlab.host / oc.gitlab.token 或平台配置页面设置");
         }
         try {
             GitLabApi client = new GitLabApi(resolvedHost.trim(), token.trim());
@@ -213,7 +213,7 @@ public class GitApi {
             return new RepositoryTarget(host, trimProjectPath(raw.substring(separator + 1)));
         }
         PlatformConfig config = configService.get();
-        return new RepositoryTarget(configService.resolveGitlabApiBaseUrl(config), trimProjectPath(raw));
+        return new RepositoryTarget(configService.resolveGitlabHost(config), trimProjectPath(raw));
     }
 
     private String trimProjectPath(String path) {
