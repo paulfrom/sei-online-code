@@ -1,6 +1,7 @@
 package com.changhong.onlinecode.dto;
 
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
@@ -91,6 +92,18 @@ public class RequirementDto extends BaseEntityDto {
 
     @Schema(description = "交付 MR URL")
     private String deliveryMrUrl;
+
+    @Schema(description = "GitLab MR 项目内编号")
+    private Long deliveryMrIid;
+
+    @Schema(description = "GitLab MR 状态")
+    private DeliveryMrStatus deliveryMrStatus;
+
+    @Schema(description = "MR 合并时间")
+    private Date deliveryMergedAt;
+
+    @Schema(description = "MR 合并提交哈希")
+    private String deliveryMergeCommitHash;
 
     @Schema(description = "交付目标分支")
     private String deliveryTargetBranch;

@@ -157,6 +157,31 @@ class WorkspaceLeaseServiceTest {
         verify(workspaceManager, never()).ensureOnBranch(any(Path.class), anyString());
     }
 
+    @Test
+    void synchronizeWorkspace_mergesConfiguredBaseAndPersistsHeads() {
+        Requirement requirement = new Requirement();
+        requirement.setId(REQUIREMENT_ID);
+        requirement.setProjectId(PROJECT_ID);
+        RequirementWorkspace existing = workspace(WORKSPACE_ID);
+        Project project = new Project();
+        project.setWorkspaceBaseBranch("develop");
+        project.setDeliveryTargetBranch("release");
+        when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(requirement);
+        when(workspaceDao.findByRequirementId(REQUIREMENT_ID)).thenReturn(Optional.of(existing));
+        when(projectDao.findOne(PROJECT_ID)).thenReturn(project);
+        when(workspaceManager.syncBaseBranch(Path.of(existing.getWorkspacePath()), "develop"))
+                .thenReturn(new WorkspaceManager.WorkspaceSyncResult(
+                        "feature/current", "develop", "base-new", "merged-new"));
+
+        WorkspaceLeaseService.WorkspaceRefreshResult result = service.synchronizeWorkspace(REQUIREMENT_ID);
+
+        assertEquals("feature/current", result.branchName());
+        assertEquals("develop", result.baseBranch());
+        assertEquals("base-new", existing.getBaseCommit());
+        assertEquals("merged-new", existing.getCurrentHead());
+        verify(workspaceDao).save(existing);
+    }
+
     // ======================== acquireOwnership ========================
 
     @Test

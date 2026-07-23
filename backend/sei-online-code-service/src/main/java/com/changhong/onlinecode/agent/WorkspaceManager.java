@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -342,6 +343,92 @@ public class WorkspaceManager {
             log.warn("getChangedFiles: git status 失败 path={}", workspaceDir, e);
             throw e;
         }
+    }
+
+    /**
+     * Fetch the configured base branch, update its local ref, then merge it into the workspace's
+     * current branch. The operation requires a clean workspace and never changes the source branch.
+     */
+    public WorkspaceSyncResult syncBaseBranch(Path workspaceDir, String baseBranch) {
+        String normalizedBase = baseBranch == null ? "" : baseBranch.trim();
+        if (normalizedBase.isBlank()) {
+            throw new IllegalArgumentException("工作区基线分支不能为空");
+        }
+        runCommandOutput(workspaceDir, "git", "check-ref-format", "--branch", normalizedBase);
+        ReentrantLock lock = workspaceLock(workspaceDir);
+        lock.lock();
+        try {
+            if (hasUncommittedChanges(workspaceDir)) {
+                throw new IllegalStateException("工作区存在未提交修改，不能同步基线分支");
+            }
+            String sourceBranch = getCurrentBranch(workspaceDir);
+            if (sourceBranch.isBlank()) {
+                throw new IllegalStateException("工作区处于 detached HEAD，不能同步基线分支");
+            }
+            String token = configService == null ? null : configService.resolveGitlabToken(null);
+            fetchBranch(workspaceDir, normalizedBase, token);
+            String remoteRef = "refs/remotes/origin/" + normalizedBase;
+            String baseHead = runCommandOutput(workspaceDir, "git", "rev-parse", remoteRef).trim();
+            try {
+                if (sourceBranch.equals(normalizedBase)) {
+                    runCommandOutput(workspaceDir, "git", "merge", "--ff-only", remoteRef);
+                } else {
+                    runCommandOutput(workspaceDir, "git", "branch", "-f", normalizedBase, remoteRef);
+                    runCommandOutput(workspaceDir, "git", "merge", "--no-edit", normalizedBase);
+                }
+            } catch (RuntimeException mergeFailure) {
+                abortMergeIfNecessary(workspaceDir);
+                throw new IllegalStateException("基线分支 " + normalizedBase + " 合并到 "
+                        + sourceBranch + " 失败: " + mergeFailure.getMessage(), mergeFailure);
+            }
+            return new WorkspaceSyncResult(sourceBranch, normalizedBase, baseHead,
+                    getCurrentHead(workspaceDir));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void fetchBranch(Path workspaceDir, String baseBranch, String token) {
+        ProcessBuilder builder = new ProcessBuilder("git", "fetch", "--prune", "origin",
+                "+refs/heads/" + baseBranch + ":refs/remotes/origin/" + baseBranch)
+                .directory(workspaceDir.toFile())
+                .redirectErrorStream(true);
+        builder.environment().put("GIT_TERMINAL_PROMPT", "0");
+        if (token != null && !token.isBlank()) {
+            String basic = Base64.getEncoder().encodeToString(
+                    ("oauth2:" + token.trim()).getBytes(StandardCharsets.UTF_8));
+            builder.environment().put("GIT_CONFIG_COUNT", "1");
+            builder.environment().put("GIT_CONFIG_KEY_0", "http.extraHeader");
+            builder.environment().put("GIT_CONFIG_VALUE_0", "Authorization: Basic " + basic);
+        }
+        try {
+            Process process = builder.start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int code = process.waitFor();
+            if (code != 0) {
+                throw new IllegalStateException("git fetch origin " + baseBranch + " failed: " + output);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("git fetch origin " + baseBranch + " interrupted", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("git fetch origin " + baseBranch + " failed", e);
+        }
+    }
+
+    private void abortMergeIfNecessary(Path workspaceDir) {
+        if (!Files.exists(workspaceDir.resolve(".git").resolve("MERGE_HEAD"))) {
+            return;
+        }
+        try {
+            runCommandOutput(workspaceDir, "git", "merge", "--abort");
+        } catch (RuntimeException abortFailure) {
+            log.error("git merge --abort failed path={}", workspaceDir, abortFailure);
+        }
+    }
+
+    public record WorkspaceSyncResult(String branchName, String baseBranch, String baseHead,
+                                      String currentHead) {
     }
 
     /**

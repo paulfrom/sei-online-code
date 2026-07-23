@@ -20,8 +20,11 @@ import {
   retryMr,
   submitMr,
   refreshRequirementWorkspace,
+  syncRequirementWorkspace,
   editPrd,
   confirmPrd,
+  confirmRequirementCompletion,
+  reopenRequirement as reopenRequirementRequest,
   regeneratePrd,
   resumeRequirementAutomation,
   stopRequirementAutomation,
@@ -61,7 +64,7 @@ const REVISION_STATE_ORDER = {
   FAILED: 5,
 };
 
-const MR_STATUS_TYPES = new Set(['MR_CREATED', 'MR_UPDATED', 'MR_FAILED']);
+const MR_STATUS_TYPES = new Set(['MR_CREATED', 'MR_UPDATED', 'MR_MERGED', 'MR_FAILED']);
 
 /**
  * Optimistically project a revision progress event onto a fetched snapshot.
@@ -157,6 +160,7 @@ export function deriveDelivery(
   if (mrComments.length > 0) {
     const latest = mrComments[0];
     if (latest.commentType === 'MR_FAILED') status = 'FAILED';
+    else if (latest.commentType === 'MR_MERGED') status = 'MERGED';
     else if (latest.commentType === 'MR_UPDATED') status = 'UPDATED';
     else if (latest.commentType === 'MR_CREATED') status = 'CREATED';
   }
@@ -166,7 +170,7 @@ export function deriveDelivery(
     branch: req ? req.deliveryBranch : null,
     commitHash: req ? req.deliveryCommitHash : null,
     targetBranch: req ? req.deliveryTargetBranch : null,
-    status,
+    status: req?.deliveryMrStatus === 'MERGED' ? 'MERGED' : status,
   };
 }
 
@@ -496,6 +500,33 @@ export function useRequirementWorkspace(requirementId) {
         }
         safeSet(setWorkspaceStatus, res.data);
         message.success('工作区状态已刷新');
+      },
+      async syncWorkspace() {
+        const res = await syncRequirementWorkspace(requirementId);
+        if (!res || !res.success || !res.data) {
+          message.error((res && res.message) || '同步主分支失败');
+          return;
+        }
+        safeSet(setWorkspaceStatus, res.data);
+        message.success(`已更新 ${res.data.baseBranch || '主分支'} 并合并到当前需求分支`);
+      },
+      async confirmCompletion() {
+        const res = await confirmRequirementCompletion(requirementId);
+        if (!res || !res.success) {
+          message.error((res && res.message) || '确认需求完成失败');
+          return;
+        }
+        message.success('需求已完成');
+        await refresh();
+      },
+      async reopenRequirement() {
+        const res = await reopenRequirementRequest(requirementId);
+        if (!res || !res.success) {
+          message.error((res && res.message) || '重新打开需求失败');
+          return;
+        }
+        message.success('需求已重新打开，可发送评论开启下一轮变更');
+        await refresh();
       },
       async retryRevision() {
         if (!requirementId || revisionRetryInFlightRef.current) return;

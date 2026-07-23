@@ -3,15 +3,18 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.ExecutionEffectStatus;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionEffectType;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
 import com.changhong.onlinecode.dto.enums.MemoryJobType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
+import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.RunType;
@@ -20,6 +23,7 @@ import com.changhong.onlinecode.entity.ExecutionEffect;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
 import com.changhong.onlinecode.entity.Project;
@@ -36,14 +40,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -68,13 +75,15 @@ public class RequirementDeliveryService {
     private final EffectService effectService;
     private final GitApi gitApi;
     private final ProjectDao projectDao;
+    private final RequirementWorkspaceDao requirementWorkspaceDao;
 
     @Transactional(rollbackFor = Exception.class)
     public void deliver(String requirementId, String executionPlanId) {
-        deliver(requirementId, executionPlanId, TriggerSource.AUTO);
+        deliver(requirementId, executionPlanId, TriggerSource.AUTO, false);
     }
 
-    private void deliver(String requirementId, String executionPlanId, TriggerSource triggerSource) {
+    private void deliver(String requirementId, String executionPlanId, TriggerSource triggerSource,
+                         boolean useCurrentWorkspaceBranch) {
         Requirement requirement = requirementDao.findOne(requirementId);
         ExecutionPlan plan = executionPlanDao.findOne(executionPlanId);
         if (requirement == null || plan == null) {
@@ -92,7 +101,7 @@ public class RequirementDeliveryService {
         runDao.save(run);
 
         try {
-            DeliveryResult result = doDeliver(requirement, plan);
+            DeliveryResult result = doDeliver(requirement, plan, useCurrentWorkspaceBranch);
             run.setState(RunState.SUCCEEDED);
             run.setTerminalReason(RunTerminalReason.SUCCEEDED);
             run.setFinishedDate(new java.util.Date());
@@ -101,6 +110,10 @@ public class RequirementDeliveryService {
             requirement.setDeliveryCommitHash(result.commitHash());
             requirement.setDeliveryTargetBranch(result.targetBranch());
             requirement.setDeliveryMrUrl(result.mrUrl());
+            requirement.setDeliveryMrIid(result.mrIid());
+            requirement.setDeliveryMrStatus(DeliveryMrStatus.OPEN);
+            requirement.setDeliveryMergedAt(null);
+            requirement.setDeliveryMergeCommitHash(null);
             requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
             requirementDao.save(requirement);
             com.changhong.onlinecode.entity.RequirementComment validationComment =
@@ -133,12 +146,16 @@ public class RequirementDeliveryService {
 
     @Transactional(rollbackFor = Exception.class)
     public Requirement retry(String requirementId) {
-        return submit(requirementId);
+        return submitAccepted(requirementId, false);
     }
 
     /** Manually submit the latest accepted plan without re-running development or acceptance. */
     @Transactional(rollbackFor = Exception.class)
     public Requirement submit(String requirementId) {
+        return submitAccepted(requirementId, true);
+    }
+
+    private Requirement submitAccepted(String requirementId, boolean useCurrentWorkspaceBranch) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
@@ -153,11 +170,12 @@ public class RequirementDeliveryService {
         }
         requirement.setAutomationStatus(RequirementAutomationStatus.DELIVERING);
         requirementDao.save(requirement);
-        deliver(requirementId, plan.getId(), TriggerSource.USER_ACTION);
+        deliver(requirementId, plan.getId(), TriggerSource.USER_ACTION, useCurrentWorkspaceBranch);
         return requirementDao.findOne(requirementId);
     }
 
-    private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan) throws Exception {
+    private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan,
+                                     boolean useCurrentWorkspaceBranch) throws Exception {
         String gitlabApiBaseUrl = configService.resolveGitlabApiBaseUrl(null);
         String gitlabToken = configService.resolveGitlabToken(null);
         String gitlabProjectId = configService.resolveGitlabProjectId(null);
@@ -167,11 +185,16 @@ public class RequirementDeliveryService {
                     "GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填，" +
                     "请通过环境变量 oc.gitlab.api-base-url / oc.gitlab.token / oc.gitlab.project-id 或平台配置页面设置");
         }
-        Path workspace = workspaceManager.resolveRequirementWorkspace(requirement.getProjectId(), requirement.getId());
-        String branch = branchName(requirement);
+        Path workspace = resolveDeliveryWorkspace(requirement, useCurrentWorkspaceBranch);
+        String branch = resolveSourceBranch(requirement, workspace, useCurrentWorkspaceBranch);
+        if (isBlank(branch)) {
+            throw new IllegalStateException("当前工作区处于 detached HEAD，无法作为 MR source branch");
+        }
         String targetBranch = gitlabTargetBranch;
 
-        runCommand(workspace, "git", "checkout", "-B", branch);
+        if (!useCurrentWorkspaceBranch) {
+            runCommand(workspace, "git", "checkout", "-B", branch);
+        }
         runCommand(workspace, "git", "add", ".");
         if (!runCommand(workspace, "git", "diff", "--cached", "--quiet").success()) {
             runCommand(workspace, "git", "commit", "-m", "feat: deliver requirement " + shortId(requirement.getId()));
@@ -223,7 +246,8 @@ public class RequirementDeliveryService {
         if (mrEffect.getStatus() == ExecutionEffectStatus.APPLIED
                 || mrEffect.getStatus() == ExecutionEffectStatus.CONFIRMED) {
             // 幂等复用已有 MR URL
-            return new DeliveryResult(branch, commitHash, targetBranch, mrEffect.getResultSnapshot(), false, changedFiles);
+            return new DeliveryResult(branch, commitHash, targetBranch, mrEffect.getResultSnapshot(),
+                    parseMrIid(mrEffect.getResultSnapshot()), false, changedFiles);
         }
 
         List<MergeRequest> opened = gitLabApi.getMergeRequestApi()
@@ -240,21 +264,124 @@ public class RequirementDeliveryService {
                     .updateMergeRequest(projectId, mr.getIid(), params);
             effectService.markApplied(mrEffect.getId(), updated.getWebUrl(), String.valueOf(mr.getIid()));
             effectService.markConfirmed(mrEffect.getId());
-            return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(), false, changedFiles);
+            return new DeliveryResult(branch, commitHash, targetBranch, updated.getWebUrl(),
+                    updated.getIid(), false, changedFiles);
         }
 
-        boolean closedOrMergedExists = gitLabApi.getMergeRequestApi()
-                .getMergeRequests(projectId).stream()
-                .anyMatch(mr -> branch.equals(mr.getSourceBranch()));
-        if (closedOrMergedExists) {
-            throw new IllegalStateException("该 source branch 已存在关闭或合并的 MR，首版交付不复用该分支");
+        if (!useCurrentWorkspaceBranch) {
+            boolean closedOrMergedExists = gitLabApi.getMergeRequestApi()
+                    .getMergeRequests(projectId).stream()
+                    .anyMatch(mr -> branch.equals(mr.getSourceBranch()));
+            if (closedOrMergedExists) {
+                throw new IllegalStateException("该 source branch 已存在关闭或合并的 MR，首版交付不复用该分支");
+            }
         }
 
         MergeRequest created = gitLabApi.getMergeRequestApi()
                 .createMergeRequest(projectId, branch, targetBranch, title, description, null);
         effectService.markApplied(mrEffect.getId(), created.getWebUrl(), String.valueOf(created.getIid()));
         effectService.markConfirmed(mrEffect.getId());
-        return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true, changedFiles);
+        return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(),
+                created.getIid(), true, changedFiles);
+    }
+
+    /** Query GitLab for the authoritative state of the requirement's latest MR. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public DeliveryMrStatus refreshMrStatus(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (isBlank(requirement.getDeliveryMrUrl())) {
+            requirement.setDeliveryMrStatus(DeliveryMrStatus.NOT_SUBMITTED);
+            requirementDao.save(requirement);
+            return DeliveryMrStatus.NOT_SUBMITTED;
+        }
+        Long iid = requirement.getDeliveryMrIid() == null
+                ? parseMrIid(requirement.getDeliveryMrUrl()) : requirement.getDeliveryMrIid();
+        if (iid == null) {
+            throw new IllegalStateException("无法从 MR 地址解析 IID: " + requirement.getDeliveryMrUrl());
+        }
+        String projectId = configService.resolveGitlabProjectId(null);
+        if (isBlank(projectId)) {
+            throw new IllegalStateException("GitLab projectId 未配置");
+        }
+        try {
+            MergeRequest mr = gitApi.client(null).getMergeRequestApi().getMergeRequest(projectId, iid);
+            DeliveryMrStatus previous = requirement.getDeliveryMrStatus();
+            DeliveryMrStatus current = mapMrStatus(mr.getState());
+            requirement.setDeliveryMrIid(iid);
+            requirement.setDeliveryMrStatus(current);
+            if (current == DeliveryMrStatus.MERGED) {
+                requirement.setDeliveryMergedAt(mr.getMergedAt() == null ? new Date() : mr.getMergedAt());
+                requirement.setDeliveryMergeCommitHash(mr.getMergeCommitSha());
+                if (requirement.getStatus() == RequirementStatus.PRD_CONFIRMED) {
+                    requirement.setStatus(RequirementStatus.WAITING_FEEDBACK);
+                }
+            }
+            requirementDao.save(requirement);
+            if (current == DeliveryMrStatus.MERGED && previous != DeliveryMrStatus.MERGED) {
+                requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
+                        RequirementCommentAuthorType.SYSTEM, "gitlab", RequirementCommentType.MR_MERGED,
+                        "GitLab MR 已合并：" + requirement.getDeliveryMrUrl(),
+                        toJson(Map.of("mrIid", iid, "mergeCommitHash",
+                                Objects.toString(mr.getMergeCommitSha(), ""))));
+            }
+            return current;
+        } catch (Exception e) {
+            throw new IllegalStateException("查询 GitLab MR 状态失败: " + e.getMessage(), e);
+        }
+    }
+
+    private DeliveryMrStatus mapMrStatus(String state) {
+        if (state == null) {
+            return DeliveryMrStatus.OPEN;
+        }
+        return switch (state.trim().toLowerCase()) {
+            case "merged" -> DeliveryMrStatus.MERGED;
+            case "closed" -> DeliveryMrStatus.CLOSED;
+            default -> DeliveryMrStatus.OPEN;
+        };
+    }
+
+    private Long parseMrIid(String mrUrl) {
+        if (isBlank(mrUrl)) {
+            return null;
+        }
+        String path = java.net.URI.create(mrUrl.trim()).getPath();
+        String[] parts = path == null ? new String[0] : path.split("/");
+        for (int i = parts.length - 1; i >= 0; i--) {
+            if (!parts[i].isBlank()) {
+                try {
+                    return Long.valueOf(parts[i]);
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Path resolveDeliveryWorkspace(Requirement requirement, boolean useCurrentWorkspaceBranch) {
+        if (!useCurrentWorkspaceBranch) {
+            return workspaceManager.resolveRequirementWorkspace(requirement.getProjectId(), requirement.getId());
+        }
+        RequirementWorkspace workspace = requirementWorkspaceDao
+                .findByProjectIdAndRequirementId(requirement.getProjectId(), requirement.getId())
+                .orElseThrow(() -> new IllegalStateException("需求工作区不存在，请先刷新工作区"));
+        if (isBlank(workspace.getWorkspacePath())) {
+            throw new IllegalStateException("需求工作区路径为空，请先刷新工作区");
+        }
+        Path path = Path.of(workspace.getWorkspacePath()).toAbsolutePath().normalize();
+        if (!Files.isDirectory(path)) {
+            throw new IllegalStateException("需求工作区不存在: " + path);
+        }
+        return path;
+    }
+
+    private String resolveSourceBranch(Requirement requirement, Path workspace,
+                                       boolean useCurrentWorkspaceBranch) {
+        return useCurrentWorkspaceBranch ? workspaceManager.getCurrentBranch(workspace) : branchName(requirement);
     }
 
     private String resolveDeliveryTargetBranch(Requirement requirement) {
@@ -413,7 +540,7 @@ public class RequirementDeliveryService {
     }
 
     private record DeliveryResult(String branch, String commitHash, String targetBranch, String mrUrl,
-                                  boolean created, List<String> changedFiles) {
+                                  Long mrIid, boolean created, List<String> changedFiles) {
     }
 
     private record CommandResult(int exitCode, String stdout, Duration duration) {

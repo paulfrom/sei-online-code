@@ -1,4 +1,4 @@
-/** 评论输入：活跃需求增量修订，已完成需求确认创建变更 loop。 */
+/** 评论输入：活跃需求增量修订，已交付 Loop 可创建变更；终态需求需先重新打开。 */
 import React, { useState } from 'react';
 import { Alert, Button, Modal } from '@ead/suid';
 import {
@@ -45,7 +45,8 @@ const CommentComposer = ({
 }) => {
   const [content, setContent] = useState('');
   const { warning, completed, dangerous } = resolveMode(requirement.automationStatus);
-  const canSend = content.trim().length > 0 && !sending;
+  const requirementCompleted = requirement.status === 'COMPLETED';
+  const canSend = content.trim().length > 0 && !sending && !requirementCompleted;
 
   const doSend = async (next) => {
     try {
@@ -75,17 +76,17 @@ const CommentComposer = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {warning && (
+      {(warning || requirementCompleted) && (
         <Alert
           type={completed ? 'warning' : 'info'}
           showIcon
-          message={warning}
+          message={requirementCompleted ? '需求已完成，请先在交付页重新打开需求。' : warning}
         />
       )}
       <MarkdownEditor
         value={content}
         onChange={setContent}
-        placeholder="输入评论（支持 Markdown）…"
+        placeholder={requirementCompleted ? '需求已完成，请先重新打开' : '输入评论（支持 Markdown）…'}
         split={false}
         height="auto"
       />

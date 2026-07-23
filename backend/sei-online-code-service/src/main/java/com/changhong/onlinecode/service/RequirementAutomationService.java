@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
@@ -25,6 +26,7 @@ import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
+import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
 import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
 import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
@@ -73,6 +75,7 @@ public class RequirementAutomationService {
     private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
     private final TaskDeliveryReviewService taskDeliveryReviewService;
     private final OcConfig ocConfig;
+    private final WorkspaceLeaseService workspaceLeaseService;
 
 
     /**
@@ -100,6 +103,9 @@ public class RequirementAutomationService {
         if (requirement.getStatus() == RequirementStatus.PRD_GENERATING) {
             throw new IllegalStateException("PRD 生成中，暂不允许发送评论");
         }
+        if (requirement.getStatus() == RequirementStatus.COMPLETED) {
+            throw new IllegalStateException("需求已完成，请先重新打开需求");
+        }
         RequirementComment comment = appendComment(requirementId, requirement.getActiveLoopId(),
                 RequirementCommentAuthorType.HUMAN, "human", RequirementCommentType.HUMAN_FEEDBACK,
                 content, metadataJson);
@@ -112,10 +118,29 @@ public class RequirementAutomationService {
                 fallbackToLegacyCommentReplan(requirement, comment);
             }
         } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.COMPLETED) {
+            DeliveryMrStatus mrStatus = refreshMrStatusOrCurrent(requirement);
+            if (mrStatus == DeliveryMrStatus.MERGED) {
+                if (!syncWorkspaceBeforeNextLoop(requirement)) {
+                    return comment;
+                }
+                String loopId = prepareLoop(requirement);
+                TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
+                        ExecutionPlanType.CHANGE_REQUEST,
+                        "MR 已合并且工作区已同步，启动 CHANGE_REQUEST loop。"));
+            } else {
+                requirement.setAutomationStatus(RequirementAutomationStatus.DEVELOPING);
+                requirementDao.save(requirement);
+                requestIncrementalRevision(requirement, comment);
+            }
+        } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.WAITING_HUMAN
+                && refreshMrStatusOrCurrent(requirement) == DeliveryMrStatus.MERGED) {
+            if (!syncWorkspaceBeforeNextLoop(requirement)) {
+                return comment;
+            }
             String loopId = prepareLoop(requirement);
             TransactionUtil.afterCommit(() -> dispatchPreparedLoop(requirementId, loopId,
                     ExecutionPlanType.CHANGE_REQUEST,
-                    "已完成需求收到人类评论，启动 CHANGE_REQUEST loop。"));
+                    "人工处理后工作区同步完成，启动 CHANGE_REQUEST loop。"));
         } else if (requirement.getAutomationStatus() == RequirementAutomationStatus.FAILED
                 && isIncrementalCommentRevisionEnabled()
                 && canReviseCurrentLoop(requirement)) {
@@ -147,6 +172,121 @@ public class RequirementAutomationService {
 
     private boolean isIncrementalCommentRevisionEnabled() {
         return ocConfig.isIncrementalCommentRevisionEnabled();
+    }
+
+    private DeliveryMrStatus refreshMrStatusOrCurrent(Requirement requirement) {
+        try {
+            DeliveryMrStatus refreshed = requirementDeliveryService.refreshMrStatus(requirement.getId());
+            requirement.setDeliveryMrStatus(refreshed);
+            if (refreshed == DeliveryMrStatus.MERGED
+                    && requirement.getStatus() == RequirementStatus.PRD_CONFIRMED) {
+                requirement.setStatus(RequirementStatus.WAITING_FEEDBACK);
+            }
+            return refreshed;
+        } catch (RuntimeException exception) {
+            LOGGER.warn("refresh MR status failed; use persisted state requirementId={}",
+                    requirement.getId(), exception);
+            return requirement.getDeliveryMrStatus() == null
+                    ? DeliveryMrStatus.NOT_SUBMITTED : requirement.getDeliveryMrStatus();
+        }
+    }
+
+    /**
+     * 用户确认整个需求完成。
+     *
+     * <p>MR 合并只代表当前 Loop 已交付。整个需求只有在没有运行中任务和计划修订，
+     * 且需求工作区成功同步合并后的基线时，才进入终态。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Requirement confirmCompletion(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (requirement.getStatus() == RequirementStatus.COMPLETED) {
+            return requirement;
+        }
+        if (requirement.getAutomationStatus() != RequirementAutomationStatus.COMPLETED) {
+            throw new IllegalStateException("当前 Loop 尚未完成，不能确认整个需求完成");
+        }
+        RequirementRevisionState revisionState = requirement.getRevisionState();
+        if (revisionState != null && revisionState != RequirementRevisionState.NONE) {
+            throw new IllegalStateException("当前 Loop 仍有计划修订待处理，不能确认需求完成");
+        }
+        List<Run> runningRuns = runDao.findByRequirementIdAndState(requirementId, RunState.RUNNING);
+        if (runningRuns != null && !runningRuns.isEmpty()) {
+            throw new IllegalStateException("当前仍有运行中的任务，不能确认需求完成");
+        }
+        DeliveryMrStatus mrStatus = requirementDeliveryService.refreshMrStatus(requirementId);
+        requirement.setDeliveryMrStatus(mrStatus);
+        if (mrStatus == DeliveryMrStatus.MERGED
+                && requirement.getStatus() == RequirementStatus.PRD_CONFIRMED) {
+            requirement.setStatus(RequirementStatus.WAITING_FEEDBACK);
+        }
+        if (mrStatus != DeliveryMrStatus.MERGED) {
+            throw new IllegalStateException("当前交付 MR 尚未合并，不能确认需求完成");
+        }
+
+        WorkspaceLeaseService.WorkspaceRefreshResult synced =
+                workspaceLeaseService.synchronizeWorkspace(requirementId);
+        requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
+                RequirementCommentAuthorType.SYSTEM, "workspace", RequirementCommentType.WORKSPACE_SYNCED,
+                "完成需求前已更新基线分支 " + synced.baseBranch()
+                        + " 并合并到需求分支 " + synced.branchName(),
+                workspaceSyncMetadata(synced));
+
+        requirement.setStatus(RequirementStatus.COMPLETED);
+        if (requirement.getAcceptedAt() == null) {
+            requirement.setAcceptedAt(new Date());
+        }
+        if (requirement.getAcceptedByAgent() == null || requirement.getAcceptedByAgent().isBlank()) {
+            requirement.setAcceptedByAgent("user");
+        }
+        requirementDao.save(requirement);
+        requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
+                RequirementCommentAuthorType.SYSTEM, "user",
+                RequirementCommentType.REQUIREMENT_COMPLETED,
+                "用户已确认整个需求完成。", null);
+        return requirement;
+    }
+
+    /** 将已完成需求恢复为待反馈状态；新 Loop 由下一条用户评论触发。 */
+    @Transactional(rollbackFor = Exception.class)
+    public Requirement reopen(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        if (requirement.getStatus() != RequirementStatus.COMPLETED) {
+            throw new IllegalStateException("仅已完成需求可以重新打开");
+        }
+        requirement.setStatus(RequirementStatus.WAITING_FEEDBACK);
+        requirementDao.save(requirement);
+        requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
+                RequirementCommentAuthorType.SYSTEM, "user",
+                RequirementCommentType.REQUIREMENT_REOPENED,
+                "用户已重新打开需求，下一条评论将启动新的变更 Loop。", null);
+        return requirement;
+    }
+
+    private boolean syncWorkspaceBeforeNextLoop(Requirement requirement) {
+        try {
+            WorkspaceLeaseService.WorkspaceRefreshResult synced =
+                    workspaceLeaseService.synchronizeWorkspace(requirement.getId());
+            requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
+                    RequirementCommentAuthorType.SYSTEM, "workspace", RequirementCommentType.WORKSPACE_SYNCED,
+                    "已更新基线分支 " + synced.baseBranch() + " 并合并到需求分支 " + synced.branchName(),
+                    workspaceSyncMetadata(synced));
+            return true;
+        } catch (RuntimeException exception) {
+            requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
+            requirementDao.save(requirement);
+            requirementCommentService.append(requirement.getId(), requirement.getActiveLoopId(),
+                    RequirementCommentAuthorType.SYSTEM, "workspace",
+                    RequirementCommentType.WORKSPACE_SYNC_FAILED,
+                    "基线分支同步失败，未启动新 Loop：" + exception.getMessage(), null);
+            return false;
+        }
     }
 
     private void fallbackToLegacyCommentReplan(Requirement requirement, RequirementComment comment) {
@@ -467,7 +607,16 @@ public class RequirementAutomationService {
     private String prepareLoop(Requirement requirement) {
         String loopId = newLoopId();
         requirement.setActiveLoopId(loopId);
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
         requirement.setAutomationStatus(RequirementAutomationStatus.PLANNING);
+        requirement.setDeliveryBranch(null);
+        requirement.setDeliveryCommitHash(null);
+        requirement.setDeliveryTargetBranch(null);
+        requirement.setDeliveryMrUrl(null);
+        requirement.setDeliveryMrIid(null);
+        requirement.setDeliveryMrStatus(DeliveryMrStatus.NOT_SUBMITTED);
+        requirement.setDeliveryMergedAt(null);
+        requirement.setDeliveryMergeCommitHash(null);
         requirementDao.save(requirement);
         return loopId;
     }
@@ -700,6 +849,16 @@ public class RequirementAutomationService {
                     "findings", result.findings() == null ? List.of() : result.findings()));
         } catch (Exception e) {
             return "{\"accepted\":" + accepted + "}";
+        }
+    }
+
+    private String workspaceSyncMetadata(WorkspaceLeaseService.WorkspaceRefreshResult synced) {
+        try {
+            return JsonUtils.mapper().writeValueAsString(Map.of(
+                    "baseCommit", Objects.toString(synced.baseCommit(), ""),
+                    "currentHead", Objects.toString(synced.currentHead(), "")));
+        } catch (Exception e) {
+            return null;
         }
     }
 

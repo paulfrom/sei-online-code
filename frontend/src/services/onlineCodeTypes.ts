@@ -9,6 +9,8 @@ export type RequirementStatus =
   | 'PRD_GENERATING'
   | 'PRD_REVIEW'
   | 'PRD_CONFIRMED'
+  | 'WAITING_FEEDBACK'
+  | 'COMPLETED'
   | 'FAILED';
 
 export type RequirementAutomationStatus =
@@ -22,6 +24,8 @@ export type RequirementRevisionState =
   | 'PLANNING'
   | 'APPLYING'
   | 'FAILED';
+
+export type DeliveryMrStatus = 'NOT_SUBMITTED' | 'OPEN' | 'MERGED' | 'CLOSED';
 
 /** A product requirement document attached to a project. */
 export interface RequirementDto {
@@ -47,6 +51,10 @@ export interface RequirementDto {
   deliveryBranch?: string | null;
   deliveryCommitHash?: string | null;
   deliveryMrUrl?: string | null;
+  deliveryMrIid?: number | null;
+  deliveryMrStatus?: DeliveryMrStatus | null;
+  deliveryMergedAt?: string | null;
+  deliveryMergeCommitHash?: string | null;
   deliveryTargetBranch?: string | null;
   failureSummary?: string | null;
   createdDate: string;

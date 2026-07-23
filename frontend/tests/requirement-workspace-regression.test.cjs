@@ -147,13 +147,19 @@ test('accepted delivery can be submitted manually after refreshing workspace fac
   const delivery = read('src/pages/OnlineCode/components/RequirementWorkspace/DeliveryTab.jsx');
 
   assert.match(service, /requirement\/\$\{id\}\/workspace\/refresh/);
+  assert.match(service, /requirement\/\$\{id\}\/workspace\/sync/);
   assert.match(service, /requirement\/\$\{id\}\/mr\/submit/);
   assert.match(hook, /refreshRequirementWorkspace\(requirementId\)/);
+  assert.match(hook, /syncRequirementWorkspace\(requirementId\)/);
   assert.match(hook, /submitMr\(requirementId\)/);
   assert.match(container, /executionPlan\?\.status === 'ACCEPTED'/);
   assert.match(container, /requirement\.automationStatus !== 'DELIVERING'/);
   assert.match(delivery, /刷新工作区/);
   assert.match(delivery, /手动提交交付物/);
+  assert.match(delivery, /工作区当前分支上的修改/);
+  assert.match(delivery, /不会切换分支/);
+  assert.match(delivery, /同步主分支/);
+  assert.match(delivery, /发生合并冲突时不会启动新的 Loop/);
   assert.match(delivery, /workspaceStatus\.changedFiles\?\.length/);
 });
 
@@ -165,4 +171,27 @@ test('project settings persist workspace base and delivery target branches', () 
     assert.match(source, /workspaceBaseBranch/);
     assert.match(source, /deliveryTargetBranch/);
   }
+});
+
+test('requirement completion is explicit, merge-gated, and reversible before the next loop', () => {
+  const service = read('src/services/requirement.js');
+  const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
+  const container = read('src/pages/OnlineCode/components/RequirementWorkspace/index.tsx');
+  const delivery = read('src/pages/OnlineCode/components/RequirementWorkspace/DeliveryTab.jsx');
+  const composer = read('src/pages/OnlineCode/components/RequirementWorkspace/CommentComposer.jsx');
+  const types = read('src/services/onlineCodeTypes.ts');
+
+  assert.match(service, /requirement\/\$\{id\}\/confirmCompletion/);
+  assert.match(service, /requirement\/\$\{id\}\/reopen/);
+  assert.match(hook, /confirmRequirementCompletion\(requirementId\)/);
+  assert.match(hook, /reopenRequirementRequest\(requirementId\)/);
+  assert.match(container, /onConfirmCompletion=\{actions\.confirmCompletion\}/);
+  assert.match(container, /onReopenRequirement=\{actions\.reopenRequirement\}/);
+  assert.match(delivery, /完成需求/);
+  assert.match(delivery, /重新打开需求/);
+  assert.match(delivery, /校验 MR 已合并、没有运行中任务或计划修订/);
+  assert.match(composer, /requirement\.status === 'COMPLETED'/);
+  assert.match(composer, /请先在交付页重新打开需求/);
+  assert.match(types, /WAITING_FEEDBACK/);
+  assert.match(types, /COMPLETED/);
 });

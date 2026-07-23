@@ -21,7 +21,11 @@ export type RequirementAutomationStatus =
 export type RequirementRevisionState =
   | 'NONE' | 'PENDING' | 'SNAPSHOTTING' | 'PLANNING' | 'APPLYING' | 'FAILED';
 
-export type RequirementStatus = 'PRD_GENERATING' | 'PRD_REVIEW' | 'PRD_CONFIRMED' | 'FAILED';
+export type DeliveryMrStatus = 'NOT_SUBMITTED' | 'OPEN' | 'MERGED' | 'CLOSED';
+
+export type RequirementStatus =
+  | 'PRD_GENERATING' | 'PRD_REVIEW' | 'PRD_CONFIRMED'
+  | 'WAITING_FEEDBACK' | 'COMPLETED' | 'FAILED';
 
 export interface RequirementDto {
   id: string; projectId: string; title: string; description?: string | null;
@@ -36,6 +40,8 @@ export interface RequirementDto {
   acceptedAt?: string | null; acceptedByAgent?: string | null;
   deliveryBranch?: string | null; deliveryCommitHash?: string | null;
   deliveryMrUrl?: string | null; deliveryTargetBranch?: string | null;
+  deliveryMrIid?: number | null; deliveryMrStatus?: DeliveryMrStatus | null;
+  deliveryMergedAt?: string | null; deliveryMergeCommitHash?: string | null;
   failureSummary?: string | null; createdDate: string; lastEditedDate: string;
 }
 
@@ -44,7 +50,9 @@ export type RequirementCommentAuthorType =
 export type RequirementCommentType =
   | 'HUMAN_FEEDBACK' | 'EXECUTION_PLAN' | 'DEV_RESULT' | 'VALIDATION_RESULT'
   | 'ACCEPTANCE' | 'REMEDIATION' | 'INTERRUPTION' | 'FAILURE'
-  | 'MR_CREATED' | 'MR_UPDATED' | 'MR_FAILED'
+  | 'MR_CREATED' | 'MR_UPDATED' | 'MR_MERGED' | 'MR_FAILED'
+  | 'WORKSPACE_SYNCED' | 'WORKSPACE_SYNC_FAILED'
+  | 'REQUIREMENT_COMPLETED' | 'REQUIREMENT_REOPENED'
   | 'MEMORY_UPDATED' | 'MEMORY_UPDATE_FAILED' | 'CONTEXT_SUMMARY_FAILED';
 
 export interface RequirementCommentDto {
@@ -215,9 +223,12 @@ export interface RunTabProps {
 }
 
 export interface DeliveryTabProps {
+  requirement: RequirementDto;
   delivery: DeliverySummary;
   comments: RequirementCommentDto[];
   onRetryMr: () => Promise<void>;
+  onConfirmCompletion: () => Promise<void>;
+  onReopenRequirement: () => Promise<void>;
 }
 
 export interface RunLogDrawerProps {

@@ -43,11 +43,17 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     ResultData<RequirementDto> confirmPrd(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/confirmCompletion")
-    @Operation(summary = "确认需求完成", description = "用户确认需求完成后清理该需求工作区")
+    @Operation(summary = "确认需求完成",
+            description = "仅当当前 Loop 已完成、MR 已合并且工作区同步成功时确认整个需求完成")
     ResultData<RequirementDto> confirmCompletion(@PathVariable("id") String id);
 
+    @PostMapping(path = "{id}/reopen")
+    @Operation(summary = "重新打开需求", description = "将已完成需求恢复为待反馈状态；后续评论将开启新的 CHANGE_REQUEST Loop")
+    ResultData<RequirementDto> reopen(@PathVariable("id") String id);
+
     @PostMapping(path = "{id}/comments", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "追加 Requirement 评论", description = "活跃需求在当前 loop 内增量修订计划；已完成需求会启动 CHANGE_REQUEST loop")
+    @Operation(summary = "追加 Requirement 评论",
+            description = "活跃需求在当前 Loop 内增量修订；待反馈需求同步工作区后启动 CHANGE_REQUEST Loop；完成态需先重新打开")
     ResultData<RequirementCommentDto> addComment(@PathVariable("id") String id,
                                                  @RequestBody @Valid CreateRequirementCommentRequest request);
 
@@ -66,6 +72,11 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     @PostMapping(path = "{id}/workspace/refresh")
     @Operation(summary = "刷新需求工作区状态", description = "读取并记录物理工作区的分支、HEAD 与未提交文件，不执行 reset/rebase")
     ResultData<RequirementWorkspaceStatusDto> refreshWorkspace(@PathVariable("id") String id);
+
+    @PostMapping(path = "{id}/workspace/sync")
+    @Operation(summary = "同步需求工作区基线",
+            description = "更新项目配置的基线分支，并将其合并到需求工作区当前分支；不会切换当前分支")
+    ResultData<RequirementWorkspaceStatusDto> syncWorkspace(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/resume")
     @Operation(summary = "恢复当前执行计划",

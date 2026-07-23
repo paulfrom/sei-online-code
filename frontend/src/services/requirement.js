@@ -33,6 +33,14 @@ export async function confirmPrd(id) {
   return request({ url: `${API}/requirement/${id}/confirmPrd`, method: 'POST' });
 }
 
+export async function confirmRequirementCompletion(id) {
+  return request({ url: `${API}/requirement/${id}/confirmCompletion`, method: 'POST' });
+}
+
+export async function reopenRequirement(id) {
+  return request({ url: `${API}/requirement/${id}/reopen`, method: 'POST' });
+}
+
 export async function addRequirementComment(id, { content, metadataJson }) {
   return request({
     url: `${API}/requirement/${id}/comments`,
@@ -55,6 +63,13 @@ export async function submitMr(id) {
 
 export async function refreshRequirementWorkspace(id) {
   return request({ url: `${API}/requirement/${id}/workspace/refresh`, method: 'POST' });
+}
+
+export async function syncRequirementWorkspace(id) {
+  return request({
+    url: `${API}/requirement/${id}/workspace/sync`,
+    method: 'POST',
+  });
 }
 
 export async function resumeRequirementAutomation(id) {

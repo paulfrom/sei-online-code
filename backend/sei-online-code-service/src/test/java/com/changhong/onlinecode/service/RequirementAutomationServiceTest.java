@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
@@ -26,6 +27,7 @@ import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
 import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraph;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
+import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -36,12 +38,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -75,6 +79,7 @@ class RequirementAutomationServiceTest {
     private PlanRevisionStateService revisionStateService;
     private EffectiveTaskGraphResolver effectiveTaskGraphResolver;
     private OcConfig ocConfig;
+    private WorkspaceLeaseService workspaceLeaseService;
     private RequirementAutomationService service;
     private List<ExecutionPlanStatus> capturedPlanStatuses;
 
@@ -99,6 +104,7 @@ class RequirementAutomationServiceTest {
         // 默认：所有任务交付审阅已结算，允许进入计划级验收。针对门禁的专门测试可在用例内覆盖。
         when(taskDeliveryReviewService.allReviewsSettled(anyString(), anyString())).thenReturn(true);
         ocConfig = mock(OcConfig.class);
+        workspaceLeaseService = mock(WorkspaceLeaseService.class);
         when(ocConfig.isIncrementalCommentRevisionEnabled()).thenReturn(true);
         capturedPlanStatuses = new ArrayList<>();
 
@@ -106,7 +112,8 @@ class RequirementAutomationServiceTest {
                 executionPlanDao, requirementCommentService, requirementDesignContextService,
                 runDao, requirementDeliveryService, pmAgentClient, agentExecutionService,
                 failureInfoSupport, revisionStateService,
-                effectiveTaskGraphResolver, taskDeliveryReviewService, ocConfig);
+                effectiveTaskGraphResolver, taskDeliveryReviewService, ocConfig,
+                workspaceLeaseService);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionStateService.request(any(), any(), any())).thenReturn(1L);
@@ -432,6 +439,144 @@ class RequirementAutomationServiceTest {
     }
 
     @Test
+    void completedRequirementWithOpenMr_revisesCurrentLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-open-mr");
+        requirement.setProjectId("project-1");
+        requirement.setActiveLoopId("loop-current");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-open-mr")).thenReturn(requirement);
+        when(requirementDeliveryService.refreshMrStatus("req-open-mr")).thenReturn(DeliveryMrStatus.OPEN);
+
+        service.handleHumanComment("req-open-mr", "继续调整当前提交", null);
+
+        assertEquals("loop-current", requirement.getActiveLoopId());
+        assertEquals(RequirementAutomationStatus.DEVELOPING, requirement.getAutomationStatus());
+        verify(revisionStateService).request(eq("req-open-mr"), eq("loop-current"), any());
+        verify(workspaceLeaseService, never()).synchronizeWorkspace(anyString());
+    }
+
+    @Test
+    void completedRequirementWithMergedMr_syncsWorkspaceBeforeCreatingNextLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-merged-mr");
+        requirement.setProjectId("project-1");
+        requirement.setActiveLoopId("loop-completed");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        requirement.setDeliveryMrStatus(DeliveryMrStatus.MERGED);
+        when(requirementDao.findOne("req-merged-mr")).thenReturn(requirement);
+        when(requirementDeliveryService.refreshMrStatus("req-merged-mr")).thenReturn(DeliveryMrStatus.MERGED);
+        when(workspaceLeaseService.synchronizeWorkspace("req-merged-mr"))
+                .thenReturn(new WorkspaceLeaseService.WorkspaceRefreshResult(
+                        "/tmp/workspace", "feature/current", "main", "main",
+                        "base-head", "merged-head", false, List.of(), new Date()));
+
+        service.handleHumanComment("req-merged-mr", "开启下一轮变更", null);
+
+        verify(workspaceLeaseService).synchronizeWorkspace("req-merged-mr");
+        assertTrue(!"loop-completed".equals(requirement.getActiveLoopId()));
+        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
+        assertEquals(DeliveryMrStatus.NOT_SUBMITTED, requirement.getDeliveryMrStatus());
+        verify(revisionStateService, never()).request(any(), any(), any());
+    }
+
+    @Test
+    void completedRequirementWithMergedMr_doesNotCreateLoopWhenWorkspaceSyncFails() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-sync-failed");
+        requirement.setProjectId("project-1");
+        requirement.setActiveLoopId("loop-completed");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-sync-failed")).thenReturn(requirement);
+        when(requirementDeliveryService.refreshMrStatus("req-sync-failed")).thenReturn(DeliveryMrStatus.MERGED);
+        when(workspaceLeaseService.synchronizeWorkspace("req-sync-failed"))
+                .thenThrow(new IllegalStateException("merge conflict"));
+
+        service.handleHumanComment("req-sync-failed", "下一轮", null);
+
+        assertEquals("loop-completed", requirement.getActiveLoopId());
+        assertEquals(RequirementAutomationStatus.WAITING_HUMAN, requirement.getAutomationStatus());
+        verify(eventPublisher, never()).publishEvent(any(RequirementAutomationLoopEvent.class));
+    }
+
+    @Test
+    void confirmCompletion_requiresMergedMrAndSynchronizedWorkspace() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-complete");
+        requirement.setProjectId("project-1");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setActiveLoopId("loop-complete");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-complete")).thenReturn(requirement);
+        when(runDao.findByRequirementIdAndState("req-complete", RunState.RUNNING)).thenReturn(List.of());
+        when(requirementDeliveryService.refreshMrStatus("req-complete")).thenReturn(DeliveryMrStatus.MERGED);
+        when(workspaceLeaseService.synchronizeWorkspace("req-complete"))
+                .thenReturn(new WorkspaceLeaseService.WorkspaceRefreshResult(
+                        "/tmp/workspace", "feature/current", "main", "main",
+                        "base-head", "merged-head", false, List.of(), new Date()));
+
+        Requirement completed = service.confirmCompletion("req-complete");
+
+        assertEquals(RequirementStatus.COMPLETED, completed.getStatus());
+        assertNotNull(completed.getAcceptedAt());
+        verify(workspaceLeaseService).synchronizeWorkspace("req-complete");
+        verify(requirementCommentService).append(eq("req-complete"), eq("loop-complete"),
+                eq(RequirementCommentAuthorType.SYSTEM), eq("user"),
+                eq(RequirementCommentType.REQUIREMENT_COMPLETED), any(), eq(null));
+    }
+
+    @Test
+    void confirmCompletion_rejectsUnmergedMr() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-unmerged");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-unmerged")).thenReturn(requirement);
+        when(runDao.findByRequirementIdAndState("req-unmerged", RunState.RUNNING)).thenReturn(List.of());
+        when(requirementDeliveryService.refreshMrStatus("req-unmerged")).thenReturn(DeliveryMrStatus.OPEN);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.confirmCompletion("req-unmerged"));
+
+        assertTrue(exception.getMessage().contains("MR 尚未合并"));
+        verify(workspaceLeaseService, never()).synchronizeWorkspace(anyString());
+    }
+
+    @Test
+    void reopenCompletedRequirement_waitsForNextCommentToCreateLoop() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-reopen");
+        requirement.setStatus(RequirementStatus.COMPLETED);
+        requirement.setActiveLoopId("loop-delivered");
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-reopen")).thenReturn(requirement);
+
+        Requirement reopened = service.reopen("req-reopen");
+
+        assertEquals(RequirementStatus.WAITING_FEEDBACK, reopened.getStatus());
+        assertEquals("loop-delivered", reopened.getActiveLoopId());
+        verify(requirementCommentService).append(eq("req-reopen"), eq("loop-delivered"),
+                eq(RequirementCommentAuthorType.SYSTEM), eq("user"),
+                eq(RequirementCommentType.REQUIREMENT_REOPENED), any(), eq(null));
+        verify(eventPublisher, never()).publishEvent(any(RequirementAutomationLoopEvent.class));
+    }
+
+    @Test
+    void completedRequirement_rejectsCommentsUntilReopened() {
+        Requirement requirement = new Requirement();
+        requirement.setId("req-closed");
+        requirement.setStatus(RequirementStatus.COMPLETED);
+        requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
+        when(requirementDao.findOne("req-closed")).thenReturn(requirement);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.handleHumanComment("req-closed", "继续修改", null));
+
+        assertTrue(exception.getMessage().contains("先重新打开"));
+        verify(requirementCommentService, never()).append(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void stopAutomation_interruptsPlanCancelsRunsAndInvalidatesLoop() {
         Requirement requirement = new Requirement();
         requirement.setId("req-stop");
@@ -509,7 +654,7 @@ class RequirementAutomationServiceTest {
     }
 
     @Test
-    void humanComment_completedRequirementRetainsNewLoopBehavior() {
+    void humanComment_completedRequirementWithoutMergedMrRevisesCurrentLoop() {
         Requirement requirement = new Requirement();
         requirement.setId("req-completed");
         requirement.setActiveLoopId("loop-completed");
@@ -518,10 +663,10 @@ class RequirementAutomationServiceTest {
 
         service.handleHumanComment("req-completed", "增加导出功能", null);
 
-        assertTrue(!"loop-completed".equals(requirement.getActiveLoopId()));
-        assertEquals(RequirementAutomationStatus.PLANNING, requirement.getAutomationStatus());
-        verify(revisionStateService, never()).request(any(), any(), any());
-        verify(eventPublisher).publishEvent(any(RequirementAutomationLoopEvent.class));
+        assertEquals("loop-completed", requirement.getActiveLoopId());
+        assertEquals(RequirementAutomationStatus.DEVELOPING, requirement.getAutomationStatus());
+        verify(revisionStateService).request(eq("req-completed"), eq("loop-completed"), any());
+        verify(eventPublisher).publishEvent(any(PlanRevisionRequestedEvent.class));
     }
 
     @Test

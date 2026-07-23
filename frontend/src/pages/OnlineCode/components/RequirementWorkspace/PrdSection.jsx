@@ -42,6 +42,8 @@ const STATUS_META = {
   PRD_GENERATING: { color: 'processing', label: 'PRD 生成中' },
   PRD_REVIEW: { color: 'gold', label: 'PRD 待确认' },
   PRD_CONFIRMED: { color: 'green', label: 'PRD 已确认' },
+  WAITING_FEEDBACK: { color: 'blue', label: '等待反馈' },
+  COMPLETED: { color: 'green', label: '需求已完成' },
   FAILED: { color: 'error', label: '失败' },
 };
 

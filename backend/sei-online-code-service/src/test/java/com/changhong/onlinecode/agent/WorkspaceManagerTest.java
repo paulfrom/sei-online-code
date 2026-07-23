@@ -476,6 +476,44 @@ class WorkspaceManagerTest {
                 .contains("package com.demo.customized;"));
     }
 
+    @Test
+    void syncBaseBranch_updatesMainAndMergesItIntoCurrentFeatureBranch(@TempDir Path tempDir) throws Exception {
+        Path remote = tempDir.resolve("remote");
+        Files.createDirectories(remote);
+        runGit(remote, "init", "-b", "main");
+        runGit(remote, "config", "user.email", "test@example.com");
+        runGit(remote, "config", "user.name", "tester");
+        Files.writeString(remote.resolve("base.txt"), "base-v1");
+        runGit(remote, "add", ".");
+        runGit(remote, "commit", "-m", "base v1");
+
+        Path workspace = tempDir.resolve("workspace");
+        runGit(tempDir, "clone", remote.toUri().toString(), workspace.toString());
+        runGit(workspace, "config", "user.email", "test@example.com");
+        runGit(workspace, "config", "user.name", "tester");
+        runGit(workspace, "checkout", "-b", "feature/custom");
+        Files.writeString(workspace.resolve("feature.txt"), "feature");
+        runGit(workspace, "add", ".");
+        runGit(workspace, "commit", "-m", "feature change");
+
+        Files.writeString(remote.resolve("base.txt"), "base-v2");
+        Files.writeString(remote.resolve("main-only.txt"), "main update");
+        runGit(remote, "add", ".");
+        runGit(remote, "commit", "-m", "base v2");
+        String expectedBaseHead = runGit(remote, "rev-parse", "HEAD").trim();
+
+        ConfigService configService = mock(ConfigService.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(null, configService, new ScaffoldGenerator());
+        WorkspaceManager.WorkspaceSyncResult result = workspaceManager.syncBaseBranch(workspace, "main");
+
+        assertEquals("feature/custom", result.branchName());
+        assertEquals("feature/custom", runGit(workspace, "branch", "--show-current").trim());
+        assertEquals(expectedBaseHead, result.baseHead());
+        assertEquals(expectedBaseHead, runGit(workspace, "rev-parse", "main").trim());
+        assertEquals("main update", Files.readString(workspace.resolve("main-only.txt")));
+        assertEquals("feature", Files.readString(workspace.resolve("feature.txt")));
+    }
+
     private String runGit(Path dir, String... args) throws Exception {
         List<String> command = new java.util.ArrayList<>();
         command.add("git");

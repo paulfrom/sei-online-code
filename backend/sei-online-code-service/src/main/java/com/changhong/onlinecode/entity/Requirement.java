@@ -2,6 +2,7 @@ package com.changhong.onlinecode.entity;
 
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
@@ -138,6 +139,19 @@ public class Requirement extends BaseAuditableEntity {
 
     @Column(name = "delivery_mr_url", length = 500)
     private String deliveryMrUrl;
+
+    @Column(name = "delivery_mr_iid")
+    private Long deliveryMrIid;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_mr_status", nullable = false, length = 32)
+    private DeliveryMrStatus deliveryMrStatus = DeliveryMrStatus.NOT_SUBMITTED;
+
+    @Column(name = "delivery_merged_at")
+    private Date deliveryMergedAt;
+
+    @Column(name = "delivery_merge_commit_hash", length = 64)
+    private String deliveryMergeCommitHash;
 
     @Column(name = "delivery_target_branch", length = 200)
     private String deliveryTargetBranch;

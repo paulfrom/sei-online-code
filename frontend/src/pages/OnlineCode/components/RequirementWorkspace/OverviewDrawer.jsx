@@ -41,7 +41,7 @@ const TITLE_BY_PANEL = {
  *   titleOverride?: string,
  *   width?: number,
  *   overview?: any,
- *   plan: any, tasks: any[], runs: any[], delivery: any, comments: any[],
+ *   requirement: any, plan: any, tasks: any[], runs: any[], delivery: any, comments: any[],
  *   workspaceStatus?: any,
  *   taskFilterId?: string|null,
  *   onClearTaskFilter?: () => void,
@@ -56,6 +56,7 @@ const TITLE_BY_PANEL = {
  *   autoStopEnabled: boolean,
  *   onRetryMr?: () => Promise<void>,
  *   onSubmitMr?: () => Promise<void>, onRefreshWorkspace?: () => Promise<void>,
+ *   onConfirmCompletion?: () => Promise<void>, onReopenRequirement?: () => Promise<void>,
  *   manualDeliveryEnabled?: boolean,
  *   onViewRunFromTask?: (task: any) => void,
  *   onJumpTaskFromPlan?: (taskKey: string) => void,
@@ -67,6 +68,7 @@ const OverviewDrawer = ({
   titleOverride,
   width = 960,
   overview,
+  requirement,
   plan,
   tasks,
   runs,
@@ -87,6 +89,9 @@ const OverviewDrawer = ({
   onRetryMr,
   onSubmitMr,
   onRefreshWorkspace,
+  onSyncWorkspace,
+  onConfirmCompletion,
+  onReopenRequirement,
   manualDeliveryEnabled,
   onViewRunFromTask,
   onJumpTaskFromPlan,
@@ -128,12 +133,16 @@ const OverviewDrawer = ({
       case 'delivery':
         return (
           <DeliveryTab
+            requirement={requirement}
             delivery={delivery}
             comments={comments}
             workspaceStatus={workspaceStatus}
             onRetryMr={onRetryMr}
             onSubmitMr={onSubmitMr}
             onRefreshWorkspace={onRefreshWorkspace}
+            onSyncWorkspace={onSyncWorkspace}
+            onConfirmCompletion={onConfirmCompletion}
+            onReopenRequirement={onReopenRequirement}
             manualDeliveryEnabled={manualDeliveryEnabled}
           />
         );

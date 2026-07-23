@@ -105,8 +105,10 @@ public class ExecutionProgressQueryService {
             overview.setAppliedRevisionSeq(requirement.getAppliedRevisionSeq());
             overview.setRevisionState(requirement.getRevisionState());
             overview.setRevisionFailureReason(requirement.getRevisionFailureReason());
-            overview.setMrStatus(requirement.getDeliveryMrUrl() == null || requirement.getDeliveryMrUrl().isBlank()
-                    ? "NOT_SUBMITTED" : "SUBMITTED");
+            overview.setMrStatus(requirement.getDeliveryMrStatus() == null
+                    ? (requirement.getDeliveryMrUrl() == null || requirement.getDeliveryMrUrl().isBlank()
+                    ? "NOT_SUBMITTED" : "OPEN")
+                    : requirement.getDeliveryMrStatus().name());
         }
         if (requirement == null) {
             overview.setActiveLoopId(workspace == null ? null : workspace.getActiveLoopId());

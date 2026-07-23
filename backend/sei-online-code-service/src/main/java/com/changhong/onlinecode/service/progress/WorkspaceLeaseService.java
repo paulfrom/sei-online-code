@@ -18,6 +18,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -168,6 +169,39 @@ public class WorkspaceLeaseService {
         }
         return new WorkspaceRefreshResult(ws.getWorkspacePath(), ws.getBranchName(), baseBranch,
                 targetBranch, ws.getBaseCommit(), physicalHead, !changedFiles.isEmpty(), changedFiles, now);
+    }
+
+    /** Update the configured base branch and merge it into the requirement's current branch. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public WorkspaceRefreshResult synchronizeWorkspace(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        RequirementWorkspace ws = workspaceDao.findByRequirementId(requirementId)
+                .orElseThrow(() -> new IllegalStateException("需求工作区不存在，请先刷新工作区"));
+        Date now = new Date();
+        if (ws.getOwnerRunId() != null && ws.getLeaseExpiresAt() != null
+                && ws.getLeaseExpiresAt().after(now)) {
+            throw new IllegalStateException("工作区正在被运行占用，暂不能同步基线分支");
+        }
+        Project project = projectDao.findOne(requirement.getProjectId());
+        String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
+                || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch().trim();
+        WorkspaceManager.WorkspaceSyncResult synced = workspaceManager.syncBaseBranch(
+                Path.of(ws.getWorkspacePath()), baseBranch);
+        ws.setBranchName(synced.branchName());
+        ws.setBaseCommit(synced.baseHead());
+        ws.setCurrentHead(synced.currentHead());
+        ws.setSnapshotVersion((ws.getSnapshotVersion() == null ? 0L : ws.getSnapshotVersion()) + 1L);
+        ws.setLastProgressAt(now);
+        workspaceDao.save(ws);
+        String targetBranch = project == null ? null : project.getDeliveryTargetBranch();
+        if (targetBranch == null || targetBranch.isBlank()) {
+            targetBranch = configService.resolveGitlabTargetBranch(null);
+        }
+        return new WorkspaceRefreshResult(ws.getWorkspacePath(), synced.branchName(), baseBranch,
+                targetBranch, synced.baseHead(), synced.currentHead(), false, List.of(), now);
     }
 
     // ======================== acquireOwnership ========================

@@ -88,11 +88,22 @@ public class RequirementController extends BaseEntityController<Requirement, Req
 
     @Override
     public ResultData<RequirementDto> confirmCompletion(String id) {
-        OperateResultWithData<Requirement> result = service.confirmCompletion(id);
-        if (result.notSuccessful()) {
-            return ResultData.fail(result.getMessage());
+        try {
+            Requirement requirement = requirementAutomationService.confirmCompletion(id);
+            return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
         }
-        return ResultData.success(service.convertToDto(result.getData()));
+    }
+
+    @Override
+    public ResultData<RequirementDto> reopen(String id) {
+        try {
+            Requirement requirement = requirementAutomationService.reopen(id);
+            return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
     }
 
     @Override
@@ -139,21 +150,34 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     @Override
     public ResultData<RequirementWorkspaceStatusDto> refreshWorkspace(String id) {
         try {
-            WorkspaceLeaseService.WorkspaceRefreshResult refreshed = workspaceLeaseService.refreshWorkspace(id);
-            RequirementWorkspaceStatusDto dto = new RequirementWorkspaceStatusDto();
-            dto.setWorkspacePath(refreshed.workspacePath());
-            dto.setBranchName(refreshed.branchName());
-            dto.setBaseBranch(refreshed.baseBranch());
-            dto.setDeliveryTargetBranch(refreshed.deliveryTargetBranch());
-            dto.setBaseCommit(refreshed.baseCommit());
-            dto.setCurrentHead(refreshed.currentHead());
-            dto.setDirty(refreshed.dirty());
-            dto.setChangedFiles(refreshed.changedFiles());
-            dto.setRefreshedAt(refreshed.refreshedAt());
-            return ResultData.success(dto);
+            return ResultData.success(toWorkspaceStatusDto(workspaceLeaseService.refreshWorkspace(id)));
         } catch (Exception e) {
             return ResultData.fail(e.getMessage());
         }
+    }
+
+    @Override
+    public ResultData<RequirementWorkspaceStatusDto> syncWorkspace(String id) {
+        try {
+            return ResultData.success(toWorkspaceStatusDto(workspaceLeaseService.synchronizeWorkspace(id)));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    private RequirementWorkspaceStatusDto toWorkspaceStatusDto(
+            WorkspaceLeaseService.WorkspaceRefreshResult refreshed) {
+        RequirementWorkspaceStatusDto dto = new RequirementWorkspaceStatusDto();
+        dto.setWorkspacePath(refreshed.workspacePath());
+        dto.setBranchName(refreshed.branchName());
+        dto.setBaseBranch(refreshed.baseBranch());
+        dto.setDeliveryTargetBranch(refreshed.deliveryTargetBranch());
+        dto.setBaseCommit(refreshed.baseCommit());
+        dto.setCurrentHead(refreshed.currentHead());
+        dto.setDirty(refreshed.dirty());
+        dto.setChangedFiles(refreshed.changedFiles());
+        dto.setRefreshedAt(refreshed.refreshedAt());
+        return dto;
     }
 
     @Override
