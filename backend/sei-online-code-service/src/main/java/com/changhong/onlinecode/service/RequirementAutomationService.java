@@ -24,7 +24,6 @@ import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
 import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
-import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
 import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
 import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
@@ -32,6 +31,7 @@ import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolve
 import com.changhong.sei.core.util.JsonUtils;
 import com.changhong.sei.core.utils.TransactionUtil;
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -53,6 +53,7 @@ import java.util.UUID;
  * <p>负责在 PM 执行计划生成成功后持久化任务并启动调度器。</p>
  */
 @Service
+@AllArgsConstructor
 public class RequirementAutomationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RequirementAutomationService.class);
@@ -67,46 +68,12 @@ public class RequirementAutomationService {
     private final RequirementDeliveryService requirementDeliveryService;
     private final PmAgentClient pmAgentClient;
     private final AgentExecutionService agentExecutionService;
-    private final ValidationLoopService validationLoopService;
     private final FailureInfoSupport failureInfoSupport;
     private final PlanRevisionStateService revisionStateService;
     private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
     private final TaskDeliveryReviewService taskDeliveryReviewService;
     private final OcConfig ocConfig;
 
-    public RequirementAutomationService(RequirementDao requirementDao,
-                                        CodingTaskDao codingTaskDao,
-                                        ApplicationEventPublisher eventPublisher,
-                                        ExecutionPlanDao executionPlanDao,
-                                        RequirementCommentService requirementCommentService,
-                                        RequirementDesignContextService requirementDesignContextService,
-                                        RunDao runDao,
-                                        RequirementDeliveryService requirementDeliveryService,
-                                        PmAgentClient pmAgentClient,
-                                        AgentExecutionService agentExecutionService,
-                                        ValidationLoopService validationLoopService,
-                                        FailureInfoSupport failureInfoSupport,
-                                        PlanRevisionStateService revisionStateService,
-                                        EffectiveTaskGraphResolver effectiveTaskGraphResolver,
-                                        TaskDeliveryReviewService taskDeliveryReviewService,
-                                        OcConfig ocConfig) {
-        this.requirementDao = requirementDao;
-        this.codingTaskDao = codingTaskDao;
-        this.eventPublisher = eventPublisher;
-        this.executionPlanDao = executionPlanDao;
-        this.requirementCommentService = requirementCommentService;
-        this.requirementDesignContextService = requirementDesignContextService;
-        this.runDao = runDao;
-        this.requirementDeliveryService = requirementDeliveryService;
-        this.pmAgentClient = pmAgentClient;
-        this.agentExecutionService = agentExecutionService;
-        this.validationLoopService = validationLoopService;
-        this.failureInfoSupport = failureInfoSupport;
-        this.revisionStateService = revisionStateService;
-        this.effectiveTaskGraphResolver = effectiveTaskGraphResolver;
-        this.taskDeliveryReviewService = taskDeliveryReviewService;
-        this.ocConfig = ocConfig;
-    }
 
     /**
      * PRD 确认后的自动化入口。当前实现生成结构化初始计划并启动调度；
