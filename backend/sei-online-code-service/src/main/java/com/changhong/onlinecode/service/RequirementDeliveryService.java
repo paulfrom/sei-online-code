@@ -146,32 +146,64 @@ public class RequirementDeliveryService {
 
     @Transactional(rollbackFor = Exception.class)
     public Requirement retry(String requirementId) {
-        return submitAccepted(requirementId, false);
+        return submitLatest(requirementId, false, true);
     }
 
-    /** Manually submit the latest accepted plan without re-running development or acceptance. */
+    /** Manually submit current uncommitted workspace changes without restricting the plan status. */
     @Transactional(rollbackFor = Exception.class)
     public Requirement submit(String requirementId) {
-        return submitAccepted(requirementId, true);
+        return submitLatest(requirementId, true, false);
     }
 
-    private Requirement submitAccepted(String requirementId, boolean useCurrentWorkspaceBranch) {
+    private Requirement submitLatest(String requirementId, boolean useCurrentWorkspaceBranch,
+                                     boolean requireAcceptedPlan) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
         }
         ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                 requirementId, requirement.getActiveLoopId());
-        if (plan == null || plan.getStatus() != com.changhong.onlinecode.dto.enums.ExecutionPlanStatus.ACCEPTED) {
+        if (plan == null) {
+            throw new IllegalStateException("当前 Loop 没有可关联的执行计划");
+        }
+        if (requireAcceptedPlan
+                && plan.getStatus() != com.changhong.onlinecode.dto.enums.ExecutionPlanStatus.ACCEPTED) {
             throw new IllegalStateException("没有可手动提交的已验收执行计划");
         }
         if (requirement.getAutomationStatus() == RequirementAutomationStatus.DELIVERING) {
             throw new IllegalStateException("交付正在进行中，请勿重复提交");
         }
+        if (useCurrentWorkspaceBranch) {
+            validateManualSubmission(requirement);
+        }
         requirement.setAutomationStatus(RequirementAutomationStatus.DELIVERING);
         requirementDao.save(requirement);
         deliver(requirementId, plan.getId(), TriggerSource.USER_ACTION, useCurrentWorkspaceBranch);
         return requirementDao.findOne(requirementId);
+    }
+
+    private void validateManualSubmission(Requirement requirement) {
+        if (requirement.getStatus() == com.changhong.onlinecode.dto.enums.RequirementStatus.COMPLETED) {
+            throw new IllegalStateException("需求已完成，请先重新打开需求");
+        }
+        List<Run> runningRuns = runDao.findByRequirementIdAndState(requirement.getId(), RunState.RUNNING);
+        if (runningRuns != null && !runningRuns.isEmpty()) {
+            throw new IllegalStateException("当前仍有运行中的任务，暂不能手动提交");
+        }
+        RequirementWorkspace workspaceRecord = requirementWorkspaceDao
+                .findByProjectIdAndRequirementId(requirement.getProjectId(), requirement.getId())
+                .orElse(null);
+        Date now = new Date();
+        if (workspaceRecord != null
+                && workspaceRecord.getOwnerRunId() != null
+                && workspaceRecord.getLeaseExpiresAt() != null
+                && workspaceRecord.getLeaseExpiresAt().after(now)) {
+            throw new IllegalStateException("工作区正在被运行占用，暂不能手动提交");
+        }
+        Path workspace = resolveDeliveryWorkspace(requirement, true);
+        if (workspaceManager.getChangedFiles(workspace).isEmpty()) {
+            throw new IllegalStateException("当前工作区没有未提交修改");
+        }
     }
 
     private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan,

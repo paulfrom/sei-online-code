@@ -35,7 +35,7 @@
 
 ### POST `/requirement/{id}/mr/submit`
 
-手动提交当前已完成交付物。只接受当前 loop 最新且状态为 `ACCEPTED` 的 ExecutionPlan，使用需求工作区当前所在分支作为 source branch，不切换或限制分支；随后提交未提交修改并复用幂等 push/MR 交付链路。成功时创建或更新 MR；失败时 Requirement 进入 `WAITING_HUMAN` 并记录 `MR_FAILED`。
+手动提交当前已完成交付物。系统关联当前 Loop 的最新 ExecutionPlan，但不限制计划状态；提交门禁以工作区事实为准：工作区存在未提交修改、没有运行中的 Run、没有有效写租约、需求未完成且当前不在交付中。提交使用工作区当前所在分支作为 source branch，不切换或限制分支；随后复用幂等 push/MR 交付链路。成功时创建或更新 MR；失败时 Requirement 进入 `WAITING_HUMAN` 并记录 `MR_FAILED`。
 
 原 `/requirement/{id}/mr/retry` 保留兼容，并委托相同服务方法。
 
@@ -73,7 +73,7 @@
 - 需求交付页提供“同步主分支”，手动执行与新 Loop 前置步骤相同的 fetch + merge 操作。
 - 需求交付页在当前 Loop 已交付后提供“完成需求”；完成态提供“重新打开需求”。
 - 完成态评论输入被禁用，避免绕过重新打开动作。
-- 手动提交按钮仅在存在已验收计划且当前未处于 `DELIVERING` 时启用；后端仍作为最终状态门禁。
+- “刷新工作区”同时刷新需求与计划快照；检测到未提交修改、需求未完成且当前未处于 `DELIVERING` 时启用手动提交按钮。后端仍以实时工作区、Run 和租约作为最终门禁。
 
 ## 非目标
 

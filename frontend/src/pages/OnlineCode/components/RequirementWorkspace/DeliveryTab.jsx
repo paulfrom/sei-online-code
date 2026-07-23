@@ -259,7 +259,15 @@ const DeliveryTab = ({
             </Popconfirm>
           </Space>
           {!manualDeliveryEnabled && (
-            <span style={{ color: '#999' }}>执行计划验收通过且当前未在交付时可手动提交。</span>
+            <span style={{ color: '#999' }}>
+              {!workspaceStatus
+                ? '请先刷新工作区。'
+                : !workspaceStatus.dirty
+                  ? '当前工作区没有未提交修改。'
+                  : requirementCompleted
+                    ? '需求已完成，请先重新打开需求。'
+                    : '交付正在进行中，请稍后再试。'}
+            </span>
           )}
           {!requirementCompleted && !completionEnabled && (
             <span style={{ color: '#999' }}>当前 Loop 交付完成后可确认整个需求完成。</span>

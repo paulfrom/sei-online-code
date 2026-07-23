@@ -7,10 +7,14 @@ import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
+import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
+import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
+import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.progress.EffectService;
 import org.junit.jupiter.api.Test;
 import org.gitlab4j.api.GitLabApi;
@@ -19,16 +23,19 @@ import org.gitlab4j.api.models.MergeRequest;
 
 import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 
 class RequirementDeliveryServiceTest {
 
@@ -154,6 +161,87 @@ class RequirementDeliveryServiceTest {
         verify(workspaceManager, never()).resolveRequirementWorkspace("project-1", "requirement-1");
         verify(workspaceManager, never()).ensureOnBranch(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void manualDelivery_allowsLatestPlanRegardlessOfPlanStatusWhenWorkspaceIsDirty() {
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        ExecutionPlanDao executionPlanDao = mock(ExecutionPlanDao.class);
+        RunDao runDao = mock(RunDao.class);
+        ConfigService configService = mock(ConfigService.class);
+        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
+        RequirementWorkspaceDao workspaceDao = mock(RequirementWorkspaceDao.class);
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                requirementDao, executionPlanDao, runDao, mock(RunNumberService.class),
+                configService, workspaceManager, mock(RequirementCommentService.class),
+                mock(MemoryJobService.class), mock(WorkspaceMemoryService.class),
+                mock(EffectService.class), mock(GitApi.class), mock(ProjectDao.class), workspaceDao);
+        Requirement requirement = manualRequirement();
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setId("plan-1");
+        plan.setStatus(ExecutionPlanStatus.DEVELOPING);
+        RequirementWorkspace workspace = new RequirementWorkspace();
+        workspace.setWorkspacePath("/tmp");
+        when(requirementDao.findOne("requirement-1")).thenReturn(requirement);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                "requirement-1", "loop-1")).thenReturn(plan);
+        when(executionPlanDao.findOne("plan-1")).thenReturn(plan);
+        when(workspaceDao.findByProjectIdAndRequirementId("project-1", "requirement-1"))
+                .thenReturn(Optional.of(workspace));
+        when(workspaceManager.getChangedFiles(Path.of("/tmp"))).thenReturn(List.of("src/App.tsx"));
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            if (run.getId() == null) {
+                run.setId("run-1");
+            }
+            return run;
+        });
+
+        Requirement result = service.submit("requirement-1");
+
+        assertEquals(requirement, result);
+        assertEquals(RequirementAutomationStatus.WAITING_HUMAN, result.getAutomationStatus());
+        verify(workspaceManager).getChangedFiles(Path.of("/tmp"));
+    }
+
+    @Test
+    void manualDelivery_rejectsCleanWorkspace() {
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        ExecutionPlanDao executionPlanDao = mock(ExecutionPlanDao.class);
+        WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
+        RequirementWorkspaceDao workspaceDao = mock(RequirementWorkspaceDao.class);
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                requirementDao, executionPlanDao, mock(RunDao.class), mock(RunNumberService.class),
+                mock(ConfigService.class), workspaceManager, mock(RequirementCommentService.class),
+                mock(MemoryJobService.class), mock(WorkspaceMemoryService.class),
+                mock(EffectService.class), mock(GitApi.class), mock(ProjectDao.class), workspaceDao);
+        Requirement requirement = manualRequirement();
+        ExecutionPlan plan = new ExecutionPlan();
+        plan.setId("plan-1");
+        plan.setStatus(ExecutionPlanStatus.READY);
+        RequirementWorkspace workspace = new RequirementWorkspace();
+        workspace.setWorkspacePath("/tmp");
+        when(requirementDao.findOne("requirement-1")).thenReturn(requirement);
+        when(executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
+                "requirement-1", "loop-1")).thenReturn(plan);
+        when(workspaceDao.findByProjectIdAndRequirementId("project-1", "requirement-1"))
+                .thenReturn(Optional.of(workspace));
+        when(workspaceManager.getChangedFiles(Path.of("/tmp"))).thenReturn(List.of());
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.submit("requirement-1"));
+
+        assertEquals("当前工作区没有未提交修改", exception.getMessage());
+    }
+
+    private Requirement manualRequirement() {
+        Requirement requirement = new Requirement();
+        requirement.setId("requirement-1");
+        requirement.setProjectId("project-1");
+        requirement.setActiveLoopId("loop-1");
+        requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
+        requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
+        return requirement;
     }
 
     @Test

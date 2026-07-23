@@ -152,8 +152,10 @@ test('accepted delivery can be submitted manually after refreshing workspace fac
   assert.match(hook, /refreshRequirementWorkspace\(requirementId\)/);
   assert.match(hook, /syncRequirementWorkspace\(requirementId\)/);
   assert.match(hook, /submitMr\(requirementId\)/);
-  assert.match(container, /executionPlan\?\.status === 'ACCEPTED'/);
+  assert.match(container, /Boolean\(workspaceStatus\?\.dirty\)/);
   assert.match(container, /requirement\.automationStatus !== 'DELIVERING'/);
+  assert.match(container, /requirement\.status !== 'COMPLETED'/);
+  assert.match(hook, /safeSet\(setWorkspaceStatus, res\.data\);[\s\S]*await refresh\(\)/);
   assert.match(delivery, /刷新工作区/);
   assert.match(delivery, /手动提交交付物/);
   assert.match(delivery, /工作区当前分支上的修改/);
@@ -161,6 +163,7 @@ test('accepted delivery can be submitted manually after refreshing workspace fac
   assert.match(delivery, /同步主分支/);
   assert.match(delivery, /发生合并冲突时不会启动新的 Loop/);
   assert.match(delivery, /workspaceStatus\.changedFiles\?\.length/);
+  assert.match(delivery, /当前工作区没有未提交修改/);
 });
 
 test('project settings persist workspace base and delivery target branches', () => {

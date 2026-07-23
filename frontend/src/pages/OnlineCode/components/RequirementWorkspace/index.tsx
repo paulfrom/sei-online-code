@@ -228,8 +228,9 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   const resumeEnabled = requirement.status === 'PRD_CONFIRMED'
     && requirement.automationStatus === 'DEVELOPING'
     && ['READY', 'DEVELOPING'].includes(executionPlan?.status);
-  const manualDeliveryEnabled = executionPlan?.status === 'ACCEPTED'
-    && requirement.automationStatus !== 'DELIVERING';
+  const manualDeliveryEnabled = Boolean(workspaceStatus?.dirty)
+    && requirement.automationStatus !== 'DELIVERING'
+    && requirement.status !== 'COMPLETED';
 
   const rightColumn = (
     <OverviewPanel

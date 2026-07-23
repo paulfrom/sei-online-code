@@ -66,7 +66,8 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     ResultData<RequirementDto> retryMr(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/mr/submit")
-    @Operation(summary = "手动提交当前交付物", description = "提交当前 loop 最新已验收计划的工作区成果并创建或更新 GitLab MR")
+    @Operation(summary = "手动提交当前交付物",
+            description = "提交当前工作区的未提交修改，使用当前分支创建或更新 GitLab MR，不限制执行计划状态")
     ResultData<RequirementDto> submitMr(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/workspace/refresh")

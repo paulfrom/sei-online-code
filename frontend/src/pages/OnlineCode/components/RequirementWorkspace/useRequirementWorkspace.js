@@ -500,6 +500,7 @@ export function useRequirementWorkspace(requirementId) {
         }
         safeSet(setWorkspaceStatus, res.data);
         message.success('工作区状态已刷新');
+        await refresh();
       },
       async syncWorkspace() {
         const res = await syncRequirementWorkspace(requirementId);
