@@ -2,6 +2,7 @@ package com.changhong.onlinecode.api;
 
 import com.changhong.onlinecode.dto.RequirementDto;
 import com.changhong.onlinecode.dto.RequirementCommentDto;
+import com.changhong.onlinecode.dto.progress.RequirementWorkspaceStatusDto;
 import com.changhong.onlinecode.dto.request.CreateRequirementCommentRequest;
 import com.changhong.onlinecode.dto.request.EditPrdRequest;
 import com.changhong.onlinecode.dto.request.RegeneratePrdRequest;
@@ -57,6 +58,14 @@ public interface RequirementApi extends BaseEntityApi<RequirementDto>, FindByPag
     @PostMapping(path = "{id}/mr/retry")
     @Operation(summary = "重试 GitLab MR 交付", description = "修复 GitLab 配置后重试交付，不重新执行开发或验收")
     ResultData<RequirementDto> retryMr(@PathVariable("id") String id);
+
+    @PostMapping(path = "{id}/mr/submit")
+    @Operation(summary = "手动提交当前交付物", description = "提交当前 loop 最新已验收计划的工作区成果并创建或更新 GitLab MR")
+    ResultData<RequirementDto> submitMr(@PathVariable("id") String id);
+
+    @PostMapping(path = "{id}/workspace/refresh")
+    @Operation(summary = "刷新需求工作区状态", description = "读取并记录物理工作区的分支、HEAD 与未提交文件，不执行 reset/rebase")
+    ResultData<RequirementWorkspaceStatusDto> refreshWorkspace(@PathVariable("id") String id);
 
     @PostMapping(path = "{id}/resume")
     @Operation(summary = "恢复当前执行计划",

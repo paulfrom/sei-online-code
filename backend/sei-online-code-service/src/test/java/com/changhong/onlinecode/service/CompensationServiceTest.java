@@ -22,11 +22,10 @@ import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
-import com.changhong.onlinecode.service.progress.ProgressService;
 import com.changhong.onlinecode.config.OcConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Date;
 import java.util.List;
@@ -55,10 +54,9 @@ class CompensationServiceTest {
     private CompensationLogService compensationLogService;
     private RequirementCommentService requirementCommentService;
     private ProgressReconciler progressReconciler;
-    private ProgressService progressService;
     private AgentExecutionService agentExecutionService;
     private OcConfig ocConfig;
-    private PlatformTransactionManager transactionManager;
+    private TransactionTemplate transactionTemplate;
     private CompensationService service;
 
     @BeforeEach
@@ -75,7 +73,6 @@ class CompensationServiceTest {
         compensationLogService = mock(CompensationLogService.class);
         requirementCommentService = mock(RequirementCommentService.class);
         progressReconciler = mock(ProgressReconciler.class);
-        progressService = mock(ProgressService.class);
         agentExecutionService = mock(AgentExecutionService.class);
         com.changhong.onlinecode.service.review.TaskDeliveryReviewService taskDeliveryReviewService =
                 mock(com.changhong.onlinecode.service.review.TaskDeliveryReviewService.class);
@@ -83,14 +80,14 @@ class CompensationServiceTest {
                 mock(org.springframework.context.ApplicationEventPublisher.class);
         ocConfig = mock(OcConfig.class);
         when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
-        transactionManager = mock(PlatformTransactionManager.class);
+        transactionTemplate = mock(TransactionTemplate.class);
         service = new CompensationService(requirementDao, requirementDesignContextDao,
                 executionPlanDao, codingTaskDao, runDao,
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
-                requirementCommentService, progressReconciler, progressService, agentExecutionService,
+                requirementCommentService, progressReconciler, agentExecutionService,
                 taskDeliveryReviewService, eventPublisher,
-                ocConfig, transactionManager);
+                ocConfig, transactionTemplate);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> invocation.getArgument(0));

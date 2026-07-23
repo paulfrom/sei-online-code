@@ -105,7 +105,7 @@ class RequirementAutomationServiceTest {
         service = new RequirementAutomationService(requirementDao, codingTaskDao, eventPublisher,
                 executionPlanDao, requirementCommentService, requirementDesignContextService,
                 runDao, requirementDeliveryService, pmAgentClient, agentExecutionService,
-                validationLoopService, failureInfoSupport, revisionStateService,
+                failureInfoSupport, revisionStateService,
                 effectiveTaskGraphResolver, taskDeliveryReviewService, ocConfig);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));

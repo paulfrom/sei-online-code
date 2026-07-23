@@ -4,6 +4,7 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dao.TaskExecutionDao;
+import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.RequirementWorkspaceState;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.ProgressOperationStatus;
@@ -11,6 +12,8 @@ import com.changhong.onlinecode.dto.progress.WriteAuthorization;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.TaskExecution;
+import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.service.ConfigService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -22,6 +25,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Date;
 import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -56,6 +60,12 @@ class WorkspaceLeaseServiceTest {
 
     @Mock
     private TaskExecutionDao taskExecutionDao;
+
+    @Mock
+    private ProjectDao projectDao;
+
+    @Mock
+    private ConfigService configService;
 
     @InjectMocks
     private WorkspaceLeaseService service;
@@ -112,6 +122,39 @@ class WorkspaceLeaseServiceTest {
         assertNull(service.bindOrResolveWorkspace(null, REQUIREMENT_ID));
         assertNull(service.bindOrResolveWorkspace(PROJECT_ID, null));
         assertNull(service.bindOrResolveWorkspace("", REQUIREMENT_ID));
+    }
+
+    @Test
+    void refreshWorkspace_recordsPhysicalStateWithoutRewritingChanges() {
+        Requirement requirement = new Requirement();
+        requirement.setId(REQUIREMENT_ID);
+        requirement.setProjectId(PROJECT_ID);
+        RequirementWorkspace existing = workspace(WORKSPACE_ID);
+        existing.setWorkspacePath("/tmp");
+        Project project = new Project();
+        project.setWorkspaceBaseBranch("develop");
+        project.setDeliveryTargetBranch("release");
+
+        when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(requirement);
+        when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Optional.of(existing));
+        when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("feature/REQ-1");
+        when(workspaceManager.getCurrentHead(any(Path.class))).thenReturn(NEW_HEAD_SHA);
+        when(workspaceManager.getChangedFiles(any(Path.class))).thenReturn(List.of("src/App.tsx"));
+        when(projectDao.findOne(PROJECT_ID)).thenReturn(project);
+
+        WorkspaceLeaseService.WorkspaceRefreshResult result = service.refreshWorkspace(REQUIREMENT_ID);
+
+        assertEquals("feature/REQ-1", result.branchName());
+        assertEquals(NEW_HEAD_SHA, result.currentHead());
+        assertEquals("develop", result.baseBranch());
+        assertEquals("release", result.deliveryTargetBranch());
+        assertTrue(result.dirty());
+        assertEquals(List.of("src/App.tsx"), result.changedFiles());
+        verify(workspaceDao).save(existing);
+        verify(workspaceManager, never()).commitAll(any(Path.class), anyString());
+        verify(workspaceManager, never()).resetSoftHead(any(Path.class));
+        verify(workspaceManager, never()).ensureOnBranch(any(Path.class), anyString());
     }
 
     // ======================== acquireOwnership ========================

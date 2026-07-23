@@ -25,6 +25,8 @@ const ProjectSettingsTab = ({ project }) => {
         projectVersion: project.projectVersion,
         packageName: project.packageName,
         workspacePath: project.workspacePath,
+        workspaceBaseBranch: project.workspaceBaseBranch || 'main',
+        deliveryTargetBranch: project.deliveryTargetBranch,
         autoRunCodingTask: project.autoRunCodingTask,
       });
     }
@@ -65,6 +67,20 @@ const ProjectSettingsTab = ({ project }) => {
         </Form.Item>
         <Form.Item name="workspacePath" label="工作区路径">
           <Input placeholder="留空则自动生成" />
+        </Form.Item>
+        <Form.Item
+          name="workspaceBaseBranch"
+          label="工作区基线分支"
+          tooltip="记录需求工作区更新时应对照的基线分支；刷新状态不会自动覆盖本地成果"
+        >
+          <Input placeholder="main" />
+        </Form.Item>
+        <Form.Item
+          name="deliveryTargetBranch"
+          label="交付目标分支"
+          tooltip="手动或自动创建 MR 时使用；留空则使用平台 GitLab 目标分支"
+        >
+          <Input placeholder="main" />
         </Form.Item>
         <Form.Item name="autoRunCodingTask" valuePropName="checked">
           <Checkbox>确认详细设计后自动执行编码任务</Checkbox>

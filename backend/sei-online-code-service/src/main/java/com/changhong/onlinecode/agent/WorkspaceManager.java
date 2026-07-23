@@ -325,6 +325,26 @@ public class WorkspaceManager {
     }
 
     /**
+     * List paths reported by {@code git status --porcelain} without modifying the workspace.
+     */
+    public List<String> getChangedFiles(Path workspaceDir) {
+        try {
+            String status = runCommandOutput(workspaceDir, "git", "status", "--porcelain");
+            if (status == null || status.isBlank()) {
+                return List.of();
+            }
+            return status.lines()
+                    .map(String::trim)
+                    .filter(line -> !line.isBlank())
+                    .map(line -> line.length() > 2 ? line.substring(2).trim() : line)
+                    .toList();
+        } catch (IllegalStateException e) {
+            log.warn("getChangedFiles: git status 失败 path={}", workspaceDir, e);
+            throw e;
+        }
+    }
+
+    /**
      * 获取 git diff 摘要（--stat），用于对账。
      *
      * @param workspaceDir 工作区目录

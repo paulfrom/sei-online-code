@@ -4,7 +4,9 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.entity.Requirement;
+import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.service.progress.EffectService;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class RequirementDeliveryServiceTest {
 
@@ -24,7 +27,8 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                mock(ProjectDao.class));
         Requirement requirement = new Requirement();
         requirement.setId("requirement-12345678");
         requirement.setActiveLoopId("new-loop-12345678");
@@ -42,7 +46,8 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                mock(ProjectDao.class));
         Method method = RequirementDeliveryService.class.getDeclaredMethod("buildSuccessMetadata",
                 String.class, String.class, String.class, String.class, String.class, String.class);
         method.setAccessible(true);
@@ -66,7 +71,8 @@ class RequirementDeliveryServiceTest {
                 mock(RunNumberService.class),
                 mock(ConfigService.class), mock(WorkspaceManager.class),
                 mock(RequirementCommentService.class), mock(MemoryJobService.class),
-                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class));
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                mock(ProjectDao.class));
         Method pushKey = RequirementDeliveryService.class.getDeclaredMethod("pushEffectKey",
                 String.class, String.class, String.class);
         Method mrKey = RequirementDeliveryService.class.getDeclaredMethod("mrEffectKey",
@@ -79,5 +85,27 @@ class RequirementDeliveryServiceTest {
         org.junit.jupiter.api.Assertions.assertNotEquals(
                 mrKey.invoke(service, "42", "feature/req-1", "commit-a"),
                 mrKey.invoke(service, "42", "feature/req-1", "commit-b"));
+    }
+
+    @Test
+    void projectDeliveryTargetBranch_overridesPlatformFallback() throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class), configService, mock(WorkspaceManager.class),
+                mock(RequirementCommentService.class), mock(MemoryJobService.class),
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class), projectDao);
+        Requirement requirement = new Requirement();
+        requirement.setProjectId("project-1");
+        Project project = new Project();
+        project.setDeliveryTargetBranch("release/1.0");
+        when(projectDao.findOne("project-1")).thenReturn(project);
+
+        Method method = RequirementDeliveryService.class.getDeclaredMethod(
+                "resolveDeliveryTargetBranch", Requirement.class);
+        method.setAccessible(true);
+
+        assertEquals("release/1.0", method.invoke(service, requirement));
     }
 }

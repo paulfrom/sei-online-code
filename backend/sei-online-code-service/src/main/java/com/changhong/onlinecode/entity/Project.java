@@ -61,6 +61,14 @@ public class Project extends BaseAuditableEntity {
     @Column(name = "workspace_path", length = 500)
     private String workspacePath;
 
+    /** Branch used as the recorded update baseline for requirement workspaces. */
+    @Column(name = "workspace_base_branch", length = 200)
+    private String workspaceBaseBranch;
+
+    /** Project-specific GitLab MR target branch; falls back to platform configuration. */
+    @Column(name = "delivery_target_branch", length = 200)
+    private String deliveryTargetBranch;
+
     /** Project-level validation command configuration JSON. */
     @Column(name = "validation_config", columnDefinition = "TEXT")
     private String validationConfig;

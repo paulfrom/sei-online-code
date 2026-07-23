@@ -59,6 +59,8 @@ export interface ProjectDto {
   projectVersion?: string;
   packageName?: string;
   workspacePath?: string;
+  workspaceBaseBranch?: string;
+  deliveryTargetBranch?: string;
   autoRunCodingTask?: boolean;
   memorySeedTemplateId?: string;
   state: LifecycleState;

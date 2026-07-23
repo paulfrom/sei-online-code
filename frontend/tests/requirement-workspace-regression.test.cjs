@@ -139,3 +139,30 @@ test('websocket revision events merge forward only and still trigger authoritati
   assert.match(hook, /incomingOrder < currentOrder/);
   assert.match(hook, /incomingTime < currentTime/);
 });
+
+test('accepted delivery can be submitted manually after refreshing workspace facts', () => {
+  const service = read('src/services/requirement.js');
+  const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
+  const container = read('src/pages/OnlineCode/components/RequirementWorkspace/index.tsx');
+  const delivery = read('src/pages/OnlineCode/components/RequirementWorkspace/DeliveryTab.jsx');
+
+  assert.match(service, /requirement\/\$\{id\}\/workspace\/refresh/);
+  assert.match(service, /requirement\/\$\{id\}\/mr\/submit/);
+  assert.match(hook, /refreshRequirementWorkspace\(requirementId\)/);
+  assert.match(hook, /submitMr\(requirementId\)/);
+  assert.match(container, /executionPlan\?\.status === 'ACCEPTED'/);
+  assert.match(container, /requirement\.automationStatus !== 'DELIVERING'/);
+  assert.match(delivery, /刷新工作区/);
+  assert.match(delivery, /手动提交交付物/);
+  assert.match(delivery, /workspaceStatus\.changedFiles\?\.length/);
+});
+
+test('project settings persist workspace base and delivery target branches', () => {
+  const serviceTypes = read('src/services/onlineCode.ts');
+  const settings = read('src/pages/OnlineCode/ProjectSettingsTab.jsx');
+
+  for (const source of [serviceTypes, settings]) {
+    assert.match(source, /workspaceBaseBranch/);
+    assert.match(source, /deliveryTargetBranch/);
+  }
+});

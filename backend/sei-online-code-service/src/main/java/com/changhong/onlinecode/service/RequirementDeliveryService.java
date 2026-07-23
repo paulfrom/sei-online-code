@@ -4,6 +4,7 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.ExecutionEffectStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionEffectType;
 import com.changhong.onlinecode.dto.enums.MemoryJobTriggerSource;
@@ -21,6 +22,7 @@ import com.changhong.onlinecode.entity.MemoryJob;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.WorkspaceMemory;
+import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.service.progress.EffectService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.util.JsonUtils;
@@ -65,9 +67,14 @@ public class RequirementDeliveryService {
     private final WorkspaceMemoryService workspaceMemoryService;
     private final EffectService effectService;
     private final GitApi gitApi;
+    private final ProjectDao projectDao;
 
     @Transactional(rollbackFor = Exception.class)
     public void deliver(String requirementId, String executionPlanId) {
+        deliver(requirementId, executionPlanId, TriggerSource.AUTO);
+    }
+
+    private void deliver(String requirementId, String executionPlanId, TriggerSource triggerSource) {
         Requirement requirement = requirementDao.findOne(requirementId);
         ExecutionPlan plan = executionPlanDao.findOne(executionPlanId);
         if (requirement == null || plan == null) {
@@ -78,7 +85,7 @@ public class RequirementDeliveryService {
         run.setRunType(RunType.SYSTEM);
         run.setRequirementId(requirementId);
         run.setLoopId(requirement.getActiveLoopId());
-        run.setTriggerSource(TriggerSource.AUTO);
+        run.setTriggerSource(triggerSource);
         run.setState(RunState.RUNNING);
         run.setStartedDate(new java.util.Date());
         runNumberService.assign(run);
@@ -126,6 +133,12 @@ public class RequirementDeliveryService {
 
     @Transactional(rollbackFor = Exception.class)
     public Requirement retry(String requirementId) {
+        return submit(requirementId);
+    }
+
+    /** Manually submit the latest accepted plan without re-running development or acceptance. */
+    @Transactional(rollbackFor = Exception.class)
+    public Requirement submit(String requirementId) {
         Requirement requirement = requirementDao.findOne(requirementId);
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
@@ -133,11 +146,14 @@ public class RequirementDeliveryService {
         ExecutionPlan plan = executionPlanDao.findTopByRequirementIdAndLoopIdOrderByVersionDesc(
                 requirementId, requirement.getActiveLoopId());
         if (plan == null || plan.getStatus() != com.changhong.onlinecode.dto.enums.ExecutionPlanStatus.ACCEPTED) {
-            throw new IllegalStateException("没有可重试交付的已验收执行计划");
+            throw new IllegalStateException("没有可手动提交的已验收执行计划");
+        }
+        if (requirement.getAutomationStatus() == RequirementAutomationStatus.DELIVERING) {
+            throw new IllegalStateException("交付正在进行中，请勿重复提交");
         }
         requirement.setAutomationStatus(RequirementAutomationStatus.DELIVERING);
         requirementDao.save(requirement);
-        deliver(requirementId, plan.getId());
+        deliver(requirementId, plan.getId(), TriggerSource.USER_ACTION);
         return requirementDao.findOne(requirementId);
     }
 
@@ -145,7 +161,7 @@ public class RequirementDeliveryService {
         String gitlabApiBaseUrl = configService.resolveGitlabApiBaseUrl(null);
         String gitlabToken = configService.resolveGitlabToken(null);
         String gitlabProjectId = configService.resolveGitlabProjectId(null);
-        String gitlabTargetBranch = configService.resolveGitlabTargetBranch(null);
+        String gitlabTargetBranch = resolveDeliveryTargetBranch(requirement);
         if (isBlank(gitlabApiBaseUrl) || isBlank(gitlabToken) || isBlank(gitlabProjectId)) {
             throw new IllegalStateException(
                     "GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填，" +
@@ -239,6 +255,15 @@ public class RequirementDeliveryService {
         effectService.markApplied(mrEffect.getId(), created.getWebUrl(), String.valueOf(created.getIid()));
         effectService.markConfirmed(mrEffect.getId());
         return new DeliveryResult(branch, commitHash, targetBranch, created.getWebUrl(), true, changedFiles);
+    }
+
+    private String resolveDeliveryTargetBranch(Requirement requirement) {
+        Project project = projectDao.findOne(requirement.getProjectId());
+        if (project != null && project.getDeliveryTargetBranch() != null
+                && !project.getDeliveryTargetBranch().isBlank()) {
+            return project.getDeliveryTargetBranch().trim();
+        }
+        return configService.resolveGitlabTargetBranch(null);
     }
 
     private String pushEffectKey(String projectKey, String branch, String commitHash) {

@@ -21,7 +21,7 @@ import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Date;
 import java.util.List;
@@ -68,20 +68,18 @@ class CompensationDevelopmentRulesTest {
         RequirementCommentService requirementCommentService = mock(RequirementCommentService.class);
         com.changhong.onlinecode.service.progress.ProgressReconciler progressReconciler =
                 mock(com.changhong.onlinecode.service.progress.ProgressReconciler.class);
-        com.changhong.onlinecode.service.progress.ProgressService progressService =
-                mock(com.changhong.onlinecode.service.progress.ProgressService.class);
         com.changhong.onlinecode.service.agent.AgentExecutionService agentExecutionService =
                 mock(com.changhong.onlinecode.service.agent.AgentExecutionService.class);
         taskDeliveryReviewService = mock(TaskDeliveryReviewService.class);
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         com.changhong.onlinecode.config.OcConfig ocConfig = mock(com.changhong.onlinecode.config.OcConfig.class);
         when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
-        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         service = new CompensationService(requirementDao, requirementDesignContextDao, executionPlanDao,
                 codingTaskDao, runDao, requirementAgentService, automationService, deliveryService,
                 failureInfoSupport, compensationLogService, requirementCommentService, progressReconciler,
-                progressService, agentExecutionService, taskDeliveryReviewService, eventPublisher,
-                ocConfig, transactionManager);
+                agentExecutionService, taskDeliveryReviewService, eventPublisher,
+                ocConfig, transactionTemplate);
 
         when(codingTaskDao.save(any(com.changhong.onlinecode.entity.CodingTask.class))).thenAnswer(inv -> inv.getArgument(0));
         when(failureInfoSupport.canRetry(any(CodingTask.class), any(Date.class))).thenReturn(true);

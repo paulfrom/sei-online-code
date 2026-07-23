@@ -4,12 +4,15 @@ import com.changhong.onlinecode.agent.WorkspaceManager;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementWorkspaceDao;
 import com.changhong.onlinecode.dao.TaskExecutionDao;
+import com.changhong.onlinecode.dao.ProjectDao;
 import com.changhong.onlinecode.dto.enums.RequirementWorkspaceState;
 import com.changhong.onlinecode.dto.progress.ProgressOperationResult;
 import com.changhong.onlinecode.dto.progress.WriteAuthorization;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementWorkspace;
 import com.changhong.onlinecode.entity.TaskExecution;
+import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.service.ConfigService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -17,9 +20,11 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -43,17 +48,23 @@ public class WorkspaceLeaseService {
     private final ProgressService progressService;
     private final RequirementDao requirementDao;
     private final TaskExecutionDao taskExecutionDao;
+    private final ProjectDao projectDao;
+    private final ConfigService configService;
 
     public WorkspaceLeaseService(RequirementWorkspaceDao workspaceDao,
                                   WorkspaceManager workspaceManager,
                                   ProgressService progressService,
                                   RequirementDao requirementDao,
-                                  TaskExecutionDao taskExecutionDao) {
+                                  TaskExecutionDao taskExecutionDao,
+                                  ProjectDao projectDao,
+                                  ConfigService configService) {
         this.workspaceDao = workspaceDao;
         this.workspaceManager = workspaceManager;
         this.progressService = progressService;
         this.requirementDao = requirementDao;
         this.taskExecutionDao = taskExecutionDao;
+        this.projectDao = projectDao;
+        this.configService = configService;
     }
 
     // ======================== bindOrResolveWorkspace ========================
@@ -108,6 +119,55 @@ public class WorkspaceLeaseService {
                     .orElseThrow(() -> new IllegalStateException(
                             "workspace vanished after unique-key conflict: " + projectId + "/" + requirementId, e));
         }
+    }
+
+    /**
+     * Re-read the physical Git state and persist the authoritative workspace head/branch.
+     * This operation deliberately does not reset, merge or rebase completed artifacts.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public WorkspaceRefreshResult refreshWorkspace(String requirementId) {
+        Requirement requirement = requirementDao.findOne(requirementId);
+        if (requirement == null) {
+            throw new IllegalArgumentException("需求不存在: " + requirementId);
+        }
+        RequirementWorkspace ws = workspaceDao
+                .findByProjectIdAndRequirementId(requirement.getProjectId(), requirementId)
+                .orElse(null);
+        if (ws == null || ws.getWorkspacePath() == null
+                || !Files.isDirectory(Path.of(ws.getWorkspacePath()))) {
+            ws = bindOrResolveWorkspace(requirement.getProjectId(), requirementId);
+        }
+        if (ws == null) {
+            throw new IllegalStateException("需求工作区解析失败: " + requirementId);
+        }
+        Date now = new Date();
+        if (ws.getOwnerRunId() != null && ws.getLeaseExpiresAt() != null
+                && ws.getLeaseExpiresAt().after(now)) {
+            throw new IllegalStateException("工作区正在被运行占用，暂不能手动刷新");
+        }
+
+        Path path = Path.of(ws.getWorkspacePath());
+        String physicalBranch = workspaceManager.getCurrentBranch(path);
+        String physicalHead = workspaceManager.getCurrentHead(path);
+        List<String> changedFiles = workspaceManager.getChangedFiles(path);
+        if (!physicalBranch.isBlank()) {
+            ws.setBranchName(physicalBranch);
+        }
+        ws.setCurrentHead(physicalHead);
+        ws.setSnapshotVersion((ws.getSnapshotVersion() == null ? 0L : ws.getSnapshotVersion()) + 1L);
+        ws.setLastProgressAt(now);
+        workspaceDao.save(ws);
+
+        Project project = projectDao.findOne(requirement.getProjectId());
+        String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
+                || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch();
+        String targetBranch = project == null ? null : project.getDeliveryTargetBranch();
+        if (targetBranch == null || targetBranch.isBlank()) {
+            targetBranch = configService.resolveGitlabTargetBranch(null);
+        }
+        return new WorkspaceRefreshResult(ws.getWorkspacePath(), ws.getBranchName(), baseBranch,
+                targetBranch, ws.getBaseCommit(), physicalHead, !changedFiles.isEmpty(), changedFiles, now);
     }
 
     // ======================== acquireOwnership ========================
@@ -382,5 +442,19 @@ public class WorkspaceLeaseService {
         public boolean isSafeToTakeOver() {
             return leaseExpired;
         }
+    }
+
+
+    public record WorkspaceRefreshResult(
+            String workspacePath,
+            String branchName,
+            String baseBranch,
+            String deliveryTargetBranch,
+            String baseCommit,
+            String currentHead,
+            boolean dirty,
+            List<String> changedFiles,
+            Date refreshedAt
+    ) {
     }
 }

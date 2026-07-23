@@ -42,6 +42,7 @@ const TITLE_BY_PANEL = {
  *   width?: number,
  *   overview?: any,
  *   plan: any, tasks: any[], runs: any[], delivery: any, comments: any[],
+ *   workspaceStatus?: any,
  *   taskFilterId?: string|null,
  *   onClearTaskFilter?: () => void,
  *   onBackToTask?: () => void,
@@ -54,6 +55,8 @@ const TITLE_BY_PANEL = {
  *   onStop: () => Promise<void>,
  *   autoStopEnabled: boolean,
  *   onRetryMr?: () => Promise<void>,
+ *   onSubmitMr?: () => Promise<void>, onRefreshWorkspace?: () => Promise<void>,
+ *   manualDeliveryEnabled?: boolean,
  *   onViewRunFromTask?: (task: any) => void,
  *   onJumpTaskFromPlan?: (taskKey: string) => void,
  * }} props
@@ -68,6 +71,7 @@ const OverviewDrawer = ({
   tasks,
   runs,
   delivery,
+  workspaceStatus,
   comments,
   taskFilterId,
   onClearTaskFilter,
@@ -81,6 +85,9 @@ const OverviewDrawer = ({
   onStop,
   autoStopEnabled,
   onRetryMr,
+  onSubmitMr,
+  onRefreshWorkspace,
+  manualDeliveryEnabled,
   onViewRunFromTask,
   onJumpTaskFromPlan,
 }) => {
@@ -119,7 +126,17 @@ const OverviewDrawer = ({
           />
         );
       case 'delivery':
-        return <DeliveryTab delivery={delivery} comments={comments} onRetryMr={onRetryMr} />;
+        return (
+          <DeliveryTab
+            delivery={delivery}
+            comments={comments}
+            workspaceStatus={workspaceStatus}
+            onRetryMr={onRetryMr}
+            onSubmitMr={onSubmitMr}
+            onRefreshWorkspace={onRefreshWorkspace}
+            manualDeliveryEnabled={manualDeliveryEnabled}
+          />
+        );
       case 'progress':
         return <ExecutionProgressTab overview={overview} />;
       default:

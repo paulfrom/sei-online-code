@@ -6,6 +6,7 @@ import com.changhong.onlinecode.dto.RequirementCommentDto;
 import com.changhong.onlinecode.dto.request.CreateRequirementCommentRequest;
 import com.changhong.onlinecode.dto.request.EditPrdRequest;
 import com.changhong.onlinecode.dto.request.RegeneratePrdRequest;
+import com.changhong.onlinecode.dto.progress.RequirementWorkspaceStatusDto;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.service.RequirementAutomationService;
@@ -13,6 +14,7 @@ import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RequirementDeliveryService;
 import com.changhong.onlinecode.service.RequirementService;
 import com.changhong.onlinecode.service.revision.PlanRevisionOrchestrationService;
+import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
 import com.changhong.sei.core.controller.BaseEntityController;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.dto.serach.PageResult;
@@ -44,6 +46,7 @@ public class RequirementController extends BaseEntityController<Requirement, Req
     private final RequirementCommentService requirementCommentService;
     private final RequirementDeliveryService requirementDeliveryService;
     private final PlanRevisionOrchestrationService planRevisionOrchestrationService;
+    private final WorkspaceLeaseService workspaceLeaseService;
 
 
     @Override
@@ -118,6 +121,36 @@ public class RequirementController extends BaseEntityController<Requirement, Req
         try {
             Requirement requirement = requirementDeliveryService.retry(id);
             return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    @Override
+    public ResultData<RequirementDto> submitMr(String id) {
+        try {
+            Requirement requirement = requirementDeliveryService.submit(id);
+            return ResultData.success(service.convertToDto(requirement));
+        } catch (Exception e) {
+            return ResultData.fail(e.getMessage());
+        }
+    }
+
+    @Override
+    public ResultData<RequirementWorkspaceStatusDto> refreshWorkspace(String id) {
+        try {
+            WorkspaceLeaseService.WorkspaceRefreshResult refreshed = workspaceLeaseService.refreshWorkspace(id);
+            RequirementWorkspaceStatusDto dto = new RequirementWorkspaceStatusDto();
+            dto.setWorkspacePath(refreshed.workspacePath());
+            dto.setBranchName(refreshed.branchName());
+            dto.setBaseBranch(refreshed.baseBranch());
+            dto.setDeliveryTargetBranch(refreshed.deliveryTargetBranch());
+            dto.setBaseCommit(refreshed.baseCommit());
+            dto.setCurrentHead(refreshed.currentHead());
+            dto.setDirty(refreshed.dirty());
+            dto.setChangedFiles(refreshed.changedFiles());
+            dto.setRefreshedAt(refreshed.refreshedAt());
+            return ResultData.success(dto);
         } catch (Exception e) {
             return ResultData.fail(e.getMessage());
         }

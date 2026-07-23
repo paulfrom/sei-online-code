@@ -18,6 +18,8 @@ import {
   findOneRequirement,
   addRequirementComment,
   retryMr,
+  submitMr,
+  refreshRequirementWorkspace,
   editPrd,
   confirmPrd,
   regeneratePrd,
@@ -178,6 +180,7 @@ export function useRequirementWorkspace(requirementId) {
   const [error, setError] = useState(null);
   const [sendingComment, setSendingComment] = useState(false);
   const [retryingRevision, setRetryingRevision] = useState(false);
+  const [workspaceStatus, setWorkspaceStatus] = useState(null);
   // Authoritative aggregated progress snapshot (ExecutionProgressApi.findOverview).
   const [overview, setOverview] = useState(null);
   // True when the snapshot is past staleAfter or the progress WS is down.
@@ -471,6 +474,29 @@ export function useRequirementWorkspace(requirementId) {
           message.error((res && res.message) || '重试 MR 失败');
         }
       },
+      async submitMr() {
+        const res = await submitMr(requirementId);
+        if (!res || !res.success) {
+          message.error((res && res.message) || '手动提交交付物失败');
+          return;
+        }
+        if (res.data?.automationStatus === 'WAITING_HUMAN') {
+          message.error('交付未完成，请查看交付事件中的失败原因');
+          await refresh();
+          return;
+        }
+        message.success('交付物已提交，GitLab MR 已创建或更新');
+        await refresh();
+      },
+      async refreshWorkspace() {
+        const res = await refreshRequirementWorkspace(requirementId);
+        if (!res || !res.success || !res.data) {
+          message.error((res && res.message) || '刷新工作区失败');
+          return;
+        }
+        safeSet(setWorkspaceStatus, res.data);
+        message.success('工作区状态已刷新');
+      },
       async retryRevision() {
         if (!requirementId || revisionRetryInFlightRef.current) return;
         revisionRetryInFlightRef.current = true;
@@ -503,6 +529,7 @@ export function useRequirementWorkspace(requirementId) {
     overview,
     stale,
     delivery,
+    workspaceStatus,
     loading,
     error,
     sendingComment,

@@ -86,6 +86,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
     overview,
     stale,
     delivery,
+    workspaceStatus,
     loading,
     error,
     sendingComment,
@@ -227,6 +228,8 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
   const resumeEnabled = requirement.status === 'PRD_CONFIRMED'
     && requirement.automationStatus === 'DEVELOPING'
     && ['READY', 'DEVELOPING'].includes(executionPlan?.status);
+  const manualDeliveryEnabled = executionPlan?.status === 'ACCEPTED'
+    && requirement.automationStatus !== 'DELIVERING';
 
   const rightColumn = (
     <OverviewPanel
@@ -296,6 +299,7 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
         tasks={codingTasks}
         runs={runs}
         delivery={delivery}
+        workspaceStatus={workspaceStatus}
         comments={comments}
         taskFilterId={taskFilterId}
         onClearTaskFilter={() => setTaskFilterId(null)}
@@ -309,6 +313,9 @@ const RequirementWorkspace: React.FC<RequirementWorkspaceProps> = ({ requirement
         onStop={actions.stopAutomation}
         autoStopEnabled={autoStopEnabled}
         onRetryMr={actions.retryMr}
+        onSubmitMr={actions.submitMr}
+        onRefreshWorkspace={actions.refreshWorkspace}
+        manualDeliveryEnabled={manualDeliveryEnabled}
         onViewRunFromTask={handleViewRunFromTask}
         onJumpTaskFromPlan={handleJumpTaskFromPlan}
       />

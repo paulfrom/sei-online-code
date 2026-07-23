@@ -49,6 +49,14 @@ export async function retryMr(id) {
   return request({ url: `${API}/requirement/${id}/mr/retry`, method: 'POST' });
 }
 
+export async function submitMr(id) {
+  return request({ url: `${API}/requirement/${id}/mr/submit`, method: 'POST' });
+}
+
+export async function refreshRequirementWorkspace(id) {
+  return request({ url: `${API}/requirement/${id}/workspace/refresh`, method: 'POST' });
+}
+
 export async function resumeRequirementAutomation(id) {
   return request({ url: `${API}/requirement/${id}/resume`, method: 'POST' });
 }

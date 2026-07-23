@@ -51,6 +51,14 @@ public class ProjectDto extends BaseEntityDto {
     @Schema(description = "项目工作区路径")
     private String workspacePath;
 
+    @Size(max = 200, message = "工作区基线分支长度不能超过200")
+    @Schema(description = "需求工作区更新基线分支", example = "main")
+    private String workspaceBaseBranch;
+
+    @Size(max = 200, message = "交付目标分支长度不能超过200")
+    @Schema(description = "GitLab MR 交付目标分支；为空时使用平台配置", example = "main")
+    private String deliveryTargetBranch;
+
     @Schema(description = "验证命令配置 JSON")
     private String validationConfig;
 
