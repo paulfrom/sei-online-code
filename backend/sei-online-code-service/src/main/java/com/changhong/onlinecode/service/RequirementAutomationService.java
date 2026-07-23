@@ -22,10 +22,12 @@ import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
 import com.changhong.onlinecode.service.revision.PlanRevisionRequestedEvent;
 import com.changhong.onlinecode.service.revision.PlanRevisionStateService;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import com.changhong.sei.core.util.JsonUtils;
 import com.changhong.sei.core.utils.TransactionUtil;
@@ -69,6 +71,7 @@ public class RequirementAutomationService {
     private final FailureInfoSupport failureInfoSupport;
     private final PlanRevisionStateService revisionStateService;
     private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
+    private final TaskDeliveryReviewService taskDeliveryReviewService;
     private final OcConfig ocConfig;
 
     public RequirementAutomationService(RequirementDao requirementDao,
@@ -85,6 +88,7 @@ public class RequirementAutomationService {
                                         FailureInfoSupport failureInfoSupport,
                                         PlanRevisionStateService revisionStateService,
                                         EffectiveTaskGraphResolver effectiveTaskGraphResolver,
+                                        TaskDeliveryReviewService taskDeliveryReviewService,
                                         OcConfig ocConfig) {
         this.requirementDao = requirementDao;
         this.codingTaskDao = codingTaskDao;
@@ -100,6 +104,7 @@ public class RequirementAutomationService {
         this.failureInfoSupport = failureInfoSupport;
         this.revisionStateService = revisionStateService;
         this.effectiveTaskGraphResolver = effectiveTaskGraphResolver;
+        this.taskDeliveryReviewService = taskDeliveryReviewService;
         this.ocConfig = ocConfig;
     }
 
@@ -251,6 +256,14 @@ public class RequirementAutomationService {
         }
         List<CodingTask> tasks = effectiveTaskGraphResolver.resolve(plan).tasks();
         if (tasks.isEmpty() || tasks.stream().anyMatch(t -> !isTerminal(t.getStatus()))) {
+            return;
+        }
+
+        // 任务级交付审阅必须全部结算（DECIDED/WAITING_HUMAN）后，才允许最终计划验收（方案 §6.1）。
+        // 存在 PENDING/REVIEWING 审阅时，等待 PM 决策完成，本轮不进入计划级验收。
+        if (taskDeliveryReviewService != null
+                && !taskDeliveryReviewService.allReviewsSettled(requirementId, requirement.getActiveLoopId())) {
+            LOGGER.debug("plan settlement deferred: open task delivery reviews. requirementId={}", requirementId);
             return;
         }
 
@@ -574,13 +587,46 @@ public class RequirementAutomationService {
                                       RequirementDesignContext context,
                                       List<RequirementComment> previousComments,
                                       PmAgentClient.PmAcceptanceResult acceptanceResult) {
-        String loopId = requirement.getActiveLoopId();
         List<PlanTask> remediationTasks = acceptanceResult.remediationTasks();
-        if (remediationTasks == null || remediationTasks.isEmpty()) {
+        boolean created = createRemediationPlan(requirement, currentPlan, context, previousComments,
+                remediationTasks, acceptanceResult.findings(), "PM 补救计划（基于验收反馈）");
+        if (!created) {
             LOGGER.warn("pm-agent returned no remediation tasks for requirement={}", requirement.getId());
             requirement.setAutomationStatus(RequirementAutomationStatus.WAITING_HUMAN);
             requirementDao.save(requirement);
-            return;
+        }
+    }
+
+    /**
+     * 任务级交付审阅的 REPLAN 入口（方案 §5.3）。复用补救计划生成能力，
+     * 与计划级验收 rejected 共享同一计数口径与 remediationTasks 契约。
+     *
+     * @return true 表示已生成补救计划并恢复调度；false 表示无补救任务或超上限，调用方应转 WAIT_HUMAN
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean startRemediationLoopFromDelivery(Requirement requirement, ExecutionPlan currentPlan,
+                                                     RequirementDesignContext context,
+                                                     List<RequirementComment> previousComments,
+                                                     PmDeliveryDecision decision) {
+        // 复用 MAX_REMEDIATION_ROUNDS 上限：以 (requirementId, loopId) 的 REMEDIATION 计划版本数为准。
+        long remediationCount = countRemediationPlans(requirement.getId(), requirement.getActiveLoopId());
+        if (remediationCount >= MAX_REMEDIATION_ROUNDS) {
+            LOGGER.warn("REPLAN rejected: remediation rounds cap reached. requirementId={}, rounds={}",
+                    requirement.getId(), remediationCount);
+            return false;
+        }
+        return createRemediationPlan(requirement, currentPlan, context, previousComments,
+                decision.remediationTasks(), decision.findings(), "PM 补救计划（基于任务交付审阅）");
+    }
+
+    private boolean createRemediationPlan(Requirement requirement, ExecutionPlan currentPlan,
+                                          RequirementDesignContext context,
+                                          List<RequirementComment> previousComments,
+                                          List<PlanTask> remediationTasks,
+                                          List<String> findings, String summary) {
+        String loopId = requirement.getActiveLoopId();
+        if (remediationTasks == null || remediationTasks.isEmpty()) {
+            return false;
         }
 
         ExecutionPlan plan = new ExecutionPlan();
@@ -589,15 +635,16 @@ public class RequirementAutomationService {
         plan.setVersion(nextPlanVersion(requirement.getId()));
         plan.setPlanType(ExecutionPlanType.REMEDIATION);
         plan.setStatus(ExecutionPlanStatus.READY);
-        plan.setSummary("PM 补救计划（基于验收反馈）");
+        plan.setSummary(summary);
         plan.setCreatedByAgent("pm-agent");
         if (context != null) {
             plan.setMemoryContextId(context.getId());
             plan.setWorkspaceMemoryId(context.getWorkspaceMemoryId());
         }
+        String baseSummary = currentPlan == null ? requirement.getTitle() : currentPlan.getSummary();
         plan.setPlanJson(planJson(requirement,
-                new PmAgentClient.PmPlanResult(currentPlan.getSummary(), remediationTasks,
-                        acceptanceResult.findings(), List.of()),
+                new PmAgentClient.PmPlanResult(baseSummary, remediationTasks,
+                        findings == null ? List.of() : findings, List.of()),
                 ExecutionPlanType.REMEDIATION));
         executionPlanDao.save(plan);
 
@@ -612,6 +659,26 @@ public class RequirementAutomationService {
         requirementDao.save(requirement);
         TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
                 new CodingTaskSchedulingEvents.ScheduleRequested(requirement.getId())));
+        return true;
+    }
+
+    private long countRemediationPlans(String requirementId, String loopId) {
+        long count = 0;
+        for (ExecutionPlan p : executionPlanDao.findByRequirementIdAndLoopId(requirementId, loopId)) {
+            if (p.getPlanType() == ExecutionPlanType.REMEDIATION) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 任务级交付审阅：调用 pm-agent 对单次交付 Run 做决策（方案 §5.1/§5.2）。
+     * 事务外调用（由 orchestrator 异步触发），内部仅阻塞调用 agent，不持有数据库事务。
+     */
+    public PmDeliveryDecision reviewTaskDelivery(Requirement requirement, ExecutionPlan plan,
+                                                               PmAgentClient.DeliveryReviewInput input) {
+        return pmAgentClient.reviewDelivery(requirement, plan, input);
     }
 
     private List<PlanTask> parsePlanTasks(String planJson) {

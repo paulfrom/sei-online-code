@@ -77,6 +77,10 @@ class CompensationServiceTest {
         progressReconciler = mock(ProgressReconciler.class);
         progressService = mock(ProgressService.class);
         agentExecutionService = mock(AgentExecutionService.class);
+        com.changhong.onlinecode.service.review.TaskDeliveryReviewService taskDeliveryReviewService =
+                mock(com.changhong.onlinecode.service.review.TaskDeliveryReviewService.class);
+        org.springframework.context.ApplicationEventPublisher eventPublisher =
+                mock(org.springframework.context.ApplicationEventPublisher.class);
         ocConfig = mock(OcConfig.class);
         when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
         transactionManager = mock(PlatformTransactionManager.class);
@@ -85,6 +89,7 @@ class CompensationServiceTest {
                 requirementAgentService,
                 automationService, deliveryService, failureInfoSupport, compensationLogService,
                 requirementCommentService, progressReconciler, progressService, agentExecutionService,
+                taskDeliveryReviewService, eventPublisher,
                 ocConfig, transactionManager);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(invocation -> invocation.getArgument(0));

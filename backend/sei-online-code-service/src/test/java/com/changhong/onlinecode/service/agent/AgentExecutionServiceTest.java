@@ -34,6 +34,9 @@ import static org.mockito.Mockito.when;
 
 class AgentExecutionServiceTest {
 
+    // helper to build a real AgentWorkspaceLease for tests
+    private static AgentWorkspaceLease newLease() { return new AgentWorkspaceLease(); }
+
     @TempDir
     Path workspace;
 
@@ -44,7 +47,8 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class));
+                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                new AgentWorkspaceLease(), Runnable::run);
 
         Agent agent = new Agent();
         agent.setId("agent-1");
@@ -100,7 +104,8 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class));
+                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                new AgentWorkspaceLease(), command -> new Thread(command, "agent-test").start());
 
         Agent agent = new Agent();
         agent.setId("agent-1");
@@ -134,9 +139,11 @@ class AgentExecutionServiceTest {
         AgentExecutionResult second = service.execute("test-agent",
                 request("project-1", "requirement-1", "task-2"));
 
+        // 工作区租约繁忙：结果为 deferred（非失败），不创建失败 Run、不消耗重试次数（方案 §6.2）。
         assertFalse(second.succeeded());
+        assertTrue(second.deferred());
         assertEquals("run-2", second.runId());
-        assertTrue(second.failureReason().contains("同一工作区已有运行中任务"));
+        assertTrue(second.failureReason().contains("推迟"));
         verify(registry, times(1)).executeDetailed(eq(agentWorkspace), any(), any(), any());
 
         CliRunResult cliResult = new CliRunResult();
@@ -153,7 +160,8 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class));
+                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                new AgentWorkspaceLease(), Runnable::run);
 
         Agent agent = new Agent();
         agent.setId("agent-1");
@@ -184,6 +192,24 @@ class AgentExecutionServiceTest {
 
         assertTrue(service.execute("test-agent", request("project-1", "requirement-1", "task-1")).succeeded());
         assertTrue(service.execute("test-agent", request("project-2", "requirement-2", "task-2")).succeeded());
+    }
+
+    @Test
+    void executeAsync_rejectedByBoundedExecutorReturnsDeferred() {
+        java.util.concurrent.Executor rejecting = command -> {
+            throw new java.util.concurrent.RejectedExecutionException("full");
+        };
+        AgentExecutionService service = new AgentExecutionService(
+                mock(AgentService.class), mock(CliRunnerRegistry.class), mock(RunDao.class),
+                mock(AgentRunRecorder.class), mock(SkillService.class), mock(BuiltInSkillRegistry.class),
+                mock(SkillMaterializer.class), new AgentWorkspaceLease(), rejecting);
+        AgentExecutionRequest request = request("project-1", "requirement-1", "task-1");
+        request.setRunId("run-1");
+
+        AgentExecutionResult result = service.executeAsync("test-agent", request).join();
+
+        assertTrue(result.deferred());
+        assertEquals("run-1", result.runId());
     }
 
     private AgentExecutionRequest request(String projectId, String requirementId, String taskId) {

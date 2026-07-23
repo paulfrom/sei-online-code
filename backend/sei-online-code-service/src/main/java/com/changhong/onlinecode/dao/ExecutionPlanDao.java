@@ -21,6 +21,9 @@ public interface ExecutionPlanDao extends BaseEntityDao<ExecutionPlan> {
 
     long countByRequirementIdAndLoopId(String requirementId, String loopId);
 
+    /** 同一 loop 下的所有计划版本（用于统计 REMEDIATION 计划数量）。 */
+    List<ExecutionPlan> findByRequirementIdAndLoopId(String requirementId, String loopId);
+
     Optional<ExecutionPlan> findByRequirementIdAndLoopIdAndRevisionSeq(
             String requirementId, String loopId, Long revisionSeq);
 }

@@ -282,11 +282,83 @@ class PmAgentClientTest {
         assertEquals("验收通过", result.summary());
     }
 
+    @Test
+    void parseDelivery_approveDecisionForValidJson() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmDeliveryDecision decision = parseDelivery(client, """
+                {"decision":"APPROVE","summary":"ok","failureCategory":"NONE","findings":["evidence"],"retryReason":null,"remediationTasks":[]}
+                """);
+        assertNotNull(decision);
+        assertEquals(com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision.APPROVE, decision.decision());
+        assertEquals(com.changhong.onlinecode.dto.enums.DeliveryFailureCategory.NONE, decision.failureCategory());
+        assertEquals(List.of("evidence"), decision.findings());
+    }
+
+    @Test
+    void parseDelivery_retryWithoutReasonIsRejected() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        // RETRY 缺少 retryReason 应被拒绝（返回 null），由服务端转 WAIT_HUMAN。
+        assertNull(parseDelivery(client, """
+                {"decision":"RETRY","summary":"retry","failureCategory":"TRANSIENT_INFRA","retryReason":null,"remediationTasks":[]}
+                """));
+    }
+
+    @Test
+    void parseDelivery_replanWithoutRemediationTasksIsRejected() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        assertNull(parseDelivery(client, """
+                {"decision":"REPLAN","summary":"replan","failureCategory":"PLAN_DEFECT","remediationTasks":[]}
+                """));
+    }
+
+    @Test
+    void parseDelivery_replanWithValidRemediationTasksIsAccepted() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmDeliveryDecision decision = parseDelivery(client, """
+                {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
+                {"taskKey":"R1","title":"fix","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]},
+                {"taskKey":"V1","title":"verify","description":"v","agent":"test-agent","area":"validation","dependsOn":["R1"],"fileScope":["backend/"],"acceptanceCriteria":["all tests pass"]}
+                ]}
+                """);
+        assertNotNull(decision);
+        assertEquals(2, decision.remediationTasks().size());
+    }
+
+    @Test
+    void parseDelivery_replanWithoutIndependentTestAgentIsRejected() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+
+        assertNull(parseDelivery(client, """
+                {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
+                {"taskKey":"R1","title":"fix","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]}
+                ]}
+                """));
+    }
+
+    @Test
+    void parseDelivery_invalidDecisionStringReturnsNull() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        assertNull(parseDelivery(client, """
+                {"decision":"MAYBE","summary":"x"}
+                """));
+    }
+
     private PmAgentClient.PmPlanResult parsePlan(PmAgentClient client, String json) throws Exception {
         Method method = PmAgentClient.class.getDeclaredMethod("parsePlanJson",
                 String.class, String.class, String.class);
         method.setAccessible(true);
         return (PmAgentClient.PmPlanResult) method.invoke(client, json, "requirement-1", "loop-1");
+    }
+
+    private PmDeliveryDecision parseDelivery(PmAgentClient client, String json) throws Exception {
+        Method method = PmAgentClient.class.getDeclaredMethod("parseDeliveryDecisionJson",
+                String.class, PmAgentClient.DeliveryReviewInput.class);
+        method.setAccessible(true);
+        PmAgentClient.DeliveryReviewInput input =
+                new PmAgentClient.DeliveryReviewInput(
+                        "req-1", "loop-1", "task-1", "run-1", "T1", "t", "d", "backend",
+                        "backend-dev-agent", "coding-task", true, List.of(), "{}", List.of());
+        return (PmDeliveryDecision) method.invoke(client, json, input);
     }
 
     private PmAgentClient.PmAcceptanceResult parseAcceptance(PmAgentClient client, String json) throws Exception {

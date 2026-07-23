@@ -17,17 +17,17 @@ import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.SkillService;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -37,7 +37,6 @@ import java.util.concurrent.TimeUnit;
  * 收口 Run 终态。业务服务不要直接调用 {@link CliRunnerRegistry}。</p>
  */
 @Service
-@AllArgsConstructor
 @Slf4j
 public class AgentExecutionService {
 
@@ -48,10 +47,38 @@ public class AgentExecutionService {
     private final SkillService skillService;
     private final BuiltInSkillRegistry builtInSkillRegistry;
     private final SkillMaterializer skillMaterializer;
-    private final ConcurrentMap<String, String> activeAgentRuns = new ConcurrentHashMap<>();
+    private final AgentWorkspaceLease workspaceLease;
+    private final Executor agentExecutionExecutor;
+
+    public AgentExecutionService(AgentService agentService,
+                                 CliRunnerRegistry cliRunnerRegistry,
+                                 RunDao runDao,
+                                 AgentRunRecorder agentRunRecorder,
+                                 SkillService skillService,
+                                 BuiltInSkillRegistry builtInSkillRegistry,
+                                 SkillMaterializer skillMaterializer,
+                                 AgentWorkspaceLease workspaceLease,
+                                 @Qualifier("agentExecutionExecutor") Executor agentExecutionExecutor) {
+        this.agentService = agentService;
+        this.cliRunnerRegistry = cliRunnerRegistry;
+        this.runDao = runDao;
+        this.agentRunRecorder = agentRunRecorder;
+        this.skillService = skillService;
+        this.builtInSkillRegistry = builtInSkillRegistry;
+        this.skillMaterializer = skillMaterializer;
+        this.workspaceLease = workspaceLease;
+        this.agentExecutionExecutor = agentExecutionExecutor;
+    }
 
     public CompletableFuture<AgentExecutionResult> executeAsync(String agentName, AgentExecutionRequest request) {
-        return CompletableFuture.supplyAsync(() -> execute(agentName, request));
+        try {
+            return CompletableFuture.supplyAsync(() -> execute(agentName, request), agentExecutionExecutor);
+        } catch (RejectedExecutionException e) {
+            String reason = "Agent 执行线程池繁忙，本次执行推迟";
+            log.warn("agent execution deferred because executor rejected task. agentName={}, runId={}",
+                    agentName, request.getRunId());
+            return CompletableFuture.completedFuture(AgentExecutionResult.deferred(request.getRunId(), reason));
+        }
     }
 
     public AgentWorkspace workspace(String projectId) {
@@ -83,13 +110,14 @@ public class AgentExecutionService {
             return AgentExecutionResult.failed(run.getId(), e.getMessage());
         }
         String slotKey = workspaceSlotKey(request.getProjectId(), workspaceKey);
-        String activeRunId = activeAgentRuns.putIfAbsent(slotKey, run.getId());
-        if (activeRunId != null && !Objects.equals(activeRunId, run.getId())) {
-            String reason = "同一工作区已有运行中任务: projectId="
+        AcquireResult lease = workspaceLease.tryAcquire(slotKey, run.getId());
+        if (!lease.acquired()) {
+            String reason = "同一工作区已有运行中任务，本次执行被推迟: projectId="
                     + request.getProjectId() + ", workspaceKey=" + workspaceKey
-                    + ", activeRunId=" + activeRunId;
-            log.info("agent execution rejected because slot is busy: {}", reason);
-            return AgentExecutionResult.failed(run.getId(), reason, reason);
+                    + ", activeRunId=" + lease.busyRunId();
+            log.info("agent execution deferred because workspace slot is busy: {}", reason);
+            // 工作区繁忙属于调度延迟：不创建失败 Run、不写失败摘要、不增加 retryCount（方案 §6.2）。
+            return AgentExecutionResult.deferred(run.getId(), reason);
         }
         try {
             materializeSkills(agent, workspace);
@@ -115,7 +143,7 @@ public class AgentExecutionService {
             cliRunnerRegistry.cancel(run.getId());
             return AgentExecutionResult.failed(run.getId(), e.getMessage());
         } finally {
-            activeAgentRuns.remove(slotKey, run.getId());
+            workspaceLease.release(slotKey, run.getId());
         }
     }
 

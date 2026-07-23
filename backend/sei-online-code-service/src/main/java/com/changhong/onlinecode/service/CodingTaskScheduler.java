@@ -12,9 +12,12 @@ import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeCollector;
 import com.changhong.onlinecode.service.memory.CodingTaskChangeResult;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewRequested;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraph;
 import com.changhong.onlinecode.service.revision.apply.EffectiveTaskGraphResolver;
 import com.changhong.onlinecode.service.validation.ValidationLoopService;
+import com.changhong.onlinecode.service.validation.ValidationTaskExecutionService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,7 +68,9 @@ public class CodingTaskScheduler {
     private final Map<String, ReentrantLock> requirementLocks = new ConcurrentHashMap<>();
     private final RequirementCommentService requirementCommentService;
     private final ValidationLoopService validationLoopService;
+    private final ValidationTaskExecutionService validationTaskExecutionService;
     private final EffectiveTaskGraphResolver effectiveTaskGraphResolver;
+    private final TaskDeliveryReviewService taskDeliveryReviewService;
 
 
     /**
@@ -125,6 +130,15 @@ public class CodingTaskScheduler {
         List<CodingTask> tasks = effectiveGraph.tasks();
         Map<String, CodingTask> taskByKey = effectiveGraph.tasksByKey();
 
+        // PM 审阅门禁（方案 §6.1）：存在任一未决（PENDING/REVIEWING）交付审阅时，
+        // 本轮调度立即结束，不启动后续任务。最终计划验收不得替代任务级交付审阅。
+        if (taskDeliveryReviewService.hasOpenReview(requirementId, currentLoopId)) {
+            log.debug("schedule paused for requirement {} due to open task delivery review", requirementId);
+            // 仍发布调度完成事件，便于编排边界在审阅全部结算后进入计划验收判断。
+            eventPublisher.publishEvent(new SchedulingPassCompletedEvent(requirementId));
+            return;
+        }
+
         // 2. 收集当前占用 lane 和 fileScope 的活动任务
         List<CodingTask> activeTasks = tasks.stream()
                 .filter(t -> ACTIVE_STATUSES.contains(t.getStatus()))
@@ -148,9 +162,12 @@ public class CodingTaskScheduler {
             }
 
             List<String> deps = task.getDependsOn() == null ? List.of() : task.getDependsOn();
+            // 依赖满足条件（方案 §6.3）：依赖任务 status==SUCCEEDED 且最新交付审阅==APPROVE。
+            // PM 决策前不把成功任务当作"依赖已满足"，避免下游提前启动。
             boolean depsSatisfied = deps.stream().allMatch(depKey -> {
                 CodingTask dep = taskByKey.get(depKey);
-                return dep != null && dep.getStatus() == CodingTaskStatus.SUCCEEDED;
+                return dep != null && dep.getStatus() == CodingTaskStatus.SUCCEEDED
+                        && taskDeliveryReviewService.isApproved(dep.getId());
             });
             boolean depsFailed = deps.stream().anyMatch(depKey -> {
                 CodingTask dep = taskByKey.get(depKey);
@@ -240,6 +257,7 @@ public class CodingTaskScheduler {
             task.setLastFailedAt(new Date());
             codingTaskDao.save(task);
             appendDevResult(task, false, failureReason);
+            requestDeliveryReview(task, false);
             schedule(task.getRequirementId());
             return;
         }
@@ -248,32 +266,19 @@ public class CodingTaskScheduler {
         task.setFailureSummary(null);
         task.setFailureDetail(null);
         codingTaskDao.save(task);
+        requestDeliveryReview(task, true);
         schedule(task.getRequirementId());
     }
 
     private void executeValidationTask(CodingTask task) {
-        if (validationLoopService != null) {
-            task.setStatus(CodingTaskStatus.VALIDATING);
-            codingTaskDao.save(task);
-            ValidationLoopService.ValidationOutcome outcome = validationLoopService.validateTask(task);
-            if (!isCurrentLoop(task)) {
-                task.setStatus(CodingTaskStatus.STALE);
-                codingTaskDao.save(task);
-                schedule(task.getRequirementId());
+        if (validationTaskExecutionService != null) {
+            // claim 阶段（方案 §7）：本调度事务内置 VALIDATING 并提交，
+            // 使 test-agent 运行期间其他事务可查询到 VALIDATING。
+            if (!validationTaskExecutionService.claim(task)) {
                 return;
             }
-            if (outcome.passed()) {
-                task.setStatus(CodingTaskStatus.SUCCEEDED);
-                task.setFailureSummary(null);
-                task.setFailureDetail(null);
-            } else {
-                task.setStatus(CodingTaskStatus.VALIDATION_FAILED);
-                task.setFailureSummary("任务级验证失败");
-                task.setFailureDetail("详见 VALIDATION_RESULT 评论及 Run 记录");
-                task.setLastFailedAt(new Date());
-            }
-            codingTaskDao.save(task);
-            schedule(task.getRequirementId());
+            // execute 阶段：调度事务提交后通过有界线程池运行 test-agent，不占用数据库事务。
+            runAfterCurrentTransactionCommit(() -> validationTaskExecutionService.executeAsync(task.getId()));
             return;
         }
 
@@ -283,6 +288,7 @@ public class CodingTaskScheduler {
         task.setLastFailedAt(new Date());
         appendValidationUnavailable(task);
         codingTaskDao.save(task);
+        requestDeliveryReview(task, false);
         schedule(task.getRequirementId());
     }
 
@@ -369,6 +375,44 @@ public class CodingTaskScheduler {
     private boolean isSchedulingPaused(Requirement requirement) {
         RequirementRevisionState state = requirement.getRevisionState();
         return state != null && state != RequirementRevisionState.NONE;
+    }
+
+    /**
+     * 任务交付完成后，创建 PM 审阅记录并在事务提交后发布异步审阅事件（方案 §5.1 / §5.2）。
+     *
+     * <p>幂等：同一 (codingTaskId, deliveryRunId) 重复调用只创建一次。审阅门禁会在下次
+     * {@code doSchedule} 生效，阻止下游任务在 PM 决策前启动。</p>
+     */
+    private void requestDeliveryReview(CodingTask task, boolean deliverySucceeded) {
+        Run run = runDao.findByCodingTaskId(task.getId()).stream()
+                .reduce((left, right) -> Objects.requireNonNullElse(left.getRunNo(), 0)
+                        > Objects.requireNonNullElse(right.getRunNo(), 0) ? left : right)
+                .orElse(null);
+        if (run == null || run.getId() == null) {
+            log.warn("requestDeliveryReview skipped: no run found. taskId={}", task.getId());
+            return;
+        }
+        com.changhong.onlinecode.entity.TaskDeliveryReview review =
+                taskDeliveryReviewService.createOrGet(task, run.getId(), deliverySucceeded);
+        // 事件在事务提交后异步触发 PM 审阅，避免在调度事务内阻塞等待 agent。
+        // 不使用 sei-core TransactionUtil.afterCommit：当本调度事务位于另一个 after-commit
+        // 回调开启的 REQUIRES_NEW 事务中时会立即执行（见 CodingTaskExecutionService 注释）。
+        runAfterCurrentTransactionCommit(() -> eventPublisher.publishEvent(
+                new TaskDeliveryReviewRequested(task.getRequirementId(), review.getId(), task.getId())));
+    }
+
+    private void runAfterCurrentTransactionCommit(Runnable action) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        action.run();
+                    }
+                });
     }
 
     private static String firstNonBlank(String... values) {

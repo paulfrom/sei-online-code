@@ -1,10 +1,12 @@
 package com.changhong.onlinecode.service.agent;
 
 import com.changhong.onlinecode.dao.RunDao;
+import com.changhong.onlinecode.dto.enums.DeliveryFailureCategory;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
+import com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
@@ -50,6 +52,7 @@ public class PmAgentClient {
     private static final String AGENT_NAME = "pm-agent";
     private static final long PLAN_TIMEOUT_SECONDS = 600;
     private static final long ACCEPT_TIMEOUT_SECONDS = 600;
+    private static final long DELIVERY_REVIEW_TIMEOUT_SECONDS = 600;
     private static final PlanPatchValidator PLAN_PATCH_VALIDATOR = new PlanPatchValidator();
 
     private final RunDao runDao;
@@ -188,6 +191,54 @@ public class PmAgentClient {
         }
         markRunSucceeded(execution.runId());
         return result;
+    }
+
+    /**
+     * 调用 pm-agent 进行任务级交付审阅（方案 §4.3 / §5.1 / §5.2）。
+     *
+     * <p>每次任务（coding agent 或 test-agent）交付完成后调用一次。pm-agent 基于交付摘要、
+     * 验收证据与必要上下文，返回结构化决策 JSON。调用失败或 JSON 解析失败返回 {@code null}，
+     * 调用方据此将审阅置为 {@code WAIT_HUMAN}（方案 §11 PM 死锁控制）。</p>
+     *
+     * <p>本方法同步阻塞，但<strong>必须</strong>由调用方在数据库事务之外执行（见方案 §7 异步边界）。</p>
+     *
+     * @param requirement 需求聚合根
+     * @param plan        当前执行计划（提供 memory context）
+     * @param input       任务级交付审阅输入
+     * @return 决策结果；agent 调用失败、取消或 JSON 解析失败时返回 null
+     */
+    public PmDeliveryDecision reviewDelivery(Requirement requirement,
+                                             ExecutionPlan plan,
+                                             DeliveryReviewInput input) {
+        Objects.requireNonNull(input, "delivery review input is required");
+        String prompt = buildDeliveryReviewPrompt(requirement, input);
+        String projectId = requirement == null ? null : requirement.getProjectId();
+        String requirementId = input.requirementId();
+        String loopId = input.loopId();
+        String memoryContextId = plan == null ? null : plan.getMemoryContextId();
+        String workspaceMemoryId = plan == null ? null : plan.getWorkspaceMemoryId();
+        AgentExecutionResult execution = executeAgent(projectId, requirementId, loopId, prompt,
+                memoryContextId, workspaceMemoryId, DELIVERY_REVIEW_TIMEOUT_SECONDS);
+        if (!execution.succeeded()) {
+            settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
+                    execution.failureReason(), "pm-agent 交付审阅调用失败"));
+            return null;
+        }
+        if (execution.runId() == null || execution.output() == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 交付审阅调用失败、取消或无输出");
+            return null;
+        }
+        if (isCancellationRequested(execution.runId())) {
+            markRunCancelled(execution.runId());
+            return null;
+        }
+        PmDeliveryDecision decision = parseDeliveryDecisionJson(execution.output(), input);
+        if (decision == null) {
+            settleFailedOrCancelled(execution.runId(), "pm-agent 交付审阅返回内容无法解析为有效决策 JSON");
+            return null;
+        }
+        markRunSucceeded(execution.runId());
+        return decision;
     }
 
     private AgentExecutionResult executeAgent(String projectId, String requirementId, String loopId, String prompt,
@@ -381,6 +432,156 @@ public class PmAgentClient {
         sb.append("  ]\n");
         sb.append("}\n");
         return sb.toString();
+    }
+
+    private String buildDeliveryReviewPrompt(Requirement requirement, DeliveryReviewInput input) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are pm-agent. Review a single task delivery and decide what the orchestrator should do next.\n\n");
+        sb.append("Decision contract:\n");
+        sb.append("- APPROVE: only when the task succeeded and delivery evidence is complete.\n");
+        sb.append("- RETRY: only for transient infrastructure issues or clearly correctable agent execution deviation; record retryReason.\n");
+        sb.append("- REPLAN: for code defects, test failures, upstream delivery incomplete, task contract errors, or when new remediation tasks are needed.\n");
+        sb.append("- WAIT_HUMAN: when you cannot decide safely, output is invalid, remediation cap reached, or a human decision is required.\n");
+        sb.append("- For a FAILED or VALIDATION_FAILED delivery, APPROVE is forbidden.\n\n");
+        sb.append("## Requirement\n");
+        sb.append("Title: ").append(requirement == null ? "" : Objects.toString(requirement.getTitle(), "")).append("\n");
+        sb.append("Description: ").append(requirement == null ? "" : Objects.toString(requirement.getDescription(), "")).append("\n\n");
+
+        sb.append("## Delivery Under Review\n");
+        sb.append("taskKey: ").append(Objects.toString(input.taskKey(), "")).append("\n");
+        sb.append("taskTitle: ").append(Objects.toString(input.taskTitle(), "")).append("\n");
+        sb.append("taskDescription: ").append(Objects.toString(input.taskDescription(), "")).append("\n");
+        sb.append("area: ").append(Objects.toString(input.area(), "")).append("\n");
+        sb.append("assignedAgent: ").append(Objects.toString(input.assignedAgent(), "")).append("\n");
+        sb.append("deliverySucceeded: ").append(input.deliverySucceeded()).append("\n");
+        sb.append("taskType: ").append(Objects.toString(input.taskType(), "")).append("\n");
+        if (input.acceptanceCriteria() != null && !input.acceptanceCriteria().isEmpty()) {
+            sb.append("acceptanceCriteria:\n");
+            for (String criterion : input.acceptanceCriteria()) {
+                sb.append("- ").append(criterion).append("\n");
+            }
+        }
+        sb.append("\n## Delivery Evidence\n");
+        sb.append(Objects.toString(input.deliveryEvidence(), "n/a")).append("\n\n");
+
+        if (input.relatedComments() != null && !input.relatedComments().isEmpty()) {
+            sb.append("## Related Comments (DEV_RESULT / VALIDATION_RESULT)\n");
+            for (RequirementComment comment : input.relatedComments()) {
+                if (comment.getCommentType() == RequirementCommentType.DEV_RESULT
+                        || comment.getCommentType() == RequirementCommentType.VALIDATION_RESULT) {
+                    sb.append("[").append(comment.getAuthorType()).append(" / ")
+                            .append(comment.getCommentType()).append("] ")
+                            .append(Objects.toString(comment.getAuthorName(), "")).append("\n");
+                    sb.append(Objects.toString(comment.getContent(), "")).append("\n\n");
+                }
+            }
+        }
+
+        sb.append("\nReturn **only** valid JSON with this exact structure:\n");
+        sb.append("{\n");
+        sb.append("  \"decision\": \"APPROVE | RETRY | REPLAN | WAIT_HUMAN\",\n");
+        sb.append("  \"summary\": \"string\",\n");
+        sb.append("  \"failureCategory\": \"NONE | TRANSIENT_INFRA | DELIVERY_INCOMPLETE | VALIDATION_FAILED | UPSTREAM_INCOMPLETE | PLAN_DEFECT\",\n");
+        sb.append("  \"findings\": [\"string\"],\n");
+        sb.append("  \"retryReason\": \"required only when decision is RETRY\",\n");
+        sb.append("  \"remediationTasks\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"taskKey\": \"string\",\n");
+        sb.append("      \"title\": \"string\",\n");
+        sb.append("      \"description\": \"string\",\n");
+        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\" or \"test-agent\",\n");
+        sb.append("      \"area\": \"frontend\" or \"backend\" or \"full-stack\" or \"validation\",\n");
+        sb.append("      \"dependsOn\": [],\n");
+        sb.append("      \"fileScope\": [\"frontend/src/...\"],\n");
+        sb.append("      \"acceptanceCriteria\": [\"string\"]\n");
+        sb.append("    }\n");
+        sb.append("  ]\n");
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    private PmDeliveryDecision parseDeliveryDecisionJson(String json, DeliveryReviewInput input) {
+        try {
+            JsonNode root = JsonUtils.mapper().readTree(extractJsonObject(json));
+            TaskDeliveryReviewDecision decision = parseDecision(root.path("decision").asText(""));
+            if (decision == null) {
+                LOGGER.warn("pm-agent delivery review has invalid decision: {}", json);
+                return null;
+            }
+            String summary = root.path("summary").asText("");
+            DeliveryFailureCategory category = parseFailureCategory(root.path("failureCategory").asText(""));
+            List<String> findings = readStringList(root.path("findings"));
+            String retryReason = root.path("retryReason").asText(null);
+            if (decision == TaskDeliveryReviewDecision.RETRY
+                    && (retryReason == null || retryReason.isBlank())) {
+                LOGGER.warn("pm-agent delivery review RETRY missing retryReason: {}", json);
+                return null;
+            }
+
+            List<RequirementAutomationService.PlanTask> remediationTasks = new ArrayList<>();
+            JsonNode remediationNode = root.path("remediationTasks");
+            if (remediationNode.isArray()) {
+                for (JsonNode taskNode : remediationNode) {
+                    String taskKey = taskNode.path("taskKey").asText(null);
+                    String title = taskNode.path("title").asText(null);
+                    String description = taskNode.path("description").asText("");
+                    String agent = taskNode.path("agent").asText(null);
+                    String area = taskNode.path("area").asText(null);
+                    List<String> dependsOn = readStringList(taskNode.path("dependsOn"));
+                    List<String> fileScope = readStringList(taskNode.path("fileScope"));
+                    List<String> acceptanceCriteria = readStringList(taskNode.path("acceptanceCriteria"));
+                    if (taskKey == null || title == null || agent == null || area == null) {
+                        LOGGER.warn("pm-agent remediation task missing required fields: {}", taskNode);
+                        return null;
+                    }
+                    remediationTasks.add(new RequirementAutomationService.PlanTask(
+                            taskKey, title, description, agent, area, dependsOn, fileScope, acceptanceCriteria));
+                }
+            }
+
+            if (decision == TaskDeliveryReviewDecision.REPLAN) {
+                if (remediationTasks.isEmpty()) {
+                    LOGGER.warn("pm-agent delivery review REPLAN without remediationTasks: {}", json);
+                    return null;
+                }
+                if (!isValidTaskGraph(remediationTasks)) {
+                    LOGGER.warn("pm-agent delivery review REPLAN has invalid agent assignment or DAG");
+                    return null;
+                }
+                if (remediationTasks.stream().noneMatch(task -> "test-agent".equals(task.agent()))) {
+                    LOGGER.warn("pm-agent delivery review REPLAN has no independent test-agent task");
+                    return null;
+                }
+            }
+
+            return new PmDeliveryDecision(decision, summary, category, findings, retryReason, remediationTasks);
+        } catch (Exception e) {
+            LOGGER.warn("pm-agent delivery review JSON parse failed: requirementId={}, codingTaskId={}",
+                    input.requirementId(), input.codingTaskId(), e);
+            return null;
+        }
+    }
+
+    private TaskDeliveryReviewDecision parseDecision(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return TaskDeliveryReviewDecision.valueOf(text.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private DeliveryFailureCategory parseFailureCategory(String text) {
+        if (text == null || text.isBlank()) {
+            return DeliveryFailureCategory.NONE;
+        }
+        try {
+            return DeliveryFailureCategory.valueOf(text.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return DeliveryFailureCategory.NONE;
+        }
     }
 
     private String buildPlanPatchPrompt(PlanRevisionInput input, RequirementDesignContext context) {
@@ -684,5 +885,39 @@ public class PmAgentClient {
      * @param command 命令字符串
      */
     public record ValidationCommand(String area, String command) {
+    }
+
+    /**
+     * 任务级交付审阅输入。{@code reviewDelivery} 的不可变快照。
+     *
+     * @param requirementId       需求 ID
+     * @param loopId              当前 loop id
+     * @param codingTaskId        交付完成的 CodingTask ID
+     * @param deliveryRunId       被审阅的交付 Run ID
+     * @param taskKey             计划任务 key
+     * @param taskTitle           任务标题
+     * @param taskDescription     任务描述
+     * @param area                任务区域
+     * @param assignedAgent       分配的 agent 名称
+     * @param taskType            任务类型标识：coding-task / validation-task
+     * @param deliverySucceeded   交付是否成功
+     * @param acceptanceCriteria  验收标准
+     * @param deliveryEvidence    交付证据文本（DEV_RESULT / VALIDATION_RESULT 摘要、改动文件、退出码等）
+     * @param relatedComments     相关评论历史
+     */
+    public record DeliveryReviewInput(String requirementId,
+                                      String loopId,
+                                      String codingTaskId,
+                                      String deliveryRunId,
+                                      String taskKey,
+                                      String taskTitle,
+                                      String taskDescription,
+                                      String area,
+                                      String assignedAgent,
+                                      String taskType,
+                                      boolean deliverySucceeded,
+                                      List<String> acceptanceCriteria,
+                                      String deliveryEvidence,
+                                      List<RequirementComment> relatedComments) {
     }
 }

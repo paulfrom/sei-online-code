@@ -14,6 +14,11 @@
 
 本方案只定义代码与测试修改，不处理当前数据库中的 Run、CodingTask 或 ExecutionPlan。
 
+> 数据迁移不在本方案范围内（不回填历史数据）。新表 `oc_task_delivery_review` 的建表语句
+> 已提供于 `backend/sei-online-code-service/src/main/resources/db/migration/V9__create_task_delivery_review.sql`，
+> 由 DBA / 外部 schema 流程执行。本仓库 `ddl-auto: validate`，未引入 Flyway 运行时；
+> 代码层只保证 `@Entity` 注解与该 DDL 列定义一致。测试层使用 Mockito 纯单元测试，不依赖真实数据库。
+
 ## 2. 非目标
 
 - 不修复当前正在运行或已经失败的任务数据。
@@ -21,6 +26,8 @@
 - 不改变前后端功能需求或业务验收标准。
 - 不允许 pm-agent 为了让计划通过而降低原验收标准。
 - 不把每个 coding task 的自测替代为 test-agent 验收。
+- 不引入 Flyway/Liquibase 等迁移工具，不改 `ddl-auto: validate` 行为。
+- 不引入分布式租约（phase 1 单实例内存租约即可，见 §6.2）。
 
 ## 3. 当前问题
 
@@ -109,25 +116,29 @@ pm-agent 必须只返回合法 JSON：
 
 ```text
 agent 完成
-  -> 短事务结算 Run 和 CodingTask
+  -> 短事务结算 Run 和 CodingTask（现有 CodingTaskExecutionService 已在提交后异步回调 finishRun）
   -> 写入 DEV_RESULT 与结构化交付摘要
   -> 创建 TaskDeliveryReview(PENDING)
-  -> 事务提交后发布 TaskDeliveryReviewRequested
-  -> 暂停同一需求的新任务调度
-  -> pm-agent 审阅
-  -> 应用 APPROVE / RETRY / REPLAN / WAIT_HUMAN
+  -> 事务提交后发布 TaskDeliveryReviewRequested（异步事件）
+  -> 暂停同一需求的新任务调度（见 §6.1 门禁）
+  -> pm-agent 审阅（异步，@TransactionalEventListener AFTER_COMMIT，事务外阻塞调用 agent）
+  -> 应用 APPROVE / RETRY / REPLAN / WAIT_HUMAN（新短事务）
   -> 事务提交后按决定重新调度
 ```
+
+**异步边界硬约束**：PM 审阅与 test-agent 执行一样，必须在任何数据库事务之外运行。
+监听 `TaskDeliveryReviewRequested` 使用 `@Async` + `AFTER_COMMIT` 语义，调用 `PmAgentClient`
+（其内部仍为同步阻塞，但不持有事务）。决策结果在新的 `@Transactional(REQUIRES_NEW)` 中落库。
 
 ### 5.2 Test-agent 完成
 
 ```text
 test-agent 完成
   -> 解析 JSON passed
-  -> 短事务结算 Run 和 CodingTask
+  -> 短事务结算 Run 和 CodingTask（claim/execute/finish 三阶段，见 §7）
   -> 写入 VALIDATION_RESULT
   -> 创建 TaskDeliveryReview(PENDING)
-  -> pm-agent 审阅
+  -> pm-agent 审阅（异步事件）
   -> passed=false 时只能 RETRY / REPLAN / WAIT_HUMAN
 ```
 
@@ -152,9 +163,14 @@ test-agent 完成
 - 原任务和原 Run 保留失败证据。
 - 当前计划进入 `NEEDS_REMEDIATION`。
 - 根据 `remediationTasks` 创建新版本补救计划。
+- **任务级 REPLAN 与计划级验收 rejected 复用同一补救路径**：现有 `RequirementAutomationService.startRemediationLoop`
+  作为唯一补救计划生成入口。任务级 REPLAN 触发时直接调用该方法，传入任务级 review 的 `remediationTasks`，
+  并复用其 `MAX_REMEDIATION_ROUNDS = 3` 上限。为避免任务级与计划级重复计数，补救轮数统一以
+  `(requirementId, loopId)` 的历史 `REMEDIATION` 计划版本数为准（与现有 `onPlanTasksSettled` 计数口径一致）。
 - 上游交付不完整时，修复任务必须先于原失败任务的替代任务。
 - 补救计划必须包含独立 test-agent 验收任务。
 - 新计划创建完成后再恢复调度。
+- **remediationTasks 契约统一**：任务级 review 与计划级 acceptance 使用同一 `PlanTask` 结构（taskKey/title/description/agent/area/dependsOn/fileScope/acceptanceCriteria），由 `PmAgentClient` 统一解析与 DAG 校验。
 
 #### WAIT_HUMAN
 
@@ -173,16 +189,29 @@ test-agent 完成
 
 存在时立即结束本轮调度。最终计划验收不得替代任务级交付审阅；只有所有任务交付审阅完成后，才允许进入 `onPlanTasksSettled`。
 
-### 6.2 工作区租约
+### 6.2 工作区租约（复用现有 mutex，不新建）
 
-调度器与执行器必须使用同一个 workspace lease 契约：
+代码现状：`AgentExecutionService.activeAgentRuns`（`ConcurrentMap<String,String>`）已是一个
+按 `projectId::requirement-{id}` 的单实例内存互斥锁；`WorkspaceLeaseService` 另有一套面向
+进度账本/Git commit 的 DB lease（含 fencing token，语义不同）。
 
+本方案**重构并复用 `AgentExecutionService` 的内存 mutex**，不引入第二把锁，避免双锁死锁：
+
+- 将 `activeAgentRuns` 重构为具名组件 `AgentWorkspaceLease`（仍是单实例内存 `ConcurrentMap`），
+  暴露 `tryAcquire(slotKey, runId) -> AcquireResult` 与 `release(slotKey, runId)`。
+- `AcquireResult` 区分 `ACQUIRED` / `BUSY`（BUSY 携带当前持有 runId）。
 - 同一 `(projectId, workspaceKey)` 同时最多一个活动 agent。
-- 调度器取得租约后才能把任务置为活动状态。
 - 租约繁忙时任务保持 `PENDING`，不创建失败 Run，不写失败摘要，不增加 retryCount。
-- `AgentExecutionResult` 增加 `DEFERRED` 或等价的类型化结果，不再用普通 `failed` 表示工作区繁忙。
-- 租约在成功、失败、取消和异常路径都必须释放。
-- 第一阶段可复用单实例内存租约；若支持多实例，必须使用带过期时间和心跳的持久化/分布式租约。
+- `AgentExecutionResult` 增加类型化 `DEFERRED` 语义：保持 record 不变，新增
+  `boolean deferred()` 访问器（默认 false）；新增静态工厂 `deferred(runId, reason)`，
+  把"workspace busy"改动收敛到执行入口一处，**不**改造现有 sealed 层级（当前是扁平 record）。
+- 调度器收到 `DEFERRED` 时跳过该任务、不修改任务状态、本轮不发布 `SchedulingPassCompleted` 触发的下游启动。
+- 租约在成功、失败、取消和异常路径都必须释放（现有 `finally` 块已覆盖，保持）。
+- 多实例部署前替换为带过期时间/心跳的持久化或分布式租约（phase 1 不做，列为风险）。
+
+**与 area/fileScope 并行的关系澄清**：phase 1 保持现有"同一 requirement 全局串行"语义
+（requirement 工作区互斥），`doSchedule` 的 area lane / fileScope 检查仍保留——它们在
+多 requirement 共享调度器实例、或未来放开 requirement 内并行时仍有效，不与此方案冲突。
 
 ### 6.3 调度依赖条件
 
@@ -192,6 +221,11 @@ test-agent 完成
 依赖任务 status == SUCCEEDED
 且依赖任务最新 delivery review == APPROVE
 ```
+
+实现要点：`doSchedule` 的依赖检查由"`status==SUCCEEDED`"扩展为"`status==SUCCEEDED` 且
+`reviewService.latestReviewFor(dep).decision==APPROVE`"。`onDevelopmentRunFinished` 现有逻辑
+（把成功任务直接置 `SUCCEEDED` 并 `schedule()`）改为：成功时置 `SUCCEEDED` 但**不**立即把下游
+视为可启动——下游启动由 review APPROVE 后的恢复调度驱动。
 
 失败任务等待 PM 决策期间，不把下游永久改为 `BLOCKED`；可保持 `PENDING`。只有 PM 决定 `REPLAN` 或 `WAIT_HUMAN` 后，才按计划变更结果处理下游任务。
 
@@ -213,6 +247,11 @@ test-agent 完成
 - 超时与取消传播；
 - traceId、requirementId、codingTaskId 和 runId 日志上下文。
 
+新增 `OcAgentExecutorConfig` `@Configuration` 类，定义名为 `validationAgentExecutor` 的
+`ThreadPoolTaskExecutor` `@Bean`（有界队列 + AbortPolicy + 明确 core/max 池大小，参数走 `OcConfig`）。
+这是本代码库首个显式 `TaskExecutor` bean（现状 `@EnableAsync` 走默认 `SimpleAsyncTaskExecutor`）。
+PM 审阅复用同一有界池（或单独 `pmReviewExecutor`），避免无界 common pool。
+
 ## 8. 补偿策略
 
 `CompensationService.recoverDevelopment` 不再直接恢复所有 `FAILED/VALIDATION_FAILED`。
@@ -233,6 +272,11 @@ test-agent 完成
 - `WAITING_HUMAN` 需求。
 
 补偿器只恢复既有决策，不产生新的业务决策。
+
+**retryCount 单调约束**：`failureInfoSupport.markRetrying` 自增 retryCount。为避免 PM 决策路径与
+补偿恢复路径对同一任务重复自增：PM `RETRY` 决策应用时调用一次 `markRetrying`；补偿器在
+"已有 RETRY 决策但调度事件丢失"路径只重发 `ScheduleRequested` 事件，**不**再调用 `markRetrying`。
+验收用例需断言：RETRY 决策 + 后续补偿恢复同一任务，`retryCount` 仅 +1。
 
 ## 9. 实施任务
 

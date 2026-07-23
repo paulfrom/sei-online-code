@@ -124,7 +124,8 @@ class CodingTaskExecutionServiceTest {
                 codingTaskProgressIntegrator,
                 workspaceLeaseService,
                 requirementWorkspaceDao,
-                taskHandoffSnapshotDao
+                taskHandoffSnapshotDao,
+                mock(org.springframework.transaction.PlatformTransactionManager.class)
         );
     }
 
@@ -338,7 +339,7 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_agentNotFound_marksFailedAndTriggersScheduler() {
+    void executePlanTask_agentNotFound_createsFailedRunAndTriggersDeliverySettlement() {
         CodingTask task = new CodingTask();
         task.setId("task7");
         task.setRequirementId("req-7");
@@ -348,6 +349,11 @@ class CodingTaskExecutionServiceTest {
         when(codingTaskDao.findOne("task7")).thenReturn(task);
         when(runDao.findByCodingTaskId("task7")).thenReturn(java.util.Collections.emptyList());
         when(agentService.findByName("missing-agent")).thenReturn(null);
+        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
+            Run run = invocation.getArgument(0);
+            run.setId("run-agent-missing");
+            return run;
+        });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task7", "missing-agent", "prompt");
 
@@ -356,7 +362,13 @@ class CodingTaskExecutionServiceTest {
         assertEquals(CodingTaskStatus.FAILED, task.getStatus());
         assertEquals("开发代理未找到", task.getFailureSummary());
         verify(codingTaskDao).save(task);
-        verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested("req-7"));
+        ArgumentCaptor<Run> failedRun = ArgumentCaptor.forClass(Run.class);
+        verify(runDao).save(failedRun.capture());
+        assertEquals(RunState.FAILED, failedRun.getValue().getState());
+        assertEquals("task7", failedRun.getValue().getCodingTaskId());
+        verify(eventPublisher).publishEvent(
+                new CodingTaskSchedulingEvents.DevelopmentFinished("task7", false,
+                        "开发代理不存在: missing-agent"));
     }
 
     @Test

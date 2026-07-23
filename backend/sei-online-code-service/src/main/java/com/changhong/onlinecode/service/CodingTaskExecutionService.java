@@ -39,7 +39,10 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -47,6 +50,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * CodingTask 执行服务。
@@ -82,6 +86,7 @@ public class CodingTaskExecutionService {
     private final WorkspaceLeaseService workspaceLeaseService;
     private final RequirementWorkspaceDao requirementWorkspaceDao;
     private final TaskHandoffSnapshotDao taskHandoffSnapshotDao;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * Requests logical cancellation and best-effort process termination.
@@ -180,13 +185,31 @@ public class CodingTaskExecutionService {
         Agent agent = agentService.findByName(agentName);
         if (agent == null) {
             log.error("coding-task plan agent not found taskId={}, agentName={}", codingTaskId, agentName);
+            String failure = "开发代理不存在: " + agentName;
             task.setStatus(CodingTaskStatus.FAILED);
             task.setFailureSummary("开发代理未找到");
             task.setFailureDetail("agentName=" + agentName);
             task.setLastFailedAt(new Date());
             codingTaskDao.save(task);
-            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(task.getRequirementId()));
-            return ResultData.fail("开发代理不存在: " + agentName);
+
+            Run failedRun = new Run();
+            linkPreviousAttempt(failedRun, findPreviousRun(task));
+            failedRun.setCodingTaskId(codingTaskId);
+            failedRun.setRequirementId(task.getRequirementId());
+            failedRun.setLoopId(task.getLoopId());
+            failedRun.setTriggerSource(triggerSource == null ? TriggerSource.AUTO : triggerSource);
+            failedRun.setAgentName(agentName);
+            failedRun.setState(RunState.FAILED);
+            failedRun.setTerminalReason(RunTerminalReason.FAILED);
+            failedRun.setStartedDate(new Date());
+            failedRun.setFinishedDate(new Date());
+            failedRun.setSummary(failure);
+            failedRun.setFailureReason(failure);
+            runNumberService.assign(failedRun);
+            runDao.save(failedRun);
+            runAfterCurrentTransactionCommit(() -> eventPublisher.publishEvent(
+                    new CodingTaskSchedulingEvents.DevelopmentFinished(codingTaskId, false, failure)));
+            return ResultData.fail(failure);
         }
 
         task.setStatus(CodingTaskStatus.RUNNING);
@@ -241,13 +264,64 @@ public class CodingTaskExecutionService {
             CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName, request);
             future.thenAccept(result -> {
                 CompletionDecision decision = decideCompletion(run, result);
-                finishRun(run, task, decision.success(), decision.summary(), decision.failureReason(), schedulerManaged);
+                if (decision.deferred()) {
+                    // 工作区租约繁忙：任务回退 PENDING 并重新调度，不计失败、不消耗重试（方案 §6.2）。
+                    boolean deferred = inNewTransaction(() ->
+                            handleDeferredRun(run, task, decision.summary()));
+                    if (deferred && schedulerManaged) {
+                        eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(
+                                task.getRequirementId()));
+                    }
+                    return;
+                }
+                boolean settled = inNewTransaction(() -> finishRun(run, task, decision.success(),
+                        decision.summary(), decision.failureReason(), schedulerManaged));
+                if (settled && schedulerManaged) {
+                    eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                            task.getId(), decision.success(), decision.failureReason()));
+                }
             }).exceptionally(e -> {
                 log.error("coding-task execute failed taskId={}", task.getId(), e);
-                finishRun(run, task, false, rootMessage(e), rootMessage(e), schedulerManaged);
+                String failure = rootMessage(e);
+                boolean settled = inNewTransaction(() ->
+                        finishRun(run, task, false, failure, failure, schedulerManaged));
+                if (settled && schedulerManaged) {
+                    eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                            task.getId(), false, failure));
+                }
                 return null;
             });
         });
+    }
+
+    /**
+     * 处理工作区租约繁忙：把任务从 RUNNING 回退 PENDING 并重发调度事件。
+     * Run 标记为 CANCELLED（租约繁忙非真实执行），不写失败摘要、不增加 retryCount。
+     */
+    private boolean handleDeferredRun(Run run, CodingTask task, String reason) {
+        Run persistedRun = runDao.findOne(run.getId());
+        if (persistedRun != null && persistedRun.getState() == RunState.RUNNING) {
+            persistedRun.setState(RunState.CANCELLED);
+            persistedRun.setTerminalReason(RunTerminalReason.CANCELLED);
+            persistedRun.setFinishedDate(new Date());
+            persistedRun.setSummary("工作区租约繁忙，执行推迟：" + reason);
+            runDao.save(persistedRun);
+        }
+        CodingTask persistedTask = codingTaskDao.findOne(task.getId());
+        if (persistedTask != null && persistedTask.getStatus() == CodingTaskStatus.RUNNING) {
+            persistedTask.setStatus(CodingTaskStatus.PENDING);
+            // 关键：不调用 failureInfoSupport.markRetrying / markCodingTaskFailure，retryCount 保持不变。
+            codingTaskDao.save(persistedTask);
+            log.info("coding-task deferred due to busy workspace, reverted to PENDING. taskId={}", task.getId());
+            return true;
+        }
+        return false;
+    }
+
+    private <T> T inNewTransaction(Supplier<T> action) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return template.execute(ignored -> action.get());
     }
 
     /**
@@ -273,6 +347,11 @@ public class CodingTaskExecutionService {
     private CompletionDecision decideCompletion(Run run, AgentExecutionResult result) {
         if (result == null) {
             return CompletionDecision.failed("执行返回空结果", "执行返回空结果");
+        }
+        // 工作区租约繁忙：调度延迟，不计为失败，不消耗重试次数（方案 §6.2）。
+        // 把任务回退到 PENDING，等待下一轮调度重新获取租约。
+        if (result.deferred()) {
+            return CompletionDecision.deferred(result.failureReason());
         }
         String summary = firstNonBlank(result.output(), result.failureReason());
         if (!result.succeeded()) {
@@ -313,13 +392,17 @@ public class CodingTaskExecutionService {
         return "coding-task-" + task.getId();
     }
 
-    private record CompletionDecision(boolean success, String summary, String failureReason) {
+    private record CompletionDecision(boolean success, String summary, String failureReason, boolean deferred) {
         static CompletionDecision ok(String summary) {
-            return new CompletionDecision(true, summary, null);
+            return new CompletionDecision(true, summary, null, false);
         }
 
         static CompletionDecision failed(String summary, String failureReason) {
-            return new CompletionDecision(false, summary, failureReason);
+            return new CompletionDecision(false, summary, failureReason, false);
+        }
+
+        static CompletionDecision deferred(String reason) {
+            return new CompletionDecision(false, reason, reason, true);
         }
     }
 
@@ -367,18 +450,22 @@ public class CodingTaskExecutionService {
 
     private void finishRun(Run run, CodingTask task, boolean success, String failureReason,
                            boolean schedulerManaged) {
-        finishRun(run, task, success, failureReason, failureReason, schedulerManaged);
+        boolean settled = finishRun(run, task, success, failureReason, failureReason, schedulerManaged);
+        if (settled && schedulerManaged) {
+            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
+                    task.getId(), success, failureReason));
+        }
     }
 
-    private void finishRun(Run run, CodingTask task, boolean success, String summary, String failureReason,
-                           boolean schedulerManaged) {
+    private boolean finishRun(Run run, CodingTask task, boolean success, String summary, String failureReason,
+                              boolean schedulerManaged) {
         Date now = new Date();
         Run persistedRun = runDao.findOne(run.getId());
         CodingTask persistedTask = codingTaskDao.findOne(task.getId());
         if (persistedRun == null || persistedTask == null) {
             log.warn("finishRun skipped because run/task disappeared. runId={}, taskId={}",
                     run.getId(), task.getId());
-            return;
+            return false;
         }
         if (Boolean.TRUE.equals(persistedRun.getCancelRequested())) {
             persistedRun.setState(RunState.CANCELLED);
@@ -392,18 +479,18 @@ public class CodingTaskExecutionService {
                 persistedTask.setStatus(CodingTaskStatus.CANCELLED);
                 codingTaskDao.save(persistedTask);
             }
-            return;
+            return false;
         }
         if (persistedRun.getLoopId() != null && persistedTask.getLoopId() != null
                 && !Objects.equals(persistedRun.getLoopId(), persistedTask.getLoopId())) {
             persistedTask.setStatus(CodingTaskStatus.STALE);
             codingTaskDao.save(persistedTask);
-            return;
+            return false;
         }
         if (persistedRun.getState() != RunState.RUNNING || persistedTask.getStatus() != CodingTaskStatus.RUNNING) {
             log.info("finishRun skipped because run/task already settled. runId={}, runState={}, taskId={}, taskStatus={}",
                     persistedRun.getId(), persistedRun.getState(), persistedTask.getId(), persistedTask.getStatus());
-            return;
+            return false;
         }
 
         persistedRun.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
@@ -424,9 +511,7 @@ public class CodingTaskExecutionService {
         appendTerminalObservationBestEffort(persistedRun, success, summary, failureReason);
 
         if (schedulerManaged) {
-            eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                    persistedTask.getId(), success, failureReason));
-            return;
+            return true;
         }
 
         persistedTask.setStatus(success ? CodingTaskStatus.SUCCEEDED : CodingTaskStatus.FAILED);
@@ -435,6 +520,7 @@ public class CodingTaskExecutionService {
         if (success && persistedTask.getExecutionPlanId() == null) {
             submitMemoryUpdateJob(persistedTask, persistedRun);
         }
+        return false;
     }
 
     /**

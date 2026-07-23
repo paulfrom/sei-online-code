@@ -6,34 +6,36 @@ import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
+import com.changhong.onlinecode.dto.enums.DeliveryFailureCategory;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanStatus;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.MemoryRecordStatus;
-import com.changhong.onlinecode.dto.enums.ObservationSourceType;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
-import com.changhong.onlinecode.dto.enums.RunObservationType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
+import com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision;
+import com.changhong.onlinecode.dto.enums.TaskDeliveryReviewStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.dto.enums.VerificationStatus;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
 import com.changhong.onlinecode.entity.Run;
+import com.changhong.onlinecode.entity.TaskDeliveryReview;
 import com.changhong.onlinecode.config.OcConfig;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.progress.ProgressReconciler;
-import com.changhong.onlinecode.service.progress.ProgressService;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewRequested;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import com.changhong.sei.core.utils.TransactionUtil;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -51,6 +53,7 @@ import java.util.Objects;
  */
 @Service
 @Slf4j
+@AllArgsConstructor
 public class CompensationService {
 
     private final RequirementDao requirementDao;
@@ -65,45 +68,12 @@ public class CompensationService {
     private final CompensationLogService compensationLogService;
     private final RequirementCommentService requirementCommentService;
     private final ProgressReconciler progressReconciler;
-    private final ProgressService progressService;
     private final AgentExecutionService agentExecutionService;
+    private final TaskDeliveryReviewService taskDeliveryReviewService;
+    private final ApplicationEventPublisher eventPublisher;
     private final OcConfig ocConfig;
     private final TransactionTemplate transactionTemplate;
 
-    public CompensationService(RequirementDao requirementDao,
-                               RequirementDesignContextDao requirementDesignContextDao,
-                               ExecutionPlanDao executionPlanDao,
-                               CodingTaskDao codingTaskDao,
-                               RunDao runDao,
-                               RequirementAgentService requirementAgentService,
-                               RequirementAutomationService automationService,
-                               RequirementDeliveryService deliveryService,
-                               FailureInfoSupport failureInfoSupport,
-                               CompensationLogService compensationLogService,
-                               RequirementCommentService requirementCommentService,
-                               ProgressReconciler progressReconciler,
-                               ProgressService progressService,
-                               AgentExecutionService agentExecutionService,
-                               OcConfig ocConfig,
-                               PlatformTransactionManager transactionManager) {
-        this.requirementDao = requirementDao;
-        this.requirementDesignContextDao = requirementDesignContextDao;
-        this.executionPlanDao = executionPlanDao;
-        this.codingTaskDao = codingTaskDao;
-        this.runDao = runDao;
-        this.requirementAgentService = requirementAgentService;
-        this.automationService = automationService;
-        this.deliveryService = deliveryService;
-        this.failureInfoSupport = failureInfoSupport;
-        this.compensationLogService = compensationLogService;
-        this.requirementCommentService = requirementCommentService;
-        this.progressReconciler = progressReconciler;
-        this.progressService = progressService;
-        this.agentExecutionService = agentExecutionService;
-        this.ocConfig = ocConfig;
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-    }
 
     /**
      * Runs one ordered recovery pass: close timed-out work, then repair upstream to downstream.
@@ -342,13 +312,32 @@ public class CompensationService {
                 "补偿恢复：重新生成当前 loop 的 PM 执行计划。"));
     }
 
+    /**
+     * 补偿开发态失败任务（方案 §8 补偿策略收敛）。
+     *
+     * <p>补偿器只恢复既有 PM 决策，不产生新的业务决策。允许自动恢复的范围：</p>
+     * <ul>
+     *   <li>已取得 PM {@code RETRY} 决策但调度事件丢失的任务（重置 PENDING 并重新调度）；</li>
+     *   <li>服务重启导致的孤儿任务：仍 PENDING 的可正常调度，无需补偿；</li>
+     *   <li>已明确 {@code TRANSIENT_INFRA} 且策略允许自动恢复的基础设施故障。</li>
+     * </ul>
+     * <p>禁止自动补偿：{@code VALIDATION_FAILED}、{@code DELIVERY_INCOMPLETE}、
+     * {@code UPSTREAM_INCOMPLETE}、{@code PLAN_DEFECT}、尚未完成 PM 审阅的失败任务、
+     * {@code WAITING_HUMAN} 需求。补偿器对这类任务保留原失败证据，等待 PM 决策或人工介入。</p>
+     */
     private void recoverDevelopment(Requirement requirement, Date now) {
         ExecutionPlan plan = currentPlan(requirement);
         if (plan == null || (plan.getStatus() != ExecutionPlanStatus.READY
                 && plan.getStatus() != ExecutionPlanStatus.DEVELOPING)) {
             return;
         }
-        boolean waitingForRetryWindow = false;
+        // WAITING_HUMAN 需求不自动补偿（方案 §8）。
+        if (requirement.getAutomationStatus() == RequirementAutomationStatus.WAITING_HUMAN
+                || requirement.getAutomationStatus() == RequirementAutomationStatus.INTERRUPTED) {
+            return;
+        }
+        boolean blockedByReview = false;
+        boolean resumed = false;
         List<CodingTask> tasks = codingTaskDao.findByRequirementId(requirement.getId()).stream()
                 .filter(task -> Objects.equals(task.getExecutionPlanId(), plan.getId()))
                 .filter(task -> Objects.equals(task.getLoopId(), requirement.getActiveLoopId()))
@@ -358,27 +347,66 @@ public class CompensationService {
                     && task.getStatus() != CodingTaskStatus.VALIDATION_FAILED) {
                 continue;
             }
+            // 失败任务必须先有 PM 决策；未审阅的失败重发审阅事件，不自动恢复。
+            TaskDeliveryReview review = taskDeliveryReviewService
+                    .findFirstByCodingTaskId(task.getId()).orElse(null);
+            if (review == null || review.getStatus() == TaskDeliveryReviewStatus.PENDING
+                    || review.getStatus() == TaskDeliveryReviewStatus.REVIEWING) {
+                if (review != null && review.getStatus() == TaskDeliveryReviewStatus.PENDING) {
+                    TransactionUtil.afterCommit(() -> eventPublisher.publishEvent(
+                            new TaskDeliveryReviewRequested(requirement.getId(), review.getId(), task.getId())));
+                    compensationLogService.record("CODING_TASK", task.getId(), "REPOST_REVIEW", true,
+                            "补发未决 PM 审阅事件",
+                            "deliveryRunId=" + review.getDeliveryRunId(), TriggerSource.SCHEDULED_COMPENSATION);
+                }
+                blockedByReview = true;
+                continue;
+            }
+            // 仅 PM 决策 RETRY 的任务允许自动恢复；WAITING_HUMAN / REPLAN 已有自己的副作用路径。
+            if (review.getDecision() != TaskDeliveryReviewDecision.RETRY) {
+                continue;
+            }
+            // VALIDATION_FAILED 即使 PM 错误地 RETRY，补偿器也不自动恢复（方案 §8 硬约束）。
+            if (!isAutoRecoverable(review, task)) {
+                continue;
+            }
             if (!failureInfoSupport.canRetry(task, now)) {
-                waitingForRetryWindow |= Objects.requireNonNullElse(task.getRetryCount(), 0)
-                        < failureInfoSupport.maxRetry();
                 continue;
             }
             CodingTaskStatus failedStatus = task.getStatus();
             if (codingTaskDao.updateStatusIfMatch(task.getId(), failedStatus, CodingTaskStatus.PENDING) == 0) {
                 continue;
             }
+            // 关键：补偿器只重置状态并重新调度，不再调用 markRetrying（retryCount 已在 PM RETRY 时增加一次）。
             task.setStatus(CodingTaskStatus.PENDING);
-            failureInfoSupport.markRetrying(task, TriggerSource.SCHEDULED_COMPENSATION, now);
             codingTaskDao.save(task);
             compensationLogService.record("CODING_TASK", task.getId(), "RETRY_LOOP_TASK", true,
-                    "恢复 loop 编码任务", task.getFailureSummary(), TriggerSource.SCHEDULED_COMPENSATION);
-            log.info("恢复 loop 编码任务，task {}，requirement {}",
-                    task.getId(), requirement.getId());
+                    "基于 PM RETRY 决策恢复 loop 编码任务",
+                    "decisionSource=PM_REVIEW, deliveryRunId=" + review.getDeliveryRunId()
+                            + ", category=" + review.getFailureCategory(),
+                    TriggerSource.SCHEDULED_COMPENSATION);
+            log.info("恢复 loop 编码任务（PM RETRY 决策），task {}，requirement {}，deliveryRunId={}",
+                    task.getId(), requirement.getId(), review.getDeliveryRunId());
+            resumed = true;
         }
-        if (!waitingForRetryWindow) {
+        // 仅在没有未决审阅阻塞时才恢复调度：失败的/未审阅的任务等待 PM 决策，
+        // 否则恢复调度会在门禁下被拦住。无失败任务的崩溃恢复（服务重启孤儿任务）仍走此路径。
+        if (!blockedByReview) {
             TransactionUtil.afterCommit(() -> automationService.resumeDevelopmentLoop(
                     requirement.getId(), requirement.getActiveLoopId()));
         }
+    }
+
+    /**
+     * 失败分类是否允许自动恢复（方案 §8）。
+     * 仅 TRANSIENT_INFRA 允许自动恢复；其余分类禁止。
+     */
+    private boolean isAutoRecoverable(TaskDeliveryReview review, CodingTask task) {
+        if (task.getStatus() == CodingTaskStatus.VALIDATION_FAILED) {
+            return false;
+        }
+        DeliveryFailureCategory category = review.getFailureCategory();
+        return category == DeliveryFailureCategory.TRANSIENT_INFRA;
     }
 
     private void recoverAcceptance(Requirement requirement, Date now) {

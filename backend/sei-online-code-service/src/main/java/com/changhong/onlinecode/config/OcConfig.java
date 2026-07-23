@@ -81,10 +81,38 @@ public class OcConfig {
     @Value("${memory.rebuild.critical-paths:build.gradle,settings.gradle,package.json,pnpm-workspace.yaml,bootstrap,routes/,.sql}")
     private String criticalPathsCsv;
 
+    // ==================== Agent 执行线程池配置 ====================
+
+    /** test-agent / pm-agent 审阅执行有界线程池核心大小。默认 2。 */
+    @Value("${oc.agent-executor.core-pool-size:2}")
+    private int agentExecutorCorePoolSize;
+
+    /** test-agent / pm-agent 审阅执行有界线程池最大大小。默认 4。 */
+    @Value("${oc.agent-executor.max-pool-size:4}")
+    private int agentExecutorMaxPoolSize;
+
+    /** test-agent / pm-agent 审阅执行有界线程池队列容量。默认 32。 */
+    @Value("${oc.agent-executor.queue-capacity:32}")
+    private int agentExecutorQueueCapacity;
+
     // ==================== Workspace Getter ====================
 
     public String getWorkspaceRoot() {
         return workspaceRoot;
+    }
+
+    // ==================== Agent 执行线程池 Getter ====================
+
+    public int getAgentExecutorCorePoolSize() {
+        return agentExecutorCorePoolSize;
+    }
+
+    public int getAgentExecutorMaxPoolSize() {
+        return agentExecutorMaxPoolSize;
+    }
+
+    public int getAgentExecutorQueueCapacity() {
+        return agentExecutorQueueCapacity;
     }
 
     // ==================== GitLab Getter ====================

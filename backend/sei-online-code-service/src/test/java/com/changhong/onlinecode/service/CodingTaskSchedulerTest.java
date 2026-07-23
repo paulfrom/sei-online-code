@@ -52,6 +52,8 @@ class CodingTaskSchedulerTest {
     private RequirementCommentService requirementCommentService;
     private ValidationLoopService validationLoopService;
     private EffectiveTaskGraphResolver effectiveTaskGraphResolver;
+    private com.changhong.onlinecode.service.validation.ValidationTaskExecutionService validationTaskExecutionService;
+    private com.changhong.onlinecode.service.review.TaskDeliveryReviewService taskDeliveryReviewService;
     private CodingTaskScheduler scheduler;
 
     private final AtomicInteger savedTasks = new AtomicInteger(0);
@@ -66,10 +68,18 @@ class CodingTaskSchedulerTest {
         requirementCommentService = mock(RequirementCommentService.class);
         validationLoopService = mock(ValidationLoopService.class);
         effectiveTaskGraphResolver = mock(EffectiveTaskGraphResolver.class);
+        validationTaskExecutionService = mock(com.changhong.onlinecode.service.validation.ValidationTaskExecutionService.class);
+        taskDeliveryReviewService = mock(com.changhong.onlinecode.service.review.TaskDeliveryReviewService.class);
+        // 默认：无未决审阅（不触发门禁），依赖任务视为已 APPROVE（保留原调度语义）。
+        // 针对新门禁/依赖语义的专门测试可在用例内覆盖这些 stub。
+        when(taskDeliveryReviewService.hasOpenReview(anyString(), anyString())).thenReturn(false);
+        when(taskDeliveryReviewService.isApproved(anyString())).thenReturn(true);
         scheduler = new CodingTaskScheduler(codingTaskDao, requirementDao, executionService,
                 runDao, mock(CodingTaskChangeCollector.class),
                 eventPublisher, requirementCommentService, validationLoopService,
-                effectiveTaskGraphResolver);
+                validationTaskExecutionService,
+                effectiveTaskGraphResolver,
+                taskDeliveryReviewService);
         when(runDao.findByCodingTaskId(anyString())).thenReturn(List.of());
 
         when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
@@ -192,18 +202,20 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
-    void schedule_validationTaskRunsTestAgentAndMarksFailure() {
+    void schedule_validationTaskClaimsAndTriggersAsyncExecution() {
+        // 新行为（方案 §7）：验证任务由 scheduler claim（置 VALIDATING）后异步执行 test-agent，
+        // 不在 schedule() 事务内同步等待。claim 委托给 ValidationTaskExecutionService。
         Requirement req = requirement("req-1", "loop-1");
         when(requirementDao.findOne("req-1")).thenReturn(req);
         CodingTask task = task("task-a", "VAL-001", "full-stack", List.of(), CodingTaskStatus.PENDING);
         task.setAssignedAgent("test-agent");
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
-        when(validationLoopService.validateTask(task))
-                .thenReturn(new ValidationLoopService.ValidationOutcome(false, List.of()));
+        when(validationTaskExecutionService.claim(task)).thenReturn(true);
 
         scheduler.schedule("req-1");
 
-        assertEquals(CodingTaskStatus.VALIDATION_FAILED, task.getStatus());
+        verify(validationTaskExecutionService).claim(task);
+        verify(validationTaskExecutionService).executeAsync("task-a");
         verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
     }
 
@@ -341,27 +353,73 @@ class CodingTaskSchedulerTest {
     }
 
     @Test
-    void schedule_validationTaskLoopChangesDuringValidation_marksTaskStale() {
-        List<CodingTaskStatus> savedStatuses = new ArrayList<>();
-        when(codingTaskDao.save(any(CodingTask.class))).thenAnswer(invocation -> {
-            CodingTask saved = invocation.getArgument(0);
-            savedStatuses.add(saved.getStatus());
-            return saved;
-        });
-        Requirement original = requirement("req-1", "loop-1");
-        Requirement current = requirement("req-1", "loop-2");
-        when(requirementDao.findOne("req-1")).thenReturn(original, current, current);
+    void schedule_validationTaskLoopChangesHandledByExecutorNotScheduler() {
+        // 新行为（方案 §7）：loop 在验证期间变更的处理已移至 ValidationTaskExecutionService，
+        // scheduler 只负责 claim + 触发异步执行，不再在 schedule() 内同步检测 loop 变更。
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
         CodingTask task = task("task-a", "VAL-001", "full-stack", List.of(), CodingTaskStatus.PENDING);
         task.setAssignedAgent("test-agent");
-        task.setExecutionPlanId("plan-1");
         when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
-        when(validationLoopService.validateTask(task))
-                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
+        when(validationTaskExecutionService.claim(task)).thenReturn(true);
 
         scheduler.schedule("req-1");
 
-        assertEquals(CodingTaskStatus.STALE, task.getStatus());
-        assertTrue(!savedStatuses.contains(CodingTaskStatus.SUCCEEDED));
+        verify(validationTaskExecutionService).claim(task);
+        verify(validationTaskExecutionService).executeAsync("task-a");
+        // scheduler 不再同步调用 test-agent
+        verify(validationLoopService, never()).validateTask(any());
+    }
+
+    @Test
+    void schedule_pausedWhenOpenDeliveryReviewExists() {
+        // 方案 §6.1 门禁：存在未决（PENDING/REVIEWING）交付审阅时，不启动后续任务。
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask task = task("task-a", "FE-001", "frontend", List.of(), CodingTaskStatus.PENDING);
+        task.setAssignedAgent("frontend-dev-agent");
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
+        when(taskDeliveryReviewService.hasOpenReview("req-1", "loop-1")).thenReturn(true);
+
+        scheduler.schedule("req-1");
+
+        verify(executionService, never()).executePlanTask(anyString(), anyString(), anyString());
+        // 仍发布调度完成事件，便于编排边界在审阅结算后进入计划验收。
+        verify(eventPublisher).publishEvent(new CodingTaskScheduler.SchedulingPassCompletedEvent("req-1"));
+    }
+
+    @Test
+    void schedule_downstreamNotStartedUntilDependencyApproved() {
+        // 方案 §6.3：依赖任务 status==SUCCEEDED 且最新 review==APPROVE 才算依赖满足。
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask upstream = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.SUCCEEDED);
+        upstream.setAssignedAgent("backend-dev-agent");
+        CodingTask downstream = task("task-b", "FE-001", "frontend", List.of("BE-001"), CodingTaskStatus.PENDING);
+        downstream.setAssignedAgent("frontend-dev-agent");
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(upstream, downstream));
+        // 上游已 SUCCEEDED 但尚未 APPROVE
+        when(taskDeliveryReviewService.isApproved("task-a")).thenReturn(false);
+
+        scheduler.schedule("req-1");
+
+        verify(executionService, never()).executePlanTask(eq("task-b"), anyString(), anyString());
+    }
+
+    @Test
+    void schedule_downstreamStartedOnceDependencyApproved() {
+        Requirement req = requirement("req-1", "loop-1");
+        when(requirementDao.findOne("req-1")).thenReturn(req);
+        CodingTask upstream = task("task-a", "BE-001", "backend", List.of(), CodingTaskStatus.SUCCEEDED);
+        upstream.setAssignedAgent("backend-dev-agent");
+        CodingTask downstream = task("task-b", "FE-001", "frontend", List.of("BE-001"), CodingTaskStatus.PENDING);
+        downstream.setAssignedAgent("frontend-dev-agent");
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(upstream, downstream));
+        when(taskDeliveryReviewService.isApproved("task-a")).thenReturn(true);
+
+        scheduler.schedule("req-1");
+
+        verify(executionService).executePlanTask(eq("task-b"), anyString(), anyString());
     }
 
     @Test

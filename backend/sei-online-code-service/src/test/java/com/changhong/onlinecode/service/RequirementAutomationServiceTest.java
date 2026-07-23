@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -93,6 +94,10 @@ class RequirementAutomationServiceTest {
         failureInfoSupport = mock(FailureInfoSupport.class);
         revisionStateService = mock(PlanRevisionStateService.class);
         effectiveTaskGraphResolver = mock(EffectiveTaskGraphResolver.class);
+        com.changhong.onlinecode.service.review.TaskDeliveryReviewService taskDeliveryReviewService =
+                mock(com.changhong.onlinecode.service.review.TaskDeliveryReviewService.class);
+        // 默认：所有任务交付审阅已结算，允许进入计划级验收。针对门禁的专门测试可在用例内覆盖。
+        when(taskDeliveryReviewService.allReviewsSettled(anyString(), anyString())).thenReturn(true);
         ocConfig = mock(OcConfig.class);
         when(ocConfig.isIncrementalCommentRevisionEnabled()).thenReturn(true);
         capturedPlanStatuses = new ArrayList<>();
@@ -101,7 +106,7 @@ class RequirementAutomationServiceTest {
                 executionPlanDao, requirementCommentService, requirementDesignContextService,
                 runDao, requirementDeliveryService, pmAgentClient, agentExecutionService,
                 validationLoopService, failureInfoSupport, revisionStateService,
-                effectiveTaskGraphResolver, ocConfig);
+                effectiveTaskGraphResolver, taskDeliveryReviewService, ocConfig);
 
         when(requirementDao.save(any(Requirement.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionStateService.request(any(), any(), any())).thenReturn(1L);
