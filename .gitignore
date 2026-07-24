@@ -66,3 +66,4 @@ backend/sei-online-code-service/local-config/
 project/
 .superpowers/
 nohup.out
+.zcode/

@@ -73,16 +73,7 @@ class ConfigServiceTest {
     }
 
     @Test
-    void resolvesGitlabHostFromConfigBeforeEnvironment() throws Exception {
-        setField("gitlabHost", " https://env.gitlab.example.com ");
-        PlatformConfig config = new PlatformConfig();
-        config.setGitlabHost(" https://db.gitlab.example.com ");
-
-        assertEquals("https://db.gitlab.example.com", service.resolveGitlabHost(config));
-    }
-
-    @Test
-    void resolvesGitlabHostFromEnvironmentWhenConfigBlank() throws Exception {
+    void resolvesGitlabHostFromEnvironment() throws Exception {
         setField("gitlabHost", " https://env.gitlab.example.com ");
 
         assertEquals("https://env.gitlab.example.com",

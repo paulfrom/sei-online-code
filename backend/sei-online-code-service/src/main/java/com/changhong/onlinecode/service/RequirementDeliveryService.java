@@ -19,14 +19,7 @@ import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.RunType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
-import com.changhong.onlinecode.entity.ExecutionEffect;
-import com.changhong.onlinecode.entity.ExecutionPlan;
-import com.changhong.onlinecode.entity.MemoryJob;
-import com.changhong.onlinecode.entity.Requirement;
-import com.changhong.onlinecode.entity.RequirementWorkspace;
-import com.changhong.onlinecode.entity.Run;
-import com.changhong.onlinecode.entity.WorkspaceMemory;
-import com.changhong.onlinecode.entity.Project;
+import com.changhong.onlinecode.entity.*;
 import com.changhong.onlinecode.service.progress.EffectService;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
 import com.changhong.sei.core.util.JsonUtils;
@@ -116,7 +109,7 @@ public class RequirementDeliveryService {
             requirement.setDeliveryMergeCommitHash(null);
             requirement.setAutomationStatus(RequirementAutomationStatus.COMPLETED);
             requirementDao.save(requirement);
-            com.changhong.onlinecode.entity.RequirementComment validationComment =
+            RequirementComment validationComment =
                     latestComment(requirementId, RequirementCommentType.VALIDATION_RESULT);
             requirementCommentService.append(requirementId, requirement.getActiveLoopId(),
                     RequirementCommentAuthorType.SYSTEM, "delivery", result.created()
@@ -208,14 +201,15 @@ public class RequirementDeliveryService {
 
     private DeliveryResult doDeliver(Requirement requirement, ExecutionPlan plan,
                                      boolean useCurrentWorkspaceBranch) throws Exception {
-        String gitlabHost = configService.resolveGitlabHost(null);
         String gitlabToken = configService.resolveGitlabToken(null);
-        String gitlabProjectId = configService.resolveGitlabProjectId(null);
+        GitApi.RepositoryTarget deliveryTarget = resolveDeliveryTarget(requirement);
+        String gitlabHost = deliveryTarget.host();
+        String gitlabProjectId = deliveryTarget.projectPath();
         String gitlabTargetBranch = resolveDeliveryTargetBranch(requirement);
-        if (isBlank(gitlabHost) || isBlank(gitlabToken) || isBlank(gitlabProjectId)) {
+        if (isBlank(gitlabToken)) {
             throw new IllegalStateException(
-                    "GitLab 交付配置不完整：apiBaseUrl/token/projectId 必填，" +
-                    "请通过环境变量 oc.gitlab.host / oc.gitlab.token / oc.gitlab.project-id 或平台配置页面设置");
+                    "GitLab 交付配置不完整：token 必填，" +
+                    "请通过环境变量 oc.gitlab.token 或平台配置页面设置");
         }
         Path workspace = resolveDeliveryWorkspace(requirement, useCurrentWorkspaceBranch);
         String branch = resolveSourceBranch(requirement, workspace, useCurrentWorkspaceBranch);
@@ -334,10 +328,7 @@ public class RequirementDeliveryService {
         if (iid == null) {
             throw new IllegalStateException("无法从 MR 地址解析 IID: " + requirement.getDeliveryMrUrl());
         }
-        String projectId = configService.resolveGitlabProjectId(null);
-        if (isBlank(projectId)) {
-            throw new IllegalStateException("GitLab projectId 未配置");
-        }
+        String projectId = resolveDeliveryTarget(requirement).projectPath();
         try {
             MergeRequest mr = gitApi.client(null).getMergeRequestApi().getMergeRequest(projectId, iid);
             DeliveryMrStatus previous = requirement.getDeliveryMrStatus();
@@ -423,6 +414,26 @@ public class RequirementDeliveryService {
             return project.getDeliveryTargetBranch().trim();
         }
         return configService.resolveGitlabTargetBranch(null);
+    }
+
+    /**
+     * 从 Project.gitUrl 解析交付目标仓库(host + projectPath)。
+     *
+     * <p>gitUrl 即交付目标仓库(拉代码、改、再推回原仓库开 MR)。host 与 projectId 都从 gitUrl 解析,
+     * 与 {@code GitApi.cloneRepository} 走同一套解析逻辑,保证「克隆来源」与「交付目标」一致,
+     * 不再依赖全局 gitlabHost / gitlabProjectId 配置。</p>
+     *
+     * @param requirement 需求(用于反查 Project)
+     * @return 解析出的 host 与 projectPath
+     */
+    private GitApi.RepositoryTarget resolveDeliveryTarget(Requirement requirement) {
+        Project project = projectDao.findOne(requirement.getProjectId());
+        String gitUrl = project == null ? null : project.getGitUrl();
+        if (isBlank(gitUrl)) {
+            throw new IllegalStateException(
+                    "项目未配置 Git 地址(gitUrl),无法确定交付目标仓库");
+        }
+        return gitApi.resolveTarget(gitUrl.trim());
     }
 
     private String pushEffectKey(String projectKey, String branch, String commitHash) {

@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -249,20 +250,26 @@ class RequirementDeliveryServiceTest {
         RequirementDao requirementDao = mock(RequirementDao.class);
         ConfigService configService = mock(ConfigService.class);
         GitApi gitApi = mock(GitApi.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
         RequirementCommentService commentService = mock(RequirementCommentService.class);
         RequirementDeliveryService service = new RequirementDeliveryService(
                 requirementDao, mock(ExecutionPlanDao.class), mock(RunDao.class),
                 mock(RunNumberService.class), configService, mock(WorkspaceManager.class),
                 commentService, mock(MemoryJobService.class), mock(WorkspaceMemoryService.class),
-                mock(EffectService.class), gitApi, mock(ProjectDao.class), mock(RequirementWorkspaceDao.class));
+                mock(EffectService.class), gitApi, projectDao, mock(RequirementWorkspaceDao.class));
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
+        requirement.setProjectId("project-1");
         requirement.setActiveLoopId("loop-1");
         requirement.setStatus(RequirementStatus.PRD_CONFIRMED);
         requirement.setDeliveryMrUrl("https://gitlab.example/group/project/-/merge_requests/12");
         requirement.setDeliveryMrStatus(DeliveryMrStatus.OPEN);
+        Project project = new Project();
+        project.setGitUrl("https://gitlab.example/group/project.git");
         when(requirementDao.findOne("requirement-1")).thenReturn(requirement);
-        when(configService.resolveGitlabProjectId(null)).thenReturn("group/project");
+        when(projectDao.findOne("project-1")).thenReturn(project);
+        when(gitApi.resolveTarget("https://gitlab.example/group/project.git"))
+                .thenReturn(new GitApi.RepositoryTarget("https://gitlab.example", "group/project"));
         GitLabApi client = mock(GitLabApi.class);
         MergeRequestApi mergeRequestApi = mock(MergeRequestApi.class);
         when(gitApi.client(null)).thenReturn(client);
@@ -284,5 +291,34 @@ class RequirementDeliveryServiceTest {
                 org.mockito.ArgumentMatchers.any(), eq("gitlab"),
                 eq(com.changhong.onlinecode.dto.enums.RequirementCommentType.MR_MERGED),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void refreshMrStatus_failsWhenProjectGitUrlMissing() {
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                requirementDao, mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class), mock(ConfigService.class), mock(WorkspaceManager.class),
+                mock(RequirementCommentService.class), mock(MemoryJobService.class),
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                projectDao, mock(RequirementWorkspaceDao.class));
+        Requirement requirement = new Requirement();
+        requirement.setId("requirement-1");
+        requirement.setProjectId("project-1");
+        requirement.setActiveLoopId("loop-1");
+        requirement.setDeliveryMrUrl("https://gitlab.example/group/project/-/merge_requests/12");
+        requirement.setDeliveryMrStatus(DeliveryMrStatus.OPEN);
+        Project project = new Project();
+        // gitUrl 留空
+        when(requirementDao.findOne("requirement-1")).thenReturn(requirement);
+        when(projectDao.findOne("project-1")).thenReturn(project);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.refreshMrStatus("requirement-1"));
+
+        // resolveDeliveryTarget 在 refreshMrStatus 的 try 块之外调用,异常直接向上抛出,不被包装
+        assertTrue(exception.getMessage().contains("项目未配置 Git 地址")
+                || exception.getMessage().contains("gitUrl"));
     }
 }

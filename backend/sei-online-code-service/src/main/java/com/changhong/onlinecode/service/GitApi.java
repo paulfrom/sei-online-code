@@ -200,7 +200,21 @@ public class GitApi {
         }
     }
 
-    private RepositoryTarget resolveTarget(String gitUrl) {
+    /**
+     * 把 gitUrl 解析成 (host, projectPath)。
+     *
+     * <p>支持三种格式:
+     * <ul>
+     *   <li>HTTP(S):{@code https://gitlab.example.com/group/repo.git} → host={@code https://gitlab.example.com}, path={@code group/repo}</li>
+     *   <li>SSH:{@code git@gitlab.example.com:group/repo.git} → host={@code https://gitlab.example.com}, path={@code group/repo}</li>
+     *   <li>纯路径:{@code group/repo} → host 走全局配置兜底,path={@code group/repo}</li>
+     * </ul>
+     * 与 {@link #cloneRepository} 走同一套解析逻辑,保证「克隆来源」与「交付目标」始终指向同一仓库。
+     *
+     * @param gitUrl Git 仓库地址
+     * @return 解析出的 host 与 projectPath
+     */
+    public RepositoryTarget resolveTarget(String gitUrl) {
         String raw = gitUrl == null ? "" : gitUrl.trim();
         if (raw.startsWith("http://") || raw.startsWith("https://")) {
             java.net.URI uri = java.net.URI.create(raw);
@@ -304,7 +318,7 @@ public class GitApi {
     public record UploadResult(String commitHash, List<String> changedFiles) {
     }
 
-    private record RepositoryTarget(String host, String projectPath) {
+    public record RepositoryTarget(String host, String projectPath) {
     }
 
     private record ChangedPath(String path, String previousPath, boolean deleted) {
