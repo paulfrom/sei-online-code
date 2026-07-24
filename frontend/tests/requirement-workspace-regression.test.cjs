@@ -160,7 +160,7 @@ test('accepted delivery can be submitted manually after refreshing workspace fac
   assert.match(delivery, /手动提交交付物/);
   assert.match(delivery, /工作区当前分支上的修改/);
   assert.match(delivery, /不会切换分支/);
-  assert.match(delivery, /同步主分支/);
+  assert.match(delivery, /同步基线分支/);
   assert.match(delivery, /发生合并冲突时不会启动新的 Loop/);
   assert.match(delivery, /workspaceStatus\.changedFiles\?\.length/);
   assert.match(delivery, /当前工作区没有未提交修改/);

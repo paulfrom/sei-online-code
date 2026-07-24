@@ -150,9 +150,14 @@ public class WorkspaceLeaseService {
 
         Path path = Path.of(ws.getWorkspacePath());
         String physicalBranch = workspaceManager.getCurrentBranch(path);
+        if ((physicalBranch == null || physicalBranch.isBlank())
+                && ws.getBranchName() != null && !ws.getBranchName().isBlank()) {
+            workspaceManager.ensureOnBranch(path, ws.getBranchName());
+            physicalBranch = workspaceManager.getCurrentBranch(path);
+        }
         String physicalHead = workspaceManager.getCurrentHead(path);
         List<String> changedFiles = workspaceManager.getChangedFiles(path);
-        if (!physicalBranch.isBlank()) {
+        if (physicalBranch != null && !physicalBranch.isBlank()) {
             ws.setBranchName(physicalBranch);
         }
         ws.setCurrentHead(physicalHead);
@@ -163,12 +168,8 @@ public class WorkspaceLeaseService {
         Project project = projectDao.findOne(requirement.getProjectId());
         String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
                 || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch();
-        String targetBranch = project == null ? null : project.getDeliveryTargetBranch();
-        if (targetBranch == null || targetBranch.isBlank()) {
-            targetBranch = configService.resolveGitlabTargetBranch(null);
-        }
         return new WorkspaceRefreshResult(ws.getWorkspacePath(), ws.getBranchName(), baseBranch,
-                targetBranch, ws.getBaseCommit(), physicalHead, !changedFiles.isEmpty(), changedFiles, now);
+                baseBranch, ws.getBaseCommit(), physicalHead, !changedFiles.isEmpty(), changedFiles, now);
     }
 
     /** Update the configured base branch and merge it into the requirement's current branch. */
@@ -188,20 +189,22 @@ public class WorkspaceLeaseService {
         Project project = projectDao.findOne(requirement.getProjectId());
         String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
                 || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch().trim();
+        Path workspacePath = Path.of(ws.getWorkspacePath());
+        String currentBranch = workspaceManager.getCurrentBranch(workspacePath);
+        if ((currentBranch == null || currentBranch.isBlank())
+                && ws.getBranchName() != null && !ws.getBranchName().isBlank()) {
+            workspaceManager.ensureOnBranch(workspacePath, ws.getBranchName());
+        }
         WorkspaceManager.WorkspaceSyncResult synced = workspaceManager.syncBaseBranch(
-                Path.of(ws.getWorkspacePath()), baseBranch);
+                workspacePath, baseBranch);
         ws.setBranchName(synced.branchName());
         ws.setBaseCommit(synced.baseHead());
         ws.setCurrentHead(synced.currentHead());
         ws.setSnapshotVersion((ws.getSnapshotVersion() == null ? 0L : ws.getSnapshotVersion()) + 1L);
         ws.setLastProgressAt(now);
         workspaceDao.save(ws);
-        String targetBranch = project == null ? null : project.getDeliveryTargetBranch();
-        if (targetBranch == null || targetBranch.isBlank()) {
-            targetBranch = configService.resolveGitlabTargetBranch(null);
-        }
         return new WorkspaceRefreshResult(ws.getWorkspacePath(), synced.branchName(), baseBranch,
-                targetBranch, synced.baseHead(), synced.currentHead(), false, List.of(), now);
+                baseBranch, synced.baseHead(), synced.currentHead(), false, List.of(), now);
     }
 
     // ======================== acquireOwnership ========================
@@ -428,7 +431,7 @@ public class WorkspaceLeaseService {
                 workspaceManager.requirementWorkspaceKey(ws.getRequirementId()));
         // 确保在记录的分支上
         String currentBranch = workspaceManager.getCurrentBranch(wsPath);
-        if (!ws.getBranchName().equals(currentBranch) && !currentBranch.isBlank()) {
+        if (!ws.getBranchName().equals(currentBranch)) {
             // 分支不匹配：以 DB 为准 checkout
             log.info("ensurePhysicalWorkspace: 分支不匹配 DB={}, physical={}, 以 DB 为准 checkout",
                     ws.getBranchName(), currentBranch);

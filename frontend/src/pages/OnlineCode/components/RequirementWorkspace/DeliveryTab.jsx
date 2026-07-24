@@ -218,12 +218,12 @@ const DeliveryTab = ({
               刷新工作区
             </Button>
             <Popconfirm
-              title="确认更新主分支并合并到当前需求分支？"
+              title="确认更新基线分支并合并到当前需求分支？"
               description="工作区必须没有未提交修改；发生合并冲突时不会启动新的 Loop。"
               onConfirm={handleSyncWorkspace}
             >
               <Button icon={<ReloadOutlined />} loading={syncing}>
-                同步主分支
+                同步基线分支
               </Button>
             </Popconfirm>
             <Popconfirm
@@ -244,8 +244,8 @@ const DeliveryTab = ({
             <Popconfirm
               title={requirementCompleted ? '确认重新打开需求？' : '确认整个需求已经完成？'}
               description={requirementCompleted
-                ? '重新打开后，下一条评论会先同步主分支，再开启新的变更 Loop。'
-                : '系统会校验 MR 已合并、没有运行中任务或计划修订，并在完成前同步主分支。'}
+                ? '重新打开后，下一条评论会先同步基线分支，再开启新的变更 Loop。'
+                : '系统会校验 MR 已合并、没有运行中任务或计划修订，并在完成前同步基线分支。'}
               onConfirm={handleRequirementStatusChange}
               disabled={!requirementCompleted && !completionEnabled}
             >

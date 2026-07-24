@@ -505,11 +505,11 @@ export function useRequirementWorkspace(requirementId) {
       async syncWorkspace() {
         const res = await syncRequirementWorkspace(requirementId);
         if (!res || !res.success || !res.data) {
-          message.error((res && res.message) || '同步主分支失败');
+          message.error((res && res.message) || '同步基线分支失败');
           return;
         }
         safeSet(setWorkspaceStatus, res.data);
-        message.success(`已更新 ${res.data.baseBranch || '主分支'} 并合并到当前需求分支`);
+        message.success(`已更新基线分支 ${res.data.baseBranch || 'main'} 并合并到当前需求分支`);
       },
       async confirmCompletion() {
         const res = await confirmRequirementCompletion(requirementId);

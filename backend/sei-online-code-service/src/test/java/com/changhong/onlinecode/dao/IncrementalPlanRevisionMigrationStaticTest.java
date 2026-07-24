@@ -12,13 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * V10 增量计划修订迁移的兼容性约束。
+ * V13 增量计划修订修复迁移的兼容性约束。
  */
 class IncrementalPlanRevisionMigrationStaticTest {
 
     private static final Path MIGRATION = firstExisting(
-            Path.of("src/main/resources/db/migration/V10__add_incremental_plan_revision.sql"),
-            Path.of("sei-online-code-service/src/main/resources/db/migration/V10__add_incremental_plan_revision.sql"));
+            Path.of("src/main/resources/db/migration/V13__restore_incremental_plan_revision.sql"),
+            Path.of("sei-online-code-service/src/main/resources/db/migration/V13__restore_incremental_plan_revision.sql"));
 
     @Test
     void existingRecordsReceiveBackwardCompatibleRevisionDefaults() throws IOException {
@@ -27,6 +27,9 @@ class IncrementalPlanRevisionMigrationStaticTest {
         assertTrue(sql.contains("revision_seq bigint not null default 0"));
         assertTrue(sql.contains("applied_revision_seq bigint not null default 0"));
         assertTrue(sql.contains("revision_state varchar(32) not null default 'none'"));
+        assertTrue(sql.contains("alter column revision_seq set default 0"));
+        assertTrue(sql.contains("alter column applied_revision_seq set default 0"));
+        assertTrue(sql.contains("alter column revision_state set default 'none'"));
         assertFalse(sql.contains("update oc_requirement"), "migration must not create or replace an existing loop");
     }
 
@@ -59,6 +62,6 @@ class IncrementalPlanRevisionMigrationStaticTest {
         if (Files.isRegularFile(second)) {
             return second;
         }
-        throw new IllegalStateException("Cannot find V10 migration");
+        throw new IllegalStateException("Cannot find V13 migration");
     }
 }

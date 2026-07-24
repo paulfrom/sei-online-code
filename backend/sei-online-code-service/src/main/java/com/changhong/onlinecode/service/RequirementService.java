@@ -3,11 +3,13 @@ package com.changhong.onlinecode.service;
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementDesignContextDao;
 import com.changhong.onlinecode.dto.RequirementDto;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RequirementDesignContextStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
@@ -56,6 +58,10 @@ public class RequirementService extends BaseEntityService<Requirement> {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OperateResultWithData<Requirement> save(Requirement entity) {
+        boolean isNew = entity.getId() == null;
+        if (isNew) {
+            initializeNewRequirementDefaults(entity);
+        }
         if (Objects.isNull(entity.getStatus())) {
             entity.setStatus(RequirementStatus.PRD_GENERATING);
         }
@@ -65,7 +71,6 @@ public class RequirementService extends BaseEntityService<Requirement> {
         if (Objects.isNull(entity.getGenerationToken()) || entity.getGenerationToken().isBlank()) {
             entity.setGenerationToken(GenerationTokenSupport.newToken());
         }
-        boolean isNew = entity.getId() == null;
         Requirement existing = null;
         if (!isNew) {
             existing = dao.findOne(entity.getId());
@@ -89,6 +94,31 @@ public class RequirementService extends BaseEntityService<Requirement> {
             triggerPrdSpawnAfterCommit(saved.getId(), null, saved.getGenerationToken());
         }
         return result;
+    }
+
+    /**
+     * 恢复 DTO 到实体映射时被 null 覆盖的新建默认值。
+     *
+     * <p>通用 {@code BaseEntityController} 会先将 {@code RequirementDto} 映射为实体；
+     * 创建请求未携带的服务端状态字段会以 null 覆盖实体字段初始化值，因此这些数据库非空字段
+     * 必须在持久化边界再次初始化。</p>
+     */
+    void initializeNewRequirementDefaults(Requirement entity) {
+        if (entity.getRetryCount() == null) {
+            entity.setRetryCount(0);
+        }
+        if (entity.getRevisionSeq() == null) {
+            entity.setRevisionSeq(0L);
+        }
+        if (entity.getAppliedRevisionSeq() == null) {
+            entity.setAppliedRevisionSeq(0L);
+        }
+        if (entity.getRevisionState() == null) {
+            entity.setRevisionState(RequirementRevisionState.NONE);
+        }
+        if (entity.getDeliveryMrStatus() == null) {
+            entity.setDeliveryMrStatus(DeliveryMrStatus.NOT_SUBMITTED);
+        }
     }
 
     private synchronized String nextRequirementNo(String projectId) {

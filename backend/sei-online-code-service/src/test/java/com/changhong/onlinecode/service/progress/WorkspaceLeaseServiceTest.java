@@ -98,6 +98,22 @@ class WorkspaceLeaseServiceTest {
     }
 
     @Test
+    void bindOrResolveWorkspace_detachedHead_restoresPersistedBranch() {
+        RequirementWorkspace existing = workspace("ws1");
+        when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Optional.of(existing));
+        when(workspaceManager.requirementWorkspaceKey(REQUIREMENT_ID)).thenReturn("requirement-test");
+        when(workspaceManager.resolveIsolatedWorkspace(eq(PROJECT_ID), anyString()))
+                .thenReturn(Path.of("/tmp/test/ws1"));
+        when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("");
+
+        RequirementWorkspace result = service.bindOrResolveWorkspace(PROJECT_ID, REQUIREMENT_ID);
+
+        assertSame(existing, result);
+        verify(workspaceManager).ensureOnBranch(any(Path.class), eq(existing.getBranchName()));
+    }
+
+    @Test
     void bindOrResolveWorkspace_newRecord_createsAndReturns() {
         when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Optional.empty());
@@ -148,7 +164,7 @@ class WorkspaceLeaseServiceTest {
         assertEquals("feature/REQ-1", result.branchName());
         assertEquals(NEW_HEAD_SHA, result.currentHead());
         assertEquals("develop", result.baseBranch());
-        assertEquals("release", result.deliveryTargetBranch());
+        assertEquals("develop", result.deliveryTargetBranch());
         assertTrue(result.dirty());
         assertEquals(List.of("src/App.tsx"), result.changedFiles());
         verify(workspaceDao).save(existing);
@@ -177,6 +193,7 @@ class WorkspaceLeaseServiceTest {
 
         assertEquals("feature/current", result.branchName());
         assertEquals("develop", result.baseBranch());
+        assertEquals("develop", result.deliveryTargetBranch());
         assertEquals("base-new", existing.getBaseCommit());
         assertEquals("merged-new", existing.getCurrentHead());
         verify(workspaceDao).save(existing);

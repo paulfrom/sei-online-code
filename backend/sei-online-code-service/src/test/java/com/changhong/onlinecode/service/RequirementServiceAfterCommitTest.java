@@ -2,6 +2,9 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RequirementDao;
 import com.changhong.onlinecode.dao.RequirementDesignContextDao;
+import com.changhong.onlinecode.dto.enums.DeliveryMrStatus;
+import com.changhong.onlinecode.dto.enums.RequirementRevisionState;
+import com.changhong.onlinecode.entity.Requirement;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -60,5 +63,31 @@ class RequirementServiceAfterCommitTest {
         // 无活动事务时 TransactionUtil.afterCommit 立即执行（非事务上下文调用方的安全回退）
         service.triggerPrdSpawnAfterCommit("req2", null, "token-2");
         verify(agent).spawnPrd("req2", null, "token-2");
+    }
+
+    @Test
+    void initializeNewRequirementDefaults_restoresValuesOverwrittenByDtoMapping() {
+        RequirementService service = new RequirementService(
+                mock(RequirementDao.class),
+                mock(RequirementAgentService.class),
+                mock(RequirementDesignContextDao.class),
+                mock(RequirementDesignContextService.class),
+                mock(RequirementCommentService.class),
+                mock(RequirementAutomationService.class));
+        Requirement requirement = new Requirement();
+        // 模拟 BaseEntityController 将 DTO 中未提交的字段映射为 null。
+        requirement.setRetryCount(null);
+        requirement.setRevisionSeq(null);
+        requirement.setAppliedRevisionSeq(null);
+        requirement.setRevisionState(null);
+        requirement.setDeliveryMrStatus(null);
+
+        service.initializeNewRequirementDefaults(requirement);
+
+        assertEquals(0, requirement.getRetryCount());
+        assertEquals(0L, requirement.getRevisionSeq());
+        assertEquals(0L, requirement.getAppliedRevisionSeq());
+        assertEquals(RequirementRevisionState.NONE, requirement.getRevisionState());
+        assertEquals(DeliveryMrStatus.NOT_SUBMITTED, requirement.getDeliveryMrStatus());
     }
 }
