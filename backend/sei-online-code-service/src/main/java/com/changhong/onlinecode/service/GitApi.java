@@ -30,6 +30,12 @@ import java.util.zip.ZipInputStream;
 @Component
 public class GitApi {
 
+    /**
+     * 单次 GitLab Commits API 请求体估算字节上限。超过即分批提交，避免 monorepo
+     * 一次性提交触发网关 body 限制或写超时（Error writing to server）。
+     */
+    static final long MAX_BATCH_PAYLOAD_BYTES = 6L * 1024 * 1024;
+
     private final ConfigService configService;
 
     public GitApi(ConfigService configService) {
@@ -82,21 +88,82 @@ public class GitApi {
                 return new UploadResult(resolved.getCommit().getId(), changedFiles);
             }
 
-            CommitPayload payload = new CommitPayload()
-                    .withBranch(branch)
-                    .withCommitMessage(blankToDefault(commitMessage, "chore: upload workspace changes"))
-                    .withActions(actions)
-                    .withAuthorName("sei-online-code")
-                    .withAuthorEmail("sei-online-code@local");
-            if (remoteBranch.isEmpty()) {
-                payload.withStartBranch(targetBranch);
-            }
-            Commit commit = client.getCommitsApi().createCommit(projectId, payload);
-            return new UploadResult(commit.getId(), changedFiles);
+            // GitLab Commits API 把所有 action 打包进单个 HTTP 请求体；monorepo 一次性提交时
+            // 单个请求极易超 body 上限或写超时（Error writing to server）。按累计字节阈值分批
+            // 串行提交，每批一个 commit，最终 HEAD 即最后一个 commit 的 id。
+            String message = blankToDefault(commitMessage, "chore: upload workspace changes");
+            String headCommitId = commitInBatches(client, projectId, branch, targetBranch,
+                    remoteBranch.isPresent(), message, actions);
+            return new UploadResult(headCommitId, changedFiles);
         } catch (Exception e) {
             throw new IllegalStateException("通过 Git API 上传仓库变更失败: project=" + projectId
                     + ", branch=" + branch, e);
         }
+    }
+
+    /**
+     * 分批串行调用 GitLab Commits API。
+     *
+     * <p>阈值仅对 action 内容做粗略字节估算（Base64 后体积约为原始的 4/3，按 content 字符长度
+     * 直接累加已偏保守）。第一批在远程分支不存在时携带 {@code startBranch} 以创建分支；
+     * 后续批次在同一分支上追加提交。每批 commit message 追加序号后缀以避免 GitLab 侧去重。
+     *
+     * @param branchExists 远程分支是否已存在
+     * @return 最后一次 commit 的 id（即分支最终 HEAD）
+     */
+    private String commitInBatches(GitLabApi client, String projectId, String branch, String targetBranch,
+                                   boolean branchExists, String message, List<CommitAction> actions) throws Exception {
+        List<List<CommitAction>> batches = partitionByPayloadSize(actions, MAX_BATCH_PAYLOAD_BYTES);
+        String headCommitId = null;
+        int total = batches.size();
+        for (int i = 0; i < total; i++) {
+            CommitPayload payload = new CommitPayload()
+                    .withBranch(branch)
+                    .withCommitMessage(total == 1 ? message : message + " (" + (i + 1) + "/" + total + ")")
+                    .withActions(batches.get(i))
+                    .withAuthorName("sei-online-code")
+                    .withAuthorEmail("sei-online-code@local");
+            // 仅第一批需要 startBranch：分支不存在时由它隐式创建
+            if (i == 0 && !branchExists) {
+                payload.withStartBranch(targetBranch);
+            }
+            Commit commit = client.getCommitsApi().createCommit(projectId, payload);
+            headCommitId = commit.getId();
+        }
+        return headCommitId;
+    }
+
+    /**
+     * 按 action 内容累计字节数拆分批次。单条 action 超过阈值时单独成批（不再切分文件内容）。
+     */
+    private static List<List<CommitAction>> partitionByPayloadSize(List<CommitAction> actions, long maxBytes) {
+        List<List<CommitAction>> batches = new ArrayList<>();
+        List<CommitAction> current = new ArrayList<>();
+        long currentBytes = 0;
+        for (CommitAction action : actions) {
+            long actionBytes = estimateActionBytes(action);
+            if (!current.isEmpty() && currentBytes + actionBytes > maxBytes) {
+                batches.add(current);
+                current = new ArrayList<>();
+                currentBytes = 0;
+            }
+            current.add(action);
+            currentBytes += actionBytes;
+        }
+        if (!current.isEmpty()) {
+            batches.add(current);
+        }
+        return batches;
+    }
+
+    private static long estimateActionBytes(CommitAction action) {
+        String content = action.getContent();
+        long bytes = action.getFilePath() == null ? 0 : action.getFilePath().length();
+        if (content != null) {
+            // Base64 文本长度即 HTTP 请求体中该字段实际占用的字节数
+            bytes += content.length();
+        }
+        return bytes;
     }
 
     public String getBranchHead(String projectId, String branch) {

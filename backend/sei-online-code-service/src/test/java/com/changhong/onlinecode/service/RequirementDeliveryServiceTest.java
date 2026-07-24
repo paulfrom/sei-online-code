@@ -22,6 +22,7 @@ import org.gitlab4j.api.MergeRequestApi;
 import org.gitlab4j.api.models.MergeRequest;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -320,5 +321,94 @@ class RequirementDeliveryServiceTest {
         // resolveDeliveryTarget 在 refreshMrStatus 的 try 块之外调用,异常直接向上抛出,不被包装
         assertTrue(exception.getMessage().contains("项目未配置 Git 地址")
                 || exception.getMessage().contains("gitUrl"));
+    }
+
+    @Test
+    void rollbackLocalCommitIfAny_softResetsToPreCommitHeadKeepingChangesStaged() throws Exception {
+        // 用真实临时 git 仓库验证：失败回滚后 HEAD 退回 commit 前，但改动以 staged 形式保留可见
+        Path tmp = Files.createTempDirectory("rollback-test-");
+        runGit(tmp, "init");
+        runGit(tmp, "config", "user.name", "test");
+        runGit(tmp, "config", "user.email", "test@local");
+        Files.writeString(tmp.resolve("a.txt"), "initial");
+        runGit(tmp, "add", "a.txt");
+        runGit(tmp, "commit", "-m", "init");
+        String preCommitHead = runGitOut(tmp, "rev-parse", "HEAD").trim();
+
+        // 模拟 deliver 期间的本地 commit
+        Files.writeString(tmp.resolve("a.txt"), "changed");
+        runGit(tmp, "add", "a.txt");
+        runGit(tmp, "commit", "-m", "feat: deliver requirement x");
+        String currentHead = runGitOut(tmp, "rev-parse", "HEAD").trim();
+        assertEquals("", runGitOut(tmp, "status", "--porcelain").trim(),
+                "commit 后工作区应干净");
+
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class), mock(ConfigService.class), mock(WorkspaceManager.class),
+                mock(RequirementCommentService.class), mock(MemoryJobService.class),
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                mock(ProjectDao.class), mock(RequirementWorkspaceDao.class));
+        Method m = RequirementDeliveryService.class.getDeclaredMethod(
+                "rollbackLocalCommitIfAny", Path.class, String.class, String.class);
+        m.setAccessible(true);
+        m.invoke(service, tmp, preCommitHead, currentHead);
+
+        assertEquals(preCommitHead, runGitOut(tmp, "rev-parse", "HEAD").trim(),
+                "回滚后 HEAD 应退回 commit 前");
+        assertTrue(runGitOut(tmp, "status", "--porcelain").contains("a.txt"),
+                "改动应以 staged 形式重新可见，刷新工作区能看到");
+    }
+
+    @Test
+    void rollbackLocalCommitIfAny_noopWhenNoNewCommit() throws Exception {
+        Path tmp = Files.createTempDirectory("rollback-noop-test-");
+        runGit(tmp, "init");
+        runGit(tmp, "config", "user.name", "test");
+        runGit(tmp, "config", "user.email", "test@local");
+        Files.writeString(tmp.resolve("a.txt"), "initial");
+        runGit(tmp, "add", "a.txt");
+        runGit(tmp, "commit", "-m", "init");
+        String head = runGitOut(tmp, "rev-parse", "HEAD").trim();
+
+        RequirementDeliveryService service = new RequirementDeliveryService(
+                mock(RequirementDao.class), mock(ExecutionPlanDao.class), mock(RunDao.class),
+                mock(RunNumberService.class), mock(ConfigService.class), mock(WorkspaceManager.class),
+                mock(RequirementCommentService.class), mock(MemoryJobService.class),
+                mock(WorkspaceMemoryService.class), mock(EffectService.class), mock(GitApi.class),
+                mock(ProjectDao.class), mock(RequirementWorkspaceDao.class));
+        Method m = RequirementDeliveryService.class.getDeclaredMethod(
+                "rollbackLocalCommitIfAny", Path.class, String.class, String.class);
+        m.setAccessible(true);
+        // 本次没有新增 commit（pre == current），不应有任何副作用
+        m.invoke(service, tmp, head, head);
+
+        assertEquals(head, runGitOut(tmp, "rev-parse", "HEAD").trim(),
+                "无新 commit 时 HEAD 不应改变");
+    }
+
+    private static void runGit(Path cwd, String... args) throws Exception {
+        List<String> cmd = new java.util.ArrayList<>();
+        cmd.add("git");
+        cmd.addAll(List.of(args));
+        Process p = new ProcessBuilder(cmd).directory(cwd.toFile()).redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes());
+        int code = p.waitFor();
+        if (code != 0) {
+            throw new IllegalStateException("git " + String.join(" ", args) + " failed: " + out);
+        }
+    }
+
+    private static String runGitOut(Path cwd, String... args) throws Exception {
+        List<String> cmd = new java.util.ArrayList<>();
+        cmd.add("git");
+        cmd.addAll(List.of(args));
+        Process p = new ProcessBuilder(cmd).directory(cwd.toFile()).redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        int code = p.waitFor();
+        if (code != 0) {
+            throw new IllegalStateException("git " + String.join(" ", args) + " failed: " + out);
+        }
+        return out;
     }
 }

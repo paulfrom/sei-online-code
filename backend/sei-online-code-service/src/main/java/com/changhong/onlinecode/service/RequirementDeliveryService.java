@@ -221,6 +221,9 @@ public class RequirementDeliveryService {
         if (!useCurrentWorkspaceBranch) {
             runCommand(workspace, "git", "checkout", "-B", branch);
         }
+        // 记录 commit 前的 HEAD：upload 失败时用它把本地 commit 回滚掉，
+        // 避免未推送成功的本地 commit 让工作区看起来干净（暂存改动不可见）。
+        String preCommitHead = runCommand(workspace, "git", "rev-parse", "HEAD").stdout().trim();
         runCommand(workspace, "git", "add", ".");
         if (!runCommand(workspace, "git", "diff", "--cached", "--quiet").success()) {
             runCommand(workspace, "git", "commit", "-m", "feat: deliver requirement " + shortId(requirement.getId()));
@@ -246,6 +249,9 @@ public class RequirementDeliveryService {
                 effectService.markConfirmed(pushEffect.getId());
             } catch (Exception e) {
                 effectService.markUnknown(pushEffect.getId());
+                // upload 失败时回滚本次新增的本地 commit（若存在），让工作区改动重新可见，
+                // 用户修复后可重新提交。--soft 保留文件内容与暂存区，不丢失任何改动。
+                rollbackLocalCommitIfAny(workspace, preCommitHead, localCommitHash);
                 throw e;
             }
         } else if (pushEffect.getStatus() != ExecutionEffectStatus.APPLIED
@@ -539,6 +545,26 @@ public class RequirementDeliveryService {
             throw new IllegalStateException(String.join(" ", command) + " failed: " + out);
         }
         return result;
+    }
+
+    /**
+     * upload 失败后回滚本次 deliver 新增的本地 commit。
+     *
+     * <p>仅当本次确实新建了 commit（{@code currentHead != preCommitHead}）时执行 {@code git reset --soft}，
+     * 把 HEAD 退回到 commit 前的位置。{@code --soft} 保留工作区文件与暂存区，因此用户之前的改动会以
+     * staged 形式重新出现在 {@code git status} 中，刷新工作区即可看到，可修复后重新提交。
+     * 回滚本身失败只记日志、不抛异常，避免掩盖原始的 upload 失败。
+     */
+    private void rollbackLocalCommitIfAny(Path workspace, String preCommitHead, String currentHead) {
+        if (preCommitHead == null || currentHead == null || preCommitHead.equals(currentHead)) {
+            return;
+        }
+        try {
+            runCommand(workspace, "git", "reset", "--soft", preCommitHead);
+        } catch (Exception rollbackFailure) {
+            log.warn("rollbackLocalCommit: git reset --soft 失败 preCommitHead={} currentHead={}",
+                    preCommitHead, currentHead, rollbackFailure);
+        }
     }
 
     private String branchName(Requirement requirement) {
