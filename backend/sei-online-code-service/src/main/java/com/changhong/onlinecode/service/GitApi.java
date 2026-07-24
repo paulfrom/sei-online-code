@@ -36,6 +36,12 @@ public class GitApi {
      */
     static final long MAX_BATCH_PAYLOAD_BYTES = 6L * 1024 * 1024;
 
+    /** GitLab Commits API 瞬时网络故障最大尝试次数（含首次）。 */
+    static final int COMMIT_RETRY_MAX_ATTEMPTS = 3;
+
+    /** 重试退避间隔（毫秒），下标 0 对应首次重试前的等待。 */
+    static final long[] COMMIT_RETRY_BACKOFF_MS = {1000L, 3000L};
+
     private final ConfigService configService;
 
     public GitApi(ConfigService configService) {
@@ -127,10 +133,57 @@ public class GitApi {
             if (i == 0 && !branchExists) {
                 payload.withStartBranch(targetBranch);
             }
-            Commit commit = client.getCommitsApi().createCommit(projectId, payload);
+            Commit commit = createCommitWithRetry(client, projectId, payload);
             headCommitId = commit.getId();
         }
         return headCommitId;
+    }
+
+    /**
+     * 对 GitLab Commits API 的瞬时网络故障做有限重试。
+     *
+     * <p>仅对连接重置/读超时/连接拒绝等瞬时异常重试（指数退避，最多
+     * {@link #COMMIT_RETRY_MAX_ATTEMPTS} 次）；业务类异常（4xx、冲突等）立即抛出。
+     * 每批独立重试，已成功的批次不会重试。</p>
+     *
+     * <p>权衡：若服务端已写入但响应丢失，重试会再发一次相同 payload，可能产生一个内容
+     * 相同的冗余 commit。这在 monorepo 大 payload 易触发网关重置的场景下优于直接判失败。</p>
+     *
+     * @param client    GitLab 客户端
+     * @param projectId 项目路径
+     * @param payload   提交载荷
+     * @return 创建的 commit
+     * @throws Exception 重试耗尽或遇到非瞬时异常时抛出
+     */
+    private Commit createCommitWithRetry(GitLabApi client, String projectId, CommitPayload payload) throws Exception {
+        for (int attempt = 1; attempt <= COMMIT_RETRY_MAX_ATTEMPTS; attempt++) {
+            try {
+                return client.getCommitsApi().createCommit(projectId, payload);
+            } catch (Exception e) {
+                if (!isTransientNetworkError(e) || attempt == COMMIT_RETRY_MAX_ATTEMPTS) {
+                    throw e;
+                }
+                Thread.sleep(COMMIT_RETRY_BACKOFF_MS[attempt - 1]);
+            }
+        }
+        throw new IllegalStateException("unreachable: retry loop exhausted without terminal throw");
+    }
+
+    /**
+     * 判断异常链是否包含瞬时网络故障（Socket 重置/超时/拒绝）。
+     *
+     * <p>gitlab4j 把底层网络异常包装成 GitLabApiException → ProcessingException → SocketException，
+     * 故需遍历 cause 链匹配。</p>
+     */
+    private static boolean isTransientNetworkError(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.SocketException
+                    || cause instanceof java.net.SocketTimeoutException
+                    || cause instanceof java.net.ConnectException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

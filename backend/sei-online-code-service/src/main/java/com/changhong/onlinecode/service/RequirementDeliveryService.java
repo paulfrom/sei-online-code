@@ -248,9 +248,10 @@ public class RequirementDeliveryService {
                         branch + "@" + commitHash);
                 effectService.markConfirmed(pushEffect.getId());
             } catch (Exception e) {
-                effectService.markUnknown(pushEffect.getId());
-                // upload 失败时回滚本次新增的本地 commit（若存在），让工作区改动重新可见，
-                // 用户修复后可重新提交。--soft 保留文件内容与暂存区，不丢失任何改动。
+                // upload 失败时 effect 保持 PREPARED：下次重新提交（同 commitHash）会命中同一
+                // effect_key 重新走 upload 分支。不调 markUnknown——UNKNOWN 在 doDeliver 既非
+                // PREPARED（不重试）也非 APPLIED/CONFIRMED（不复用），会让重试抛"状态异常"，
+                // 且当前无对账消费者；保持 PREPARED 才是可重试的正确终态。
                 rollbackLocalCommitIfAny(workspace, preCommitHead, localCommitHash);
                 throw e;
             }
