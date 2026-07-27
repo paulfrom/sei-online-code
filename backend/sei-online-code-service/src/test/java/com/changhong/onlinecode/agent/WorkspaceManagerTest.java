@@ -214,6 +214,35 @@ class WorkspaceManagerTest {
     }
 
     @Test
+    void expectedRequirementWorkspacePath_doesNotCreateOrCheckoutWorkspace(@TempDir Path tempDir)
+            throws Exception {
+        ConfigService configService = mock(ConfigService.class);
+        ProjectDao projectDao = mock(ProjectDao.class);
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        WorkspaceManager workspaceManager = new WorkspaceManager(projectDao, configService, new ScaffoldGenerator());
+        workspaceManager.setRequirementDao(requirementDao);
+
+        PlatformConfig config = new PlatformConfig();
+        config.setWorkspaceRoot(tempDir.toString());
+        when(configService.get()).thenReturn(config);
+        when(configService.resolveWorkspaceRoot(config)).thenReturn(tempDir.toString());
+        Project project = new Project();
+        project.setId("project-expected");
+        when(projectDao.findOne("project-expected")).thenReturn(project);
+        Requirement requirement = new Requirement();
+        requirement.setId("req-expected");
+        requirement.setRequirementNo("REQ-0099");
+        when(requirementDao.findOne("req-expected")).thenReturn(requirement);
+
+        Path expected = workspaceManager.expectedRequirementWorkspacePath(
+                "project-expected", "req-expected");
+
+        assertTrue(expected.endsWith(Path.of(".sei", "workspaces", "requirement-REQ-0099")));
+        assertFalse(Files.exists(expected));
+        assertEquals("feature/REQ-0099", workspaceManager.requirementBranchName("req-expected"));
+    }
+
+    @Test
     void resolveRequirementWorkspace_serializesConcurrentInitialization(@TempDir Path tempDir)
             throws Exception {
         ConfigService configService = mock(ConfigService.class);

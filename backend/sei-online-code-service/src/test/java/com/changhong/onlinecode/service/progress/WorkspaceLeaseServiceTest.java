@@ -85,10 +85,11 @@ class WorkspaceLeaseServiceTest {
         RequirementWorkspace existing = workspace("ws1");
         when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Optional.of(existing));
-        // ensurePhysicalWorkspace mocks: use any() to avoid Path equality mismatches
-        when(workspaceManager.requirementWorkspaceKey(REQUIREMENT_ID)).thenReturn("requirement-test");
-        when(workspaceManager.resolveIsolatedWorkspace(eq(PROJECT_ID), anyString()))
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Path.of("/tmp/test/ws1"));
+        when(workspaceManager.resolveRequirementWorkspace(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Path.of("/tmp/test/ws1"));
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/test");
         when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("feature/test");
 
         RequirementWorkspace result = service.bindOrResolveWorkspace(PROJECT_ID, REQUIREMENT_ID);
@@ -102,10 +103,12 @@ class WorkspaceLeaseServiceTest {
         RequirementWorkspace existing = workspace("ws1");
         when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Optional.of(existing));
-        when(workspaceManager.requirementWorkspaceKey(REQUIREMENT_ID)).thenReturn("requirement-test");
-        when(workspaceManager.resolveIsolatedWorkspace(eq(PROJECT_ID), anyString()))
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Path.of("/tmp/test/ws1"));
-        when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("");
+        when(workspaceManager.resolveRequirementWorkspace(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Path.of("/tmp/test/ws1"));
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/test");
+        when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("", "feature/test");
 
         RequirementWorkspace result = service.bindOrResolveWorkspace(PROJECT_ID, REQUIREMENT_ID);
 
@@ -117,11 +120,8 @@ class WorkspaceLeaseServiceTest {
     void bindOrResolveWorkspace_newRecord_createsAndReturns() {
         when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Optional.empty());
-        Requirement req = new Requirement();
-        req.setRequirementNo("REQ-001");
-        when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(req);
         Path mockPath = Path.of("/tmp/ws");
-        when(workspaceManager.requirementWorkspaceKey(REQUIREMENT_ID)).thenReturn("requirement-REQ-001");
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/REQ-001");
         when(workspaceManager.resolveRequirementWorkspace(PROJECT_ID, REQUIREMENT_ID)).thenReturn(mockPath);
         when(workspaceManager.getCurrentHead(mockPath)).thenReturn(HEAD_SHA);
         RequirementWorkspace saved = workspace("ws1");
@@ -141,12 +141,32 @@ class WorkspaceLeaseServiceTest {
     }
 
     @Test
+    void bindOrResolveWorkspace_pathDriftWithDirtyOldWorkspace_rejectsMigration() {
+        RequirementWorkspace existing = workspace(WORKSPACE_ID);
+        existing.setWorkspacePath("/tmp");
+        Path expected = Path.of("/tmp/expected-requirement-workspace");
+        when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Optional.of(existing));
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(expected);
+        when(workspaceManager.getChangedFiles(Path.of("/tmp")))
+                .thenReturn(List.of("src/Unsubmitted.java"));
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.bindOrResolveWorkspace(PROJECT_ID, REQUIREMENT_ID));
+
+        assertTrue(exception.getMessage().contains("路径与 Loop 执行路径不一致"));
+        verify(workspaceManager, never()).resolveRequirementWorkspace(PROJECT_ID, REQUIREMENT_ID);
+    }
+
+    @Test
     void refreshWorkspace_recordsPhysicalStateWithoutRewritingChanges() {
         Requirement requirement = new Requirement();
         requirement.setId(REQUIREMENT_ID);
         requirement.setProjectId(PROJECT_ID);
         RequirementWorkspace existing = workspace(WORKSPACE_ID);
         existing.setWorkspacePath("/tmp");
+        existing.setBranchName("feature/REQ-1");
         Project project = new Project();
         project.setWorkspaceBaseBranch("develop");
         project.setDeliveryTargetBranch("release");
@@ -154,6 +174,9 @@ class WorkspaceLeaseServiceTest {
         when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(requirement);
         when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
                 .thenReturn(Optional.of(existing));
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/REQ-1");
         when(workspaceManager.getCurrentBranch(any(Path.class))).thenReturn("feature/REQ-1");
         when(workspaceManager.getCurrentHead(any(Path.class))).thenReturn(NEW_HEAD_SHA);
         when(workspaceManager.getChangedFiles(any(Path.class))).thenReturn(List.of("src/App.tsx"));
@@ -164,7 +187,7 @@ class WorkspaceLeaseServiceTest {
         assertEquals("feature/REQ-1", result.branchName());
         assertEquals(NEW_HEAD_SHA, result.currentHead());
         assertEquals("develop", result.baseBranch());
-        assertEquals("develop", result.deliveryTargetBranch());
+        assertEquals("release", result.deliveryTargetBranch());
         assertTrue(result.dirty());
         assertEquals(List.of("src/App.tsx"), result.changedFiles());
         verify(workspaceDao).save(existing);
@@ -179,11 +202,18 @@ class WorkspaceLeaseServiceTest {
         requirement.setId(REQUIREMENT_ID);
         requirement.setProjectId(PROJECT_ID);
         RequirementWorkspace existing = workspace(WORKSPACE_ID);
+        existing.setWorkspacePath("/tmp");
+        existing.setBranchName("feature/current");
         Project project = new Project();
         project.setWorkspaceBaseBranch("develop");
         project.setDeliveryTargetBranch("release");
         when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(requirement);
-        when(workspaceDao.findByRequirementId(REQUIREMENT_ID)).thenReturn(Optional.of(existing));
+        when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Optional.of(existing));
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/current");
+        when(workspaceManager.getCurrentBranch(Path.of("/tmp"))).thenReturn("feature/current");
         when(projectDao.findOne(PROJECT_ID)).thenReturn(project);
         when(workspaceManager.syncBaseBranch(Path.of(existing.getWorkspacePath()), "develop"))
                 .thenReturn(new WorkspaceManager.WorkspaceSyncResult(
@@ -193,10 +223,34 @@ class WorkspaceLeaseServiceTest {
 
         assertEquals("feature/current", result.branchName());
         assertEquals("develop", result.baseBranch());
-        assertEquals("develop", result.deliveryTargetBranch());
+        assertEquals("release", result.deliveryTargetBranch());
         assertEquals("base-new", existing.getBaseCommit());
         assertEquals("merged-new", existing.getCurrentHead());
         verify(workspaceDao).save(existing);
+    }
+
+    @Test
+    void refreshWorkspace_rejectsNonRequirementBranch() {
+        Requirement requirement = new Requirement();
+        requirement.setId(REQUIREMENT_ID);
+        requirement.setProjectId(PROJECT_ID);
+        RequirementWorkspace existing = workspace(WORKSPACE_ID);
+        existing.setWorkspacePath("/tmp");
+        existing.setBranchName("feature/REQ-1");
+        when(requirementDao.findOne(REQUIREMENT_ID)).thenReturn(requirement);
+        when(workspaceDao.findByProjectIdAndRequirementId(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Optional.of(existing));
+        when(workspaceManager.expectedRequirementWorkspacePath(PROJECT_ID, REQUIREMENT_ID))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName(REQUIREMENT_ID)).thenReturn("feature/REQ-1");
+        when(workspaceManager.getCurrentBranch(Path.of("/tmp"))).thenReturn("hotfix/wrong-branch");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.refreshWorkspace(REQUIREMENT_ID));
+
+        assertTrue(exception.getMessage().contains("expected=feature/REQ-1"));
+        assertTrue(exception.getMessage().contains("actual=hotfix/wrong-branch"));
+        verify(workspaceManager, never()).ensureOnBranch(any(Path.class), anyString());
     }
 
     // ======================== acquireOwnership ========================

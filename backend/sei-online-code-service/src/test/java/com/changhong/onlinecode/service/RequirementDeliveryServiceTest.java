@@ -132,7 +132,7 @@ class RequirementDeliveryServiceTest {
     }
 
     @Test
-    void manualDelivery_usesCurrentWorkspaceAndBranchWithoutResolvingRequirementBranch() throws Exception {
+    void manualDelivery_rejectsArbitraryCurrentBranch() throws Exception {
         WorkspaceManager workspaceManager = mock(WorkspaceManager.class);
         RequirementWorkspaceDao workspaceDao = mock(RequirementWorkspaceDao.class);
         RequirementDeliveryService service = new RequirementDeliveryService(
@@ -148,6 +148,10 @@ class RequirementDeliveryServiceTest {
         workspace.setWorkspacePath("/tmp");
         when(workspaceDao.findByProjectIdAndRequirementId("project-1", "requirement-1"))
                 .thenReturn(Optional.of(workspace));
+        when(workspaceManager.expectedRequirementWorkspacePath("project-1", "requirement-1"))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName("requirement-1"))
+                .thenReturn("feature/requirement-1");
         when(workspaceManager.getCurrentBranch(Path.of("/tmp"))).thenReturn("hotfix/arbitrary-branch");
 
         Method resolveWorkspace = RequirementDeliveryService.class.getDeclaredMethod(
@@ -159,7 +163,11 @@ class RequirementDeliveryServiceTest {
         resolveSourceBranch.setAccessible(true);
 
         assertEquals(Path.of("/tmp"), resolved);
-        assertEquals("hotfix/arbitrary-branch", resolveSourceBranch.invoke(service, requirement, resolved, true));
+        var exception = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> resolveSourceBranch.invoke(service, requirement, resolved, true));
+        assertEquals("当前工作区分支不是需求交付分支，拒绝手动提交"
+                        + ": expected=feature/requirement-1, actual=hotfix/arbitrary-branch",
+                exception.getCause().getMessage());
         verify(workspaceManager, never()).resolveRequirementWorkspace("project-1", "requirement-1");
         verify(workspaceManager, never()).ensureOnBranch(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString());
@@ -190,6 +198,12 @@ class RequirementDeliveryServiceTest {
         when(executionPlanDao.findOne("plan-1")).thenReturn(plan);
         when(workspaceDao.findByProjectIdAndRequirementId("project-1", "requirement-1"))
                 .thenReturn(Optional.of(workspace));
+        when(workspaceManager.expectedRequirementWorkspacePath("project-1", "requirement-1"))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName("requirement-1"))
+                .thenReturn("feature/requirement-1");
+        when(workspaceManager.getCurrentBranch(Path.of("/tmp")))
+                .thenReturn("feature/requirement-1");
         when(workspaceManager.getChangedFiles(Path.of("/tmp"))).thenReturn(List.of("src/App.tsx"));
         when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
             Run run = invocation.getArgument(0);
@@ -228,6 +242,12 @@ class RequirementDeliveryServiceTest {
                 "requirement-1", "loop-1")).thenReturn(plan);
         when(workspaceDao.findByProjectIdAndRequirementId("project-1", "requirement-1"))
                 .thenReturn(Optional.of(workspace));
+        when(workspaceManager.expectedRequirementWorkspacePath("project-1", "requirement-1"))
+                .thenReturn(Path.of("/tmp"));
+        when(workspaceManager.requirementBranchName("requirement-1"))
+                .thenReturn("feature/requirement-1");
+        when(workspaceManager.getCurrentBranch(Path.of("/tmp")))
+                .thenReturn("feature/requirement-1");
         when(workspaceManager.getChangedFiles(Path.of("/tmp"))).thenReturn(List.of());
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,

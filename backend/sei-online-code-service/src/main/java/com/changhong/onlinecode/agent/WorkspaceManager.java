@@ -228,6 +228,34 @@ public class WorkspaceManager {
     }
 
     /**
+     * 计算需求级隔离工作区的规范路径，不创建目录，也不切换分支。
+     */
+    public Path expectedRequirementWorkspacePath(String projectId, String requirementId) {
+        WorkspaceResolveResult resolved = resolve(projectId);
+        if (resolved == null || resolved.getPath() == null || resolved.getPath().isBlank()) {
+            throw new IllegalStateException("项目工作区解析失败: " + projectId);
+        }
+        Path projectWorkspace = Path.of(resolved.getPath()).toAbsolutePath().normalize();
+        if (!Files.isDirectory(projectWorkspace)) {
+            throw new IllegalStateException("项目工作区不存在或不是目录: " + projectWorkspace);
+        }
+        Path root = isolatedWorkspacesRoot(projectWorkspace);
+        Path target = root.resolve(safeSegment(requirementWorkspaceKey(requirementId)))
+                .toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalStateException("非法隔离工作区路径: " + target);
+        }
+        return target;
+    }
+
+    /**
+     * 返回需求工作区唯一允许使用的 feature branch。
+     */
+    public String requirementBranchName(String requirementId) {
+        return branchName(requirementWorkspaceKey(requirementId));
+    }
+
+    /**
      * 删除需求工作区（EXE-005 GC 安全：ACTIVE/UNKNOWN/BLOCKED/DELIVERING 或 retention 未到期时拒绝）。
      */
     public void deleteRequirementWorkspace(String projectId, String requirementId) {

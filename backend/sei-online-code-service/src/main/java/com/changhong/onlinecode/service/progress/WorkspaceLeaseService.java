@@ -18,7 +18,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.annotation.Propagation;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -93,9 +92,7 @@ public class WorkspaceLeaseService {
             return ws;
         }
         // 新建
-        Requirement requirement = requirementDao.findOne(requirementId);
-        String branchName = deriveBranchName(requirement);
-        String workspaceKey = workspaceManager.requirementWorkspaceKey(requirementId);
+        String branchName = workspaceManager.requirementBranchName(requirementId);
         Path wsPath = workspaceManager.resolveRequirementWorkspace(projectId, requirementId);
         String workspacePath = wsPath.toAbsolutePath().normalize().toString();
         String baseCommit = workspaceManager.getCurrentHead(wsPath);
@@ -116,9 +113,11 @@ public class WorkspaceLeaseService {
             // 并发：另一个线程已创建，回读唯一记录（ADR-001 不变量 1）
             log.debug("bindOrResolveWorkspace: (project={}, requirement={}) 并发冲突，回读已有记录",
                     projectId, requirementId);
-            return workspaceDao.findByProjectIdAndRequirementId(projectId, requirementId)
+            RequirementWorkspace concurrent = workspaceDao.findByProjectIdAndRequirementId(projectId, requirementId)
                     .orElseThrow(() -> new IllegalStateException(
                             "workspace vanished after unique-key conflict: " + projectId + "/" + requirementId, e));
+            ensurePhysicalWorkspace(concurrent);
+            return concurrent;
         }
     }
 
@@ -132,13 +131,7 @@ public class WorkspaceLeaseService {
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
         }
-        RequirementWorkspace ws = workspaceDao
-                .findByProjectIdAndRequirementId(requirement.getProjectId(), requirementId)
-                .orElse(null);
-        if (ws == null || ws.getWorkspacePath() == null
-                || !Files.isDirectory(Path.of(ws.getWorkspacePath()))) {
-            ws = bindOrResolveWorkspace(requirement.getProjectId(), requirementId);
-        }
+        RequirementWorkspace ws = bindOrResolveWorkspace(requirement.getProjectId(), requirementId);
         if (ws == null) {
             throw new IllegalStateException("需求工作区解析失败: " + requirementId);
         }
@@ -149,17 +142,16 @@ public class WorkspaceLeaseService {
         }
 
         Path path = Path.of(ws.getWorkspacePath());
+        String expectedBranch = workspaceManager.requirementBranchName(requirementId);
         String physicalBranch = workspaceManager.getCurrentBranch(path);
-        if ((physicalBranch == null || physicalBranch.isBlank())
-                && ws.getBranchName() != null && !ws.getBranchName().isBlank()) {
-            workspaceManager.ensureOnBranch(path, ws.getBranchName());
+        if (physicalBranch == null || physicalBranch.isBlank()) {
+            workspaceManager.ensureOnBranch(path, expectedBranch);
             physicalBranch = workspaceManager.getCurrentBranch(path);
         }
+        requireExpectedBranch(requirementId, path, expectedBranch, physicalBranch);
         String physicalHead = workspaceManager.getCurrentHead(path);
         List<String> changedFiles = workspaceManager.getChangedFiles(path);
-        if (physicalBranch != null && !physicalBranch.isBlank()) {
-            ws.setBranchName(physicalBranch);
-        }
+        ws.setBranchName(expectedBranch);
         ws.setCurrentHead(physicalHead);
         ws.setSnapshotVersion((ws.getSnapshotVersion() == null ? 0L : ws.getSnapshotVersion()) + 1L);
         ws.setLastProgressAt(now);
@@ -167,9 +159,11 @@ public class WorkspaceLeaseService {
 
         Project project = projectDao.findOne(requirement.getProjectId());
         String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
-                || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch();
+                || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch().trim();
+        String deliveryTargetBranch = resolveDeliveryTargetBranch(project);
         return new WorkspaceRefreshResult(ws.getWorkspacePath(), ws.getBranchName(), baseBranch,
-                baseBranch, ws.getBaseCommit(), physicalHead, !changedFiles.isEmpty(), changedFiles, now);
+                deliveryTargetBranch, ws.getBaseCommit(), physicalHead,
+                !changedFiles.isEmpty(), changedFiles, now);
     }
 
     /** Update the configured base branch and merge it into the requirement's current branch. */
@@ -179,8 +173,10 @@ public class WorkspaceLeaseService {
         if (requirement == null) {
             throw new IllegalArgumentException("需求不存在: " + requirementId);
         }
-        RequirementWorkspace ws = workspaceDao.findByRequirementId(requirementId)
-                .orElseThrow(() -> new IllegalStateException("需求工作区不存在，请先刷新工作区"));
+        RequirementWorkspace ws = bindOrResolveWorkspace(requirement.getProjectId(), requirementId);
+        if (ws == null) {
+            throw new IllegalStateException("需求工作区不存在，请先刷新工作区");
+        }
         Date now = new Date();
         if (ws.getOwnerRunId() != null && ws.getLeaseExpiresAt() != null
                 && ws.getLeaseExpiresAt().after(now)) {
@@ -190,21 +186,25 @@ public class WorkspaceLeaseService {
         String baseBranch = project == null || project.getWorkspaceBaseBranch() == null
                 || project.getWorkspaceBaseBranch().isBlank() ? "main" : project.getWorkspaceBaseBranch().trim();
         Path workspacePath = Path.of(ws.getWorkspacePath());
+        String expectedBranch = workspaceManager.requirementBranchName(requirementId);
         String currentBranch = workspaceManager.getCurrentBranch(workspacePath);
-        if ((currentBranch == null || currentBranch.isBlank())
-                && ws.getBranchName() != null && !ws.getBranchName().isBlank()) {
-            workspaceManager.ensureOnBranch(workspacePath, ws.getBranchName());
+        if (currentBranch == null || currentBranch.isBlank()) {
+            workspaceManager.ensureOnBranch(workspacePath, expectedBranch);
+            currentBranch = workspaceManager.getCurrentBranch(workspacePath);
         }
+        requireExpectedBranch(requirementId, workspacePath, expectedBranch, currentBranch);
         WorkspaceManager.WorkspaceSyncResult synced = workspaceManager.syncBaseBranch(
                 workspacePath, baseBranch);
+        requireExpectedBranch(requirementId, workspacePath, expectedBranch, synced.branchName());
         ws.setBranchName(synced.branchName());
         ws.setBaseCommit(synced.baseHead());
         ws.setCurrentHead(synced.currentHead());
         ws.setSnapshotVersion((ws.getSnapshotVersion() == null ? 0L : ws.getSnapshotVersion()) + 1L);
         ws.setLastProgressAt(now);
         workspaceDao.save(ws);
+        String deliveryTargetBranch = resolveDeliveryTargetBranch(project);
         return new WorkspaceRefreshResult(ws.getWorkspacePath(), synced.branchName(), baseBranch,
-                baseBranch, synced.baseHead(), synced.currentHead(), false, List.of(), now);
+                deliveryTargetBranch, synced.baseHead(), synced.currentHead(), false, List.of(), now);
     }
 
     // ======================== acquireOwnership ========================
@@ -423,29 +423,57 @@ public class WorkspaceLeaseService {
 
     // ======================== helpers ========================
 
-    /** 确保物理工作区目录与分支存在（重启恢复路径）。 */
+    /**
+     * 对账 DB 路径与 Loop 使用的规范路径。旧路径存在未提交修改时拒绝自动迁移，避免交付物丢失。
+     */
     private void ensurePhysicalWorkspace(RequirementWorkspace ws) {
-        Path wsPath = Path.of(ws.getWorkspacePath());
-        workspaceManager.resolveIsolatedWorkspace(
-                ws.getProjectId(),
-                workspaceManager.requirementWorkspaceKey(ws.getRequirementId()));
-        // 确保在记录的分支上
-        String currentBranch = workspaceManager.getCurrentBranch(wsPath);
-        if (!ws.getBranchName().equals(currentBranch)) {
-            // 分支不匹配：以 DB 为准 checkout
-            log.info("ensurePhysicalWorkspace: 分支不匹配 DB={}, physical={}, 以 DB 为准 checkout",
-                    ws.getBranchName(), currentBranch);
-            workspaceManager.ensureOnBranch(wsPath, ws.getBranchName());
+        Path expectedPath = workspaceManager.expectedRequirementWorkspacePath(
+                ws.getProjectId(), ws.getRequirementId());
+        Path recordedPath = ws.getWorkspacePath() == null || ws.getWorkspacePath().isBlank()
+                ? null : Path.of(ws.getWorkspacePath()).toAbsolutePath().normalize();
+        if (recordedPath != null && !recordedPath.equals(expectedPath)
+                && Files.isDirectory(recordedPath)
+                && !workspaceManager.getChangedFiles(recordedPath).isEmpty()) {
+            throw new IllegalStateException("需求工作区路径与 Loop 执行路径不一致，且旧工作区存在未提交修改"
+                    + ": recorded=" + recordedPath + ", expected=" + expectedPath);
+        }
+        Path workspacePath = Files.isDirectory(expectedPath)
+                ? expectedPath
+                : workspaceManager.resolveRequirementWorkspace(ws.getProjectId(), ws.getRequirementId());
+        String expectedBranch = workspaceManager.requirementBranchName(ws.getRequirementId());
+        String physicalBranch = workspaceManager.getCurrentBranch(workspacePath);
+        if (physicalBranch == null || physicalBranch.isBlank()) {
+            workspaceManager.ensureOnBranch(workspacePath, expectedBranch);
+            physicalBranch = workspaceManager.getCurrentBranch(workspacePath);
+        }
+        requireExpectedBranch(ws.getRequirementId(), workspacePath, expectedBranch, physicalBranch);
+
+        boolean changed = recordedPath == null || !recordedPath.equals(workspacePath)
+                || !expectedBranch.equals(ws.getBranchName());
+        ws.setWorkspacePath(workspacePath.toAbsolutePath().normalize().toString());
+        ws.setBranchName(expectedBranch);
+        if (changed) {
+            workspaceDao.save(ws);
         }
     }
 
-    /** 生成 feature branch 名称。 */
-    private String deriveBranchName(Requirement requirement) {
-        if (requirement != null && requirement.getRequirementNo() != null
-                && !requirement.getRequirementNo().isBlank()) {
-            return "feature/" + requirement.getRequirementNo().trim();
+    private void requireExpectedBranch(String requirementId, Path workspacePath,
+                                       String expectedBranch, String physicalBranch) {
+        if (!expectedBranch.equals(physicalBranch)) {
+            throw new IllegalStateException("需求工作区分支不一致，拒绝继续 Git 操作"
+                    + ": requirement=" + requirementId
+                    + ", path=" + workspacePath
+                    + ", expected=" + expectedBranch
+                    + ", actual=" + physicalBranch);
         }
-        return "feature/requirement-workspace";
+    }
+
+    private String resolveDeliveryTargetBranch(Project project) {
+        if (project != null && project.getDeliveryTargetBranch() != null
+                && !project.getDeliveryTargetBranch().isBlank()) {
+            return project.getDeliveryTargetBranch().trim();
+        }
+        return configService.resolveGitlabTargetBranch(null);
     }
 
     // ======================== ReconciliationReport ========================

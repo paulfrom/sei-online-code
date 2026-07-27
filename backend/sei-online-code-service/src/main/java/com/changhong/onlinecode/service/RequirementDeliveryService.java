@@ -194,6 +194,7 @@ public class RequirementDeliveryService {
             throw new IllegalStateException("工作区正在被运行占用，暂不能手动提交");
         }
         Path workspace = resolveDeliveryWorkspace(requirement, true);
+        requireManualDeliveryBranch(requirement, workspace);
         if (workspaceManager.getChangedFiles(workspace).isEmpty()) {
             throw new IllegalStateException("当前工作区没有未提交修改");
         }
@@ -406,12 +407,31 @@ public class RequirementDeliveryService {
         if (!Files.isDirectory(path)) {
             throw new IllegalStateException("需求工作区不存在: " + path);
         }
+        Path expectedPath = workspaceManager.expectedRequirementWorkspacePath(
+                requirement.getProjectId(), requirement.getId());
+        if (!path.equals(expectedPath)) {
+            throw new IllegalStateException("需求工作区路径与 Loop 执行路径不一致，拒绝手动提交"
+                    + ": recorded=" + path + ", expected=" + expectedPath);
+        }
         return path;
     }
 
     private String resolveSourceBranch(Requirement requirement, Path workspace,
                                        boolean useCurrentWorkspaceBranch) {
-        return useCurrentWorkspaceBranch ? workspaceManager.getCurrentBranch(workspace) : branchName(requirement);
+        if (!useCurrentWorkspaceBranch) {
+            return branchName(requirement);
+        }
+        return requireManualDeliveryBranch(requirement, workspace);
+    }
+
+    private String requireManualDeliveryBranch(Requirement requirement, Path workspace) {
+        String expectedBranch = workspaceManager.requirementBranchName(requirement.getId());
+        String physicalBranch = workspaceManager.getCurrentBranch(workspace);
+        if (!expectedBranch.equals(physicalBranch)) {
+            throw new IllegalStateException("当前工作区分支不是需求交付分支，拒绝手动提交"
+                    + ": expected=" + expectedBranch + ", actual=" + physicalBranch);
+        }
+        return physicalBranch;
     }
 
     private String resolveDeliveryTargetBranch(Requirement requirement) {
