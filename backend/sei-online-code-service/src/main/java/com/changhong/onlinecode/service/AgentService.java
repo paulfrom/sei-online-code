@@ -83,9 +83,9 @@ public class AgentService extends BaseEntityService<Agent> {
     /**
      * 附加/替换 agent 绑定的技能 id 列表（ep #24，整体替换，oc_agent_skill join 表）。
      *
-     * <p>整体替换语义：先 {@code deleteByAgentId} 清旧，再逐条 insert 新。skill_id 存在性校验
-     * 延后到 Phase 6（{@code builtin:<name>} 经 BuiltInSkillRegistry 校验、DB id 经 SkillDao
-     * 校验）；本阶段仅持久化绑定关系。</p>
+     * <p>整体替换语义：先 {@code deleteByAgentId} 清旧，再逐条 insert 新。skill_id 为
+     * {@code oc_skill.id}（内置技能 V13 起也是普通 oc_skill 行）；本阶段仅持久化绑定关系，
+     * 存在性校验在 materialize 时按 DB 查询兜底（未命中则跳过）。</p>
      *
      * @param agentId  agent id
      * @param skillIds 待绑定技能 id 列表（null/空表示解绑全部）

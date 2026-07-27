@@ -23,8 +23,9 @@ import java.util.List;
  * <p><b>Agent↔Skill 关联模型：</b>独立 join 表 {@code oc_agent_skill}（对齐 multica 维度 a），
  * 取代原 {@code skill_ids} JSON 列。{@code skillIds} 字段为 {@code @Transient}，由
  * {@link com.changhong.onlinecode.service.AgentService} 从 join 表 populate；持久化经
- * {@code AgentService.attachSkills}。{@code skill_id} 不加 FK（为 Phase 6 内置技能
- * synthetic id {@code builtin:<name>} 预留）。</p>
+ * {@code AgentService.attachSkills}。{@code skill_id} 引用 {@code oc_skill.id}（内置技能 V13
+ * 起统一为真实 oc_skill 行，不再使用 {@code builtin:<name>} synthetic id）；表上未显式加 FK 约束，
+ * 保留历史宽松设计。</p>
  *
  * <p>三个内置 agent（{@code builtin=true}，不可删除）：requirement-agent / dispatch-agent /
  * deploy-agent。自定义 agent 为 {@code builtin=false}。</p>

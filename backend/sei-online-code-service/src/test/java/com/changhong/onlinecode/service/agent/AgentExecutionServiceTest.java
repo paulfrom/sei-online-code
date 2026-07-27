@@ -1,6 +1,5 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.AgentWorkspace;
 import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
@@ -47,7 +46,7 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                mock(SkillService.class), mock(SkillMaterializer.class),
                 new AgentWorkspaceLease(), Runnable::run);
 
         Agent agent = new Agent();
@@ -104,7 +103,7 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                mock(SkillService.class), mock(SkillMaterializer.class),
                 new AgentWorkspaceLease(), command -> new Thread(command, "agent-test").start());
 
         Agent agent = new Agent();
@@ -160,7 +159,7 @@ class AgentExecutionServiceTest {
         RunDao runDao = mock(RunDao.class);
         AgentRunRecorder recorder = mock(AgentRunRecorder.class);
         AgentExecutionService service = new AgentExecutionService(agentService, registry, runDao, recorder,
-                mock(SkillService.class), mock(BuiltInSkillRegistry.class), mock(SkillMaterializer.class),
+                mock(SkillService.class), mock(SkillMaterializer.class),
                 new AgentWorkspaceLease(), Runnable::run);
 
         Agent agent = new Agent();
@@ -201,7 +200,7 @@ class AgentExecutionServiceTest {
         };
         AgentExecutionService service = new AgentExecutionService(
                 mock(AgentService.class), mock(CliRunnerRegistry.class), mock(RunDao.class),
-                mock(AgentRunRecorder.class), mock(SkillService.class), mock(BuiltInSkillRegistry.class),
+                mock(AgentRunRecorder.class), mock(SkillService.class),
                 mock(SkillMaterializer.class), new AgentWorkspaceLease(), rejecting);
         AgentExecutionRequest request = request("project-1", "requirement-1", "task-1");
         request.setRunId("run-1");

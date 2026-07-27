@@ -19,8 +19,7 @@ import lombok.extern.slf4j.Slf4j;
  * 目录下一个相对路径文件，由 {@link com.changhong.onlinecode.agent.SkillMaterializer} 随
  * SKILL.md 一并写入 worktree。
  *
- * <p>{@code skill_id} 加 FK + ON DELETE CASCADE（与 oc_agent_skill.skill_id 不同——后者为
- * {@code builtin:<name>} synthetic id 预留而不加 FK；本表是真实 oc_skill 子行，FK 合理，
+ * <p>{@code skill_id} 加 FK + ON DELETE CASCADE（本表是真实 oc_skill 子行，FK 合理，
  * 删技能时辅助文件级联清除）。{@code (skill_id, path)} 唯一，避免同技能重复路径。</p>
  *
  * <p>辅助文件<b>不进</b> §6 hash recipe——{@code .lock} 仍只覆盖 SKILL.md 五元组

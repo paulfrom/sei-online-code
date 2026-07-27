@@ -3,7 +3,6 @@ package com.changhong.onlinecode.service.agent;
 import com.changhong.onlinecode.agent.AgentBriefWriter;
 import com.changhong.onlinecode.agent.AgentInvocationContext;
 import com.changhong.onlinecode.agent.AgentWorkspace;
-import com.changhong.onlinecode.agent.BuiltInSkillRegistry;
 import com.changhong.onlinecode.agent.CliRunResult;
 import com.changhong.onlinecode.agent.CliRunnerRegistry;
 import com.changhong.onlinecode.agent.SkillMaterializer;
@@ -45,7 +44,6 @@ public class AgentExecutionService {
     private final RunDao runDao;
     private final AgentRunRecorder agentRunRecorder;
     private final SkillService skillService;
-    private final BuiltInSkillRegistry builtInSkillRegistry;
     private final SkillMaterializer skillMaterializer;
     private final AgentWorkspaceLease workspaceLease;
     private final Executor agentExecutionExecutor;
@@ -55,7 +53,6 @@ public class AgentExecutionService {
                                  RunDao runDao,
                                  AgentRunRecorder agentRunRecorder,
                                  SkillService skillService,
-                                 BuiltInSkillRegistry builtInSkillRegistry,
                                  SkillMaterializer skillMaterializer,
                                  AgentWorkspaceLease workspaceLease,
                                  @Qualifier("agentExecutionExecutor") Executor agentExecutionExecutor) {
@@ -64,7 +61,6 @@ public class AgentExecutionService {
         this.runDao = runDao;
         this.agentRunRecorder = agentRunRecorder;
         this.skillService = skillService;
-        this.builtInSkillRegistry = builtInSkillRegistry;
         this.skillMaterializer = skillMaterializer;
         this.workspaceLease = workspaceLease;
         this.agentExecutionExecutor = agentExecutionExecutor;
@@ -287,10 +283,6 @@ public class AgentExecutionService {
             if (agent.getSkillIds() != null) {
                 for (String sid : agent.getSkillIds()) {
                     if (sid == null || sid.isBlank()) {
-                        continue;
-                    }
-                    if (sid.startsWith(BuiltInSkillRegistry.PREFIX)) {
-                        builtInSkillRegistry.resolve(sid).ifPresent(payloads::add);
                         continue;
                     }
                     Skill skill = skillService.findOne(sid);
