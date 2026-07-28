@@ -241,7 +241,7 @@ public class RequirementDeliveryService {
         List<String> changedFiles;
         if (pushEffect.getStatus() == ExecutionEffectStatus.PREPARED) {
             try {
-                GitApi.UploadResult upload = gitApi.upload(workspace, projectKey, branch, targetBranch,
+                GitApi.UploadResult upload = gitApi.upload(workspace, deliveryTarget, branch, targetBranch,
                         "feat: deliver requirement " + shortId(requirement.getId()));
                 commitHash = upload.commitHash();
                 changedFiles = upload.changedFiles();
@@ -260,7 +260,7 @@ public class RequirementDeliveryService {
                 && pushEffect.getStatus() != ExecutionEffectStatus.CONFIRMED) {
             throw new IllegalStateException("push effect 状态异常: key=" + pushEffectKey + " status=" + pushEffect.getStatus());
         } else {
-            commitHash = gitApi.getBranchHead(projectKey, branch);
+            commitHash = gitApi.getBranchHead(deliveryTarget, branch);
             changedFiles = List.of();
         }
 

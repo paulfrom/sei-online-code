@@ -75,10 +75,11 @@ public class GitApi {
         }
     }
 
-    public UploadResult upload(Path workspaceDir, String projectId, String branch,
+    public UploadResult upload(Path workspaceDir, RepositoryTarget target, String branch,
                                String targetBranch, String commitMessage) {
-        GitLabApi client = client(null);
+        String projectId = target.projectPath();
         try {
+            GitLabApi client = client(target.host());
             Optional<Branch> remoteBranch = client.getRepositoryApi().getOptionalBranch(projectId, branch);
             String comparisonRef = localComparisonRef(workspaceDir, targetBranch);
             List<ChangedPath> changes = readChanges(workspaceDir, comparisonRef);
@@ -102,7 +103,8 @@ public class GitApi {
                     remoteBranch.isPresent(), message, actions);
             return new UploadResult(headCommitId, changedFiles);
         } catch (Exception e) {
-            throw new IllegalStateException("通过 Git API 上传仓库变更失败: project=" + projectId
+            throw new IllegalStateException("通过 Git API 上传仓库变更失败: host=" + target.host()
+                    + ", project=" + projectId
                     + ", branch=" + branch, e);
         }
     }
@@ -219,11 +221,13 @@ public class GitApi {
         return bytes;
     }
 
-    public String getBranchHead(String projectId, String branch) {
+    public String getBranchHead(RepositoryTarget target, String branch) {
+        String projectId = target.projectPath();
         try {
-            return client(null).getRepositoryApi().getBranch(projectId, branch).getCommit().getId();
+            return client(target.host()).getRepositoryApi().getBranch(projectId, branch).getCommit().getId();
         } catch (Exception e) {
-            throw new IllegalStateException("通过 Git API 获取分支失败: project=" + projectId
+            throw new IllegalStateException("通过 Git API 获取分支失败: host=" + target.host()
+                    + ", project=" + projectId
                     + ", branch=" + branch, e);
         }
     }
