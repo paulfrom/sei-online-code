@@ -1,7 +1,6 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RequirementDao;
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
@@ -14,7 +13,6 @@ import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
@@ -60,7 +58,6 @@ public class RequirementAgentService {
     private final RequirementDesignContextService requirementDesignContextService;
     private final DesignContextPromptAssembler designContextPromptAssembler;
     private final RequirementCommentService requirementCommentService;
-    private final RunDao runDao;
 
 
     /**
@@ -98,14 +95,14 @@ public class RequirementAgentService {
                     Requirement latest = requirementDao.findOne(requirementId);
                     if (Objects.isNull(latest) || !matchesGenerationToken(latest, generationToken)) {
                         log.info("prd-agent: requirement {} 已被新一轮生成接管，丢弃过期结果", requirementId);
-                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管",
+                        agentExecutionService.settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管",
                                 RunTerminalReason.SUPERSEDED);
                         return;
                     }
                     try {
                         validatePrdContent(output.content());
                     } catch (RuntimeException ex) {
-                        settleRun(output.runId(), RunState.FAILED, ex.getMessage());
+                        agentExecutionService.settleRun(output.runId(), RunState.FAILED, ex.getMessage());
                         throw ex;
                     }
                     latest.setPrdContent(output.content());
@@ -115,7 +112,7 @@ public class RequirementAgentService {
                     latest.setMemoryValidationResultJson(null);
                     failureInfoSupport.clearRequirementFailure(latest);
                     requirementDao.save(latest);
-                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    agentExecutionService.settleRun(output.runId(), RunState.SUCCEEDED, null);
                     log.info("prd-agent: requirement {} PRD 生成完成，版本 {}，已提交异步记忆审阅",
                             requirementId, latest.getPrdVersion());
                     reviewMemory(requirementId, output.content(), context);
@@ -153,12 +150,12 @@ public class RequirementAgentService {
         AgentExecutionRequest request = buildRequest(requirement, buildMemoryReviewPrompt(content, context), context);
         // memory-review-agent 只读取 PRD/记忆并返回差异，不得占用或改写需求级 writer 工作区。
         // 独立 workspace 也隔离了 AgentBrief/skills 的物化写入，允许它与开发/验证任务并行。
-        request.setWorkspaceKey("memory-review-" + context.getId());
+        request.setWorkspaceMode(AgentExecutionRequest.WorkspaceMode.SNAPSHOT_READER);
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(MEMORY_REVIEW_AGENT_NAME, request);
 
         future.thenApply(result -> resultOutput(result, this::parseMemoryReview))
                 .thenAccept(output -> {
-                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    agentExecutionService.settleRun(output.runId(), RunState.SUCCEEDED, null);
                     persistMemoryReview(requirementId, content, output.content());
                 })
                 .exceptionally(e -> {
@@ -456,15 +453,15 @@ public class RequirementAgentService {
 
     private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
         String runId = result == null ? null : result.runId();
-        if (result == null || !result.succeeded()) {
+        if (result == null || result.status() != AgentExecutionResult.Status.SUCCEEDED) {
             String reason = result == null ? "Agent 执行无结果" : result.failureReason();
-            settleRun(runId, RunState.FAILED, reason);
+            agentExecutionService.settleRun(runId, RunState.FAILED, reason);
             throw new IllegalStateException(reason);
         }
         try {
             return new AgentOutput<>(runId, mapper.apply(result.output()));
         } catch (RuntimeException e) {
-            settleRun(runId, RunState.FAILED, e.getMessage());
+            agentExecutionService.settleRun(runId, RunState.FAILED, e.getMessage());
             throw e;
         }
     }
@@ -478,41 +475,6 @@ public class RequirementAgentService {
             current = current.getCause();
         }
         return current.getMessage();
-    }
-
-    /**
-     * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
-     */
-    private void settleRun(String runId, RunState state, String reason) {
-        settleRun(runId, state, reason, terminalReason(state));
-    }
-
-    private void settleRun(String runId, RunState state, String reason, RunTerminalReason terminalReason) {
-        try {
-            Run current = runDao.findOne(runId);
-            if (current == null || current.getState() != RunState.RUNNING) {
-                return;
-            }
-            current.setState(state);
-            current.setTerminalReason(terminalReason);
-            current.setFinishedDate(new Date());
-            if (state == RunState.FAILED) {
-                current.setFailureReason(reason);
-            }
-            runDao.save(current);
-        } catch (Exception e) {
-            log.warn("prd-agent: 更新 Run 终态失败 runId={}", runId, e);
-        }
-    }
-
-    private RunTerminalReason terminalReason(RunState state) {
-        if (state == RunState.SUCCEEDED) {
-            return RunTerminalReason.SUCCEEDED;
-        }
-        if (state == RunState.CANCELLED) {
-            return RunTerminalReason.CANCELLED;
-        }
-        return RunTerminalReason.FAILED;
     }
 
     private String toJson(DesignMemoryValidationService.ValidationResult result) {

@@ -1,10 +1,8 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RunState;
 import com.changhong.onlinecode.entity.Requirement;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.dto.revision.PlanPatch;
 import com.changhong.onlinecode.service.revision.contract.PlanRevisionInput;
 import org.junit.jupiter.api.Test;
@@ -20,42 +18,38 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PmAgentClientTest {
 
     @Test
     void generatePlanPatch_includesCompleteSnapshotAndAcceptsValidPatch() {
-        RunDao runDao = mock(RunDao.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
-        Run run = new Run();
-        run.setId("run-patch");
-        run.setState(RunState.RUNNING);
-        when(runDao.findOne("run-patch")).thenReturn(run);
         AtomicReference<AgentExecutionRequest> captured = new AtomicReference<>();
         when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
                 any(AgentExecutionRequest.class))).thenAnswer(invocation -> {
             captured.set(invocation.getArgument(1));
-            return new AgentExecutionResult("run-patch", """
+            return AgentExecutionResult.succeeded("run-patch", """
                     ```json
                     {"requirementId":"req-1","loopId":"loop-1","revisionSeq":2,
                     "basePlanId":"plan-1","basePlanVersion":1,"summary":"保留后端",
                     "operations":[{"taskKey":"BE-1","action":"KEEP","sourceTaskId":"task-be",
                     "reason":"不受评论影响"}]}
                     ```
-                    """, true, null);
+                    """);
         });
         Requirement requirement = new Requirement();
         requirement.setId("req-1");
         requirement.setProjectId("project-1");
         PlanRevisionInput input = revisionInput();
 
-        PlanPatch result = new PmAgentClient(runDao, agentExecutionService)
+        PlanPatch result = new PmAgentClient(agentExecutionService)
                 .generatePlanPatch(requirement, input, null);
 
         assertNotNull(result);
         assertEquals("KEEP", result.getOperations().get(0).getAction().name());
-        assertEquals(RunState.SUCCEEDED, run.getState());
+        verify(agentExecutionService).settleRun("run-patch", RunState.SUCCEEDED, null);
         String prompt = captured.get().getPrompt();
         assertTrue(prompt.contains("完整评论内容"));
         assertTrue(prompt.contains("\\\"goal\\\":\\\"base\\\""));
@@ -65,58 +59,42 @@ class PmAgentClientTest {
 
     @Test
     void generatePlanPatch_invalidDagMarksRunFailed() {
-        RunDao runDao = mock(RunDao.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
-        Run run = new Run();
-        run.setId("run-invalid-patch");
-        run.setState(RunState.RUNNING);
-        when(runDao.findOne("run-invalid-patch")).thenReturn(run);
         when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
-                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult("run-invalid-patch", """
+                any(AgentExecutionRequest.class))).thenReturn(AgentExecutionResult.succeeded("run-invalid-patch", """
                     {"requirementId":"req-1","loopId":"loop-1","revisionSeq":2,
                     "basePlanId":"plan-1","basePlanVersion":1,"summary":"bad",
                     "operations":[{"taskKey":"NEW","action":"ADD","reason":"change","title":"new",
                     "description":"new","area":"backend","fileScope":["backend/"],
                     "dependsOn":["MISSING"],"assignedAgent":"backend-dev-agent"}]}
-                    """, true, null));
+                    """));
         Requirement requirement = new Requirement();
         requirement.setId("req-1");
         requirement.setProjectId("project-1");
 
-        PlanPatch result = new PmAgentClient(runDao, agentExecutionService)
+        PlanPatch result = new PmAgentClient(agentExecutionService)
                 .generatePlanPatch(requirement, revisionInput(), null);
 
         assertNull(result);
-        assertEquals(RunState.FAILED, run.getState());
-        assertEquals("pm-agent 返回内容无法解析为有效 PlanPatch JSON", run.getFailureReason());
+        verify(agentExecutionService).settleRun(
+                "run-invalid-patch", RunState.FAILED,
+                "pm-agent 返回内容无法解析为有效 PlanPatch JSON");
     }
 
     @Test
     void generatePlan_passesPersistedRunIdToRunnerAndRejectsCancelledResult() {
-        RunDao runDao = mock(RunDao.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
-        AtomicReference<Run> savedRun = new AtomicReference<>();
-        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
-            Run run = invocation.getArgument(0);
-            savedRun.set(run);
-            return run;
-        });
-        Run run = new Run();
-        run.setId("run-1");
-        run.setState(RunState.RUNNING);
-        savedRun.set(run);
-        when(runDao.findOne("run-1")).thenAnswer(invocation -> savedRun.get());
+        when(agentExecutionService.isCancellationRequested("run-1")).thenReturn(true);
         when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
                 any(AgentExecutionRequest.class))).thenAnswer(invocation -> {
-            savedRun.get().setCancelRequested(Boolean.TRUE);
-            return new AgentExecutionResult("run-1", """
+            return AgentExecutionResult.succeeded("run-1", """
                     {"goal":"g","tasks":[{"taskKey":"BE-1","title":"t","description":"d",
                     "agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"]}],
                     "risks":[],"validation":{"commands":[]}}
-                    """, true, null);
+                    """);
         });
 
-        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
+        PmAgentClient client = new PmAgentClient(agentExecutionService);
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
         requirement.setProjectId("project-1");
@@ -125,30 +103,18 @@ class PmAgentClientTest {
                 ExecutionPlanType.INITIAL, null, List.of(), null);
 
         assertNull(result);
-        assertEquals(RunState.CANCELLED, savedRun.get().getState());
+        verify(agentExecutionService).settleRun("run-1", RunState.CANCELLED, null);
     }
 
     @Test
     void generatePlan_cliFailureDoesNotParseOutputAsJsonAndStoresRealFailure() {
-        RunDao runDao = mock(RunDao.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
-        AtomicReference<Run> savedRun = new AtomicReference<>();
-        Run run = new Run();
-        run.setId("run-failed");
-        run.setState(RunState.RUNNING);
-        savedRun.set(run);
-        when(runDao.findOne("run-failed")).thenAnswer(invocation -> savedRun.get());
-        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
-            Run saved = invocation.getArgument(0);
-            savedRun.set(saved);
-            return saved;
-        });
         when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
-                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult(
+                any(AgentExecutionRequest.class))).thenReturn(AgentExecutionResult.failed(
                 "run-failed", "API Error: Unable to connect to API (ECONNRESET)",
-                false, "claude exited with code 1"));
+                "claude exited with code 1"));
 
-        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
+        PmAgentClient client = new PmAgentClient(agentExecutionService);
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
         requirement.setProjectId("project-1");
@@ -157,35 +123,22 @@ class PmAgentClientTest {
                 ExecutionPlanType.INITIAL, null, List.of(), null);
 
         assertNull(result);
-        assertEquals(RunState.FAILED, savedRun.get().getState());
-        assertEquals("API Error: Unable to connect to API (ECONNRESET)", savedRun.get().getSummary());
-        assertEquals("API Error: Unable to connect to API (ECONNRESET)", savedRun.get().getFailureReason());
+        verify(agentExecutionService).settleRun(
+                "run-failed", RunState.FAILED, "API Error: Unable to connect to API (ECONNRESET)");
     }
 
     @Test
     void generatePlan_nonJsonOutputMarksRunFailed() {
-        RunDao runDao = mock(RunDao.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
-        AtomicReference<Run> savedRun = new AtomicReference<>();
-        Run run = new Run();
-        run.setId("run-invalid-json");
-        run.setState(RunState.RUNNING);
-        savedRun.set(run);
-        when(runDao.findOne("run-invalid-json")).thenAnswer(invocation -> savedRun.get());
-        when(runDao.save(any(Run.class))).thenAnswer(invocation -> {
-            Run saved = invocation.getArgument(0);
-            savedRun.set(saved);
-            return saved;
-        });
         when(agentExecutionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
-                any(AgentExecutionRequest.class))).thenReturn(new AgentExecutionResult(
+                any(AgentExecutionRequest.class))).thenReturn(AgentExecutionResult.succeeded(
                 "run-invalid-json", """
                 ---
 
                 **执行计划已输出。**
-                """, true, null));
+                """));
 
-        PmAgentClient client = new PmAgentClient(runDao, agentExecutionService);
+        PmAgentClient client = new PmAgentClient(agentExecutionService);
         Requirement requirement = new Requirement();
         requirement.setId("requirement-1");
         requirement.setProjectId("project-1");
@@ -194,13 +147,14 @@ class PmAgentClientTest {
                 ExecutionPlanType.INITIAL, null, List.of(), null);
 
         assertNull(result);
-        assertEquals(RunState.FAILED, savedRun.get().getState());
-        assertEquals("pm-agent 返回内容无法解析为有效计划 JSON", savedRun.get().getFailureReason());
+        verify(agentExecutionService).settleRun(
+                "run-invalid-json", RunState.FAILED,
+                "pm-agent 返回内容无法解析为有效计划 JSON");
     }
 
     @Test
     void parsePlan_rejectsInvalidAgentAreaDuplicateKeysAndInvalidDag() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
 
         assertNull(parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"T1","title":"t","agent":"frontend-dev-agent",
@@ -224,7 +178,7 @@ class PmAgentClientTest {
 
     @Test
     void parsePlan_preservesAcceptanceCriteriaForValidDag() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 {"goal":"g","tasks":[{"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
                 "area":"backend","dependsOn":[],"fileScope":["backend/"],
@@ -237,7 +191,7 @@ class PmAgentClientTest {
 
     @Test
     void parsePlan_extractsJsonFromMarkdownOutput() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 计划如下：
                 ```json
@@ -255,7 +209,7 @@ class PmAgentClientTest {
 
     @Test
     void parsePlan_acceptsExplicitTestAgentValidationTask() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmAgentClient.PmPlanResult result = parsePlan(client, """
                 {"goal":"g","tasks":[
                 {"taskKey":"BE-1","title":"a","agent":"backend-dev-agent",
@@ -271,7 +225,7 @@ class PmAgentClientTest {
 
     @Test
     void parseAcceptance_extractsJsonFromMarkdownOutput() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmAgentClient.PmAcceptanceResult result = parseAcceptance(client, """
                 ```json
                 {"accepted":true,"summary":"验收通过","findings":[],"remediationTasks":[]}
@@ -285,7 +239,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_approveDecisionForValidJson() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"APPROVE","summary":"ok","failureCategory":"NONE","findings":["evidence"],"retryReason":null,"remediationTasks":[]}
                 """);
@@ -297,7 +251,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_retryWithoutReasonIsRejected() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         // RETRY 缺少 retryReason 应被拒绝（返回 null），由服务端转 WAIT_HUMAN。
         assertNull(parseDelivery(client, """
                 {"decision":"RETRY","summary":"retry","failureCategory":"TRANSIENT_INFRA","retryReason":null,"remediationTasks":[]}
@@ -306,7 +260,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_replanWithoutRemediationTasksIsRejected() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         assertNull(parseDelivery(client, """
                 {"decision":"REPLAN","summary":"replan","failureCategory":"PLAN_DEFECT","remediationTasks":[]}
                 """));
@@ -314,7 +268,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_replanWithoutCodingRemediationIsRejected() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         assertNull(parseDelivery(client, """
                 {"decision":"REPLAN","summary":"retry validation","failureCategory":"VALIDATION_FAILED","remediationTasks":[
                 {"taskKey":"V1","title":"verify again","description":"v","agent":"test-agent","area":"validation","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["all tests pass"]}
@@ -324,7 +278,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_replanWithValidRemediationTasksIsAccepted() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
                 {"taskKey":"R1","title":"fix","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]},
@@ -337,7 +291,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_replanWithoutIndependentTestAgentGetsDeterministicValidationTask() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
 
         PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
@@ -353,7 +307,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_replanWithUnsequencedTestAgentGetsFinalValidationTask() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
 
         PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"REPLAN","summary":"fix","failureCategory":"VALIDATION_FAILED","remediationTasks":[
@@ -370,7 +324,7 @@ class PmAgentClientTest {
 
     @Test
     void parseDelivery_invalidDecisionStringReturnsNull() throws Exception {
-        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         assertNull(parseDelivery(client, """
                 {"decision":"MAYBE","summary":"x"}
                 """));
@@ -389,8 +343,8 @@ class PmAgentClientTest {
                 "req-1", "loop-1", "task-1", "delivery-run", "T1", "task", "description",
                 "backend", "backend-dev-agent", "coding-task", false, List.of(), "{}", List.of());
 
-        assertThrows(PmAgentClient.AgentExecutionDeferredException.class,
-                () -> new PmAgentClient(mock(RunDao.class), executionService)
+        assertThrows(AgentExecutionDeferredException.class,
+                () -> new PmAgentClient(executionService)
                         .reviewDelivery(requirement, null, input));
     }
 

@@ -264,21 +264,22 @@ public class CodingTaskExecutionService {
             CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(agentName, request);
             future.thenAccept(result -> {
                 CompletionDecision decision = decideCompletion(run, result);
-                if (decision.deferred()) {
+                if (decision.status() == CompletionStatus.DEFERRED) {
                     // 工作区租约繁忙：任务回退 PENDING 并重新调度，不计失败、不消耗重试（方案 §6.2）。
                     boolean deferred = inNewTransaction(() ->
-                            handleDeferredRun(run, task, decision.summary()));
+                            handleDeferredRun(task, decision.summary()));
                     if (deferred && schedulerManaged) {
                         eventPublisher.publishEvent(new CodingTaskSchedulingEvents.ScheduleRequested(
                                 task.getRequirementId()));
                     }
                     return;
                 }
-                boolean settled = inNewTransaction(() -> finishRun(run, task, decision.success(),
+                boolean success = decision.status() == CompletionStatus.SUCCEEDED;
+                boolean settled = inNewTransaction(() -> finishRun(run, task, success,
                         decision.summary(), decision.failureReason(), schedulerManaged));
                 if (settled && schedulerManaged) {
                     eventPublisher.publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                            task.getId(), decision.success(), decision.failureReason()));
+                            task.getId(), success, decision.failureReason()));
                 }
             }).exceptionally(e -> {
                 log.error("coding-task execute failed taskId={}", task.getId(), e);
@@ -296,17 +297,9 @@ public class CodingTaskExecutionService {
 
     /**
      * 处理工作区租约繁忙：把任务从 RUNNING 回退 PENDING 并重发调度事件。
-     * Run 标记为 CANCELLED（租约繁忙非真实执行），不写失败摘要、不增加 retryCount。
+     * Run 已由 AgentExecutionService 收敛为 CANCELLED；此处只恢复业务任务状态。
      */
-    private boolean handleDeferredRun(Run run, CodingTask task, String reason) {
-        Run persistedRun = runDao.findOne(run.getId());
-        if (persistedRun != null && persistedRun.getState() == RunState.RUNNING) {
-            persistedRun.setState(RunState.CANCELLED);
-            persistedRun.setTerminalReason(RunTerminalReason.CANCELLED);
-            persistedRun.setFinishedDate(new Date());
-            persistedRun.setSummary("工作区租约繁忙，执行推迟：" + reason);
-            runDao.save(persistedRun);
-        }
+    private boolean handleDeferredRun(CodingTask task, String reason) {
         CodingTask persistedTask = codingTaskDao.findOne(task.getId());
         if (persistedTask != null && persistedTask.getStatus() == CodingTaskStatus.RUNNING) {
             persistedTask.setStatus(CodingTaskStatus.PENDING);
@@ -350,11 +343,11 @@ public class CodingTaskExecutionService {
         }
         // 工作区租约繁忙：调度延迟，不计为失败，不消耗重试次数（方案 §6.2）。
         // 把任务回退到 PENDING，等待下一轮调度重新获取租约。
-        if (result.deferred()) {
+        if (result.status() == AgentExecutionResult.Status.DEFERRED) {
             return CompletionDecision.deferred(result.failureReason());
         }
         String summary = firstNonBlank(result.output(), result.failureReason());
-        if (!result.succeeded()) {
+        if (result.status() != AgentExecutionResult.Status.SUCCEEDED) {
             String failure = firstNonBlank(summary, "Agent 执行失败");
             return CompletionDecision.failed(summary, failure);
         }
@@ -392,17 +385,23 @@ public class CodingTaskExecutionService {
         return "coding-task-" + task.getId();
     }
 
-    private record CompletionDecision(boolean success, String summary, String failureReason, boolean deferred) {
+    private enum CompletionStatus {
+        SUCCEEDED,
+        FAILED,
+        DEFERRED
+    }
+
+    private record CompletionDecision(CompletionStatus status, String summary, String failureReason) {
         static CompletionDecision ok(String summary) {
-            return new CompletionDecision(true, summary, null, false);
+            return new CompletionDecision(CompletionStatus.SUCCEEDED, summary, null);
         }
 
         static CompletionDecision failed(String summary, String failureReason) {
-            return new CompletionDecision(false, summary, failureReason, false);
+            return new CompletionDecision(CompletionStatus.FAILED, summary, failureReason);
         }
 
         static CompletionDecision deferred(String reason) {
-            return new CompletionDecision(false, reason, reason, true);
+            return new CompletionDecision(CompletionStatus.DEFERRED, reason, reason);
         }
     }
 

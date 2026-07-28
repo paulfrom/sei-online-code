@@ -112,7 +112,8 @@ class FeatureDesignBuildServiceTaskGenerationTest {
         when(agentExecutionService.workspace("project1")).thenReturn(agentWorkspace);
         when(runService.save(any(Run.class))).thenReturn(savedRunResult);
         when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult("run1", "success", true, null)));
+                .thenReturn(CompletableFuture.completedFuture(
+                        AgentExecutionResult.succeeded("run1", "success")));
 
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build("fd1");
 

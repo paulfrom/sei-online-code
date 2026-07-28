@@ -15,7 +15,7 @@ import com.changhong.onlinecode.service.FailureInfoSupport;
 import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RequirementDesignContextService;
-import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.agent.AgentExecutionDeferredException;
 import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -104,7 +104,7 @@ class TaskDeliveryReviewOrchestratorTest {
         when(codingTaskDao.findOne("task-1")).thenReturn(task);
         when(requirementDao.findOne("req-1")).thenReturn(requirement);
         when(automationService.reviewTaskDelivery(any(), any(), any()))
-                .thenThrow(new PmAgentClient.AgentExecutionDeferredException(
+                .thenThrow(new AgentExecutionDeferredException(
                         "run-deferred", "workspace busy"));
 
         orchestrator.review("review-1");

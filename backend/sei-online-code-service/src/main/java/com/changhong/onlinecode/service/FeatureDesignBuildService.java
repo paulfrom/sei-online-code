@@ -11,7 +11,6 @@ import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.featuredesign.FeatureDesignContent;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TaskState;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
@@ -27,7 +26,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -278,7 +276,8 @@ public class FeatureDesignBuildService {
 
     private void completeBuild(String featureDesignId, String runId, AgentExecutionResult result,
                                Throwable error, TriggerSource triggerSource) {
-        boolean success = error == null && result != null && result.succeeded();
+        boolean success = error == null && result != null
+                && result.status() == AgentExecutionResult.Status.SUCCEEDED;
         String detail = success ? null : firstNonBlank(
                 rootMessage(error),
                 result == null ? null : result.failureReason(),
@@ -290,20 +289,8 @@ public class FeatureDesignBuildService {
             success = false;
             detail = firstNonBlank(rootMessage(persistenceError), detail, "构建状态更新失败");
         }
-        settleRun(runId, result, success, detail);
-    }
-
-    private void settleRun(String runId, AgentExecutionResult result, boolean success, String failureReason) {
-        Run current = runService.findOne(runId);
-        if (current == null || current.getState() != RunState.RUNNING) {
-            return;
-        }
-        current.setState(success ? RunState.SUCCEEDED : RunState.FAILED);
-        current.setTerminalReason(success ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
-        current.setFinishedDate(new Date());
-        current.setSummary(result == null ? null : result.output());
-        current.setFailureReason(success ? null : failureReason);
-        runService.save(current);
+        agentExecutionService.settleRun(runId,
+                success ? RunState.SUCCEEDED : RunState.FAILED, detail);
     }
 
     private static String rootMessage(Throwable error) {

@@ -59,7 +59,7 @@ class AgentExecutionServiceTest {
 
         AgentWorkspace agentWorkspace = mock(AgentWorkspace.class);
         when(agentWorkspace.pathString()).thenReturn(workspace.toString());
-        when(registry.workspace(eq("project-1"), eq("memory-review-context-1"))).thenReturn(agentWorkspace);
+        when(registry.workspace(eq("project-1"), eq("snapshot-reader-run-1"))).thenReturn(agentWorkspace);
 
         Run run = new Run();
         run.setId("run-1");
@@ -79,13 +79,13 @@ class AgentExecutionServiceTest {
         request.setProjectId("project-1");
         request.setRequirementId("requirement-1");
         request.setCodingTaskId("task-1");
-        request.setWorkspaceKey("memory-review-context-1");
+        request.setWorkspaceMode(AgentExecutionRequest.WorkspaceMode.SNAPSHOT_READER);
         request.setPrompt("prompt");
         request.setTriggerSource(TriggerSource.AUTO);
 
         AgentExecutionResult result = service.execute("test-agent", request);
 
-        assertTrue(result.succeeded());
+        assertEquals(AgentExecutionResult.Status.SUCCEEDED, result.status());
         assertEquals("run-1", result.runId());
         assertEquals("{\"passed\":true}", result.output());
         assertEquals("{\"passed\":true}", run.getSummary());
@@ -148,8 +148,7 @@ class AgentExecutionServiceTest {
                 request("project-1", "requirement-1", "task-2"));
 
         // 工作区租约繁忙：结果为 deferred（非失败），不创建失败 Run、不消耗重试次数（方案 §6.2）。
-        assertFalse(second.succeeded());
-        assertTrue(second.deferred());
+        assertEquals(AgentExecutionResult.Status.DEFERRED, second.status());
         assertEquals("run-2", second.runId());
         assertTrue(second.failureReason().contains("推迟"));
         assertEquals(RunState.CANCELLED, deferredRun.get().getState());
@@ -160,7 +159,8 @@ class AgentExecutionServiceTest {
         cliResult.setProcessSucceeded(true);
         cliResult.setOutput("done");
         blockedCli.complete(cliResult);
-        assertTrue(firstFuture.get(5, TimeUnit.SECONDS).succeeded());
+        assertEquals(AgentExecutionResult.Status.SUCCEEDED,
+                firstFuture.get(5, TimeUnit.SECONDS).status());
     }
 
     @Test
@@ -200,8 +200,10 @@ class AgentExecutionServiceTest {
             return CompletableFuture.completedFuture(result);
         });
 
-        assertTrue(service.execute("test-agent", request("project-1", "requirement-1", "task-1")).succeeded());
-        assertTrue(service.execute("test-agent", request("project-2", "requirement-2", "task-2")).succeeded());
+        assertEquals(AgentExecutionResult.Status.SUCCEEDED,
+                service.execute("test-agent", request("project-1", "requirement-1", "task-1")).status());
+        assertEquals(AgentExecutionResult.Status.SUCCEEDED,
+                service.execute("test-agent", request("project-2", "requirement-2", "task-2")).status());
     }
 
     @Test
@@ -223,9 +225,30 @@ class AgentExecutionServiceTest {
 
         AgentExecutionResult result = service.executeAsync("test-agent", request).join();
 
-        assertTrue(result.deferred());
+        assertEquals(AgentExecutionResult.Status.DEFERRED, result.status());
         assertEquals("run-1", result.runId());
         assertEquals(RunState.CANCELLED, run.getState());
+        verify(runDao).save(run);
+    }
+
+    @Test
+    void settleRun_cancellationOverridesRequestedSuccess() {
+        RunDao runDao = mock(RunDao.class);
+        Run run = new Run();
+        run.setId("run-1");
+        run.setState(RunState.RUNNING);
+        run.setCancelRequested(Boolean.TRUE);
+        when(runDao.findOne("run-1")).thenReturn(run);
+        AgentExecutionService service = new AgentExecutionService(
+                mock(AgentService.class), mock(CliRunnerRegistry.class), runDao,
+                mock(AgentRunRecorder.class), mock(SkillService.class),
+                mock(SkillMaterializer.class), new AgentWorkspaceLease(), Runnable::run);
+
+        service.settleRun("run-1", RunState.SUCCEEDED, null);
+
+        assertEquals(RunState.CANCELLED, run.getState());
+        assertEquals(com.changhong.onlinecode.dto.enums.RunTerminalReason.CANCELLED,
+                run.getTerminalReason());
         verify(runDao).save(run);
     }
 

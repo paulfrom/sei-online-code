@@ -1,12 +1,10 @@
 package com.changhong.onlinecode.service;
 
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dao.SpecDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.dto.spec.SpecApiContract;
@@ -14,7 +12,6 @@ import com.changhong.onlinecode.dto.spec.SpecContent;
 import com.changhong.onlinecode.dto.spec.SpecEntity;
 import com.changhong.onlinecode.dto.spec.SpecPage;
 import com.changhong.onlinecode.entity.Project;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.Spec;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
@@ -53,7 +50,6 @@ public class SpecAgentService {
     private final ProjectLifecycleService projectLifecycleService;
     private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
-    private final RunDao runDao;
 
     /**
      * spawn 需求智能体（latest Spec 应已由 caller 置 GENERATING）。D11 链式落库 SPEC_REVIEW/FAILED。
@@ -94,7 +90,7 @@ public class SpecAgentService {
                     spec.setState(SpecState.SPEC_REVIEW);
                     failureInfoSupport.clearSpecFailure(spec);
                     specDao.save(spec);
-                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    agentExecutionService.settleRun(output.runId(), RunState.SUCCEEDED, null);
                     // refineSpec 路径项目停在 SPEC_REFINING，此处推进到 SPEC_REVIEW；
                     // regenerate 路径项目已在 SPEC_REVIEW，自环合法（见 SpecService 注释）。
                     projectLifecycleService.transitionState(projectId, LifecycleState.SPEC_REVIEW);
@@ -277,42 +273,20 @@ public class SpecAgentService {
 
     private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
         String runId = result == null ? null : result.runId();
-        if (result == null || !result.succeeded()) {
+        if (result == null || result.status() != AgentExecutionResult.Status.SUCCEEDED) {
             String reason = result == null ? "Agent 执行无结果" : result.failureReason();
-            settleRun(runId, RunState.FAILED, reason);
+            agentExecutionService.settleRun(runId, RunState.FAILED, reason);
             throw new IllegalStateException(reason);
         }
         try {
             return new AgentOutput<>(runId, mapper.apply(result.output()));
         } catch (RuntimeException e) {
-            settleRun(runId, RunState.FAILED, e.getMessage());
+            agentExecutionService.settleRun(runId, RunState.FAILED, e.getMessage());
             throw e;
         }
     }
 
     private record AgentOutput<T>(String runId, T content) {
-    }
-
-    /**
-     * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
-     */
-    private void settleRun(String runId, RunState state, String reason) {
-        try {
-            Run current = runDao.findOne(runId);
-            if (current == null || current.getState() != RunState.RUNNING) {
-                return;
-            }
-            current.setState(state);
-            current.setTerminalReason(state == RunState.SUCCEEDED
-                    ? RunTerminalReason.SUCCEEDED : RunTerminalReason.FAILED);
-            current.setFinishedDate(new java.util.Date());
-            if (state == RunState.FAILED) {
-                current.setFailureReason(reason);
-            }
-            runDao.save(current);
-        } catch (Exception e) {
-            log.warn("spec-agent: 更新 Run 终态失败 runId={}", runId, e);
-        }
     }
 
     private String buildSpecPrompt(Project project, Spec spec, String modifyHint) {

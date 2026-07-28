@@ -19,7 +19,7 @@ import com.changhong.onlinecode.service.FailureInfoSupport;
 import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RequirementDesignContextService;
-import com.changhong.onlinecode.service.agent.PmAgentClient;
+import com.changhong.onlinecode.service.agent.AgentExecutionDeferredException;
 import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -131,7 +131,7 @@ public class TaskDeliveryReviewOrchestrator {
         PmDeliveryDecision decision;
         try {
             decision = invokePmAgent(requirement, plan, task, review);
-        } catch (PmAgentClient.AgentExecutionDeferredException e) {
+        } catch (AgentExecutionDeferredException e) {
             boolean requeued = reviewService.requeueReview(reviewId);
             log.info("delivery review deferred and requeued. reviewId={}, runId={}, requeued={}, reason={}",
                     reviewId, e.getRunId(), requeued, e.getMessage());
@@ -147,7 +147,7 @@ public class TaskDeliveryReviewOrchestrator {
             com.changhong.onlinecode.service.agent.PmAgentClient.DeliveryReviewInput input =
                     buildReviewInput(requirement, plan, task, review);
             return automationService.reviewTaskDelivery(requirement, plan, input);
-        } catch (PmAgentClient.AgentExecutionDeferredException e) {
+        } catch (AgentExecutionDeferredException e) {
             throw e;
         } catch (Exception e) {
             log.error("pm-agent delivery review invocation failed. reviewId={}, codingTaskId={}",

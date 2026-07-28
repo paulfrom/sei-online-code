@@ -2,7 +2,6 @@ package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.FeatureDesignDao;
 import com.changhong.onlinecode.dao.PlanDao;
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.FailureCode;
 import com.changhong.onlinecode.dto.enums.FailureStage;
@@ -16,7 +15,6 @@ import com.changhong.onlinecode.dto.plan.PlanFeature;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Plan;
 import com.changhong.onlinecode.entity.Project;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
@@ -56,7 +54,6 @@ public class PlanAgentService {
     private final ProjectLifecycleService projectLifecycleService;
     private final AgentExecutionService agentExecutionService;
     private final FailureInfoSupport failureInfoSupport;
-    private final RunDao runDao;
 
     private final Semaphore fdPermits = new Semaphore(MAX_CONCURRENT_FD);
     private final ExecutorService executor = Executors.newCachedThreadPool();
@@ -91,7 +88,7 @@ public class PlanAgentService {
                     Plan latest = planDao.findLatestByProjectId(projectId);
                     if (latest == null || !matchesGenerationToken(latest, generationToken)) {
                         log.info("spawnPlanning: projectId={} 已被新一轮生成接管，丢弃过期结果", projectId);
-                        settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管",
+                        agentExecutionService.settleRun(output.runId(), RunState.FAILED, "已被新一轮生成接管",
                                 RunTerminalReason.SUPERSEDED);
                         return;
                     }
@@ -99,7 +96,7 @@ public class PlanAgentService {
                     latest.setStatus(PlanStatus.DRAFT);
                     failureInfoSupport.clearPlanFailure(latest);
                     planDao.save(latest);
-                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    agentExecutionService.settleRun(output.runId(), RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
                     log.error("spawnPlanning failed projectId={}", projectId, e);
@@ -194,7 +191,7 @@ public class PlanAgentService {
                     target.setStatus(FeatureDesignStatus.DRAFT);
                     failureInfoSupport.clearFeatureDesignFailure(target);
                     featureDesignDao.save(target);
-                    settleRun(output.runId(), RunState.SUCCEEDED, null);
+                    agentExecutionService.settleRun(output.runId(), RunState.SUCCEEDED, null);
                 })
                 .exceptionally(e -> {
                     log.error("spawnFeatureDesign failed projectId={} featureId={}", projectId, featureId, e);
@@ -282,55 +279,20 @@ public class PlanAgentService {
 
     private <T> AgentOutput<T> resultOutput(AgentExecutionResult result, Function<String, T> mapper) {
         String runId = result == null ? null : result.runId();
-        if (result == null || !result.succeeded()) {
+        if (result == null || result.status() != AgentExecutionResult.Status.SUCCEEDED) {
             String reason = result == null ? "Agent 执行无结果" : result.failureReason();
-            settleRun(runId, RunState.FAILED, reason);
+            agentExecutionService.settleRun(runId, RunState.FAILED, reason);
             throw new IllegalStateException(reason);
         }
         try {
             return new AgentOutput<>(runId, mapper.apply(result.output()));
         } catch (RuntimeException e) {
-            settleRun(runId, RunState.FAILED, e.getMessage());
+            agentExecutionService.settleRun(runId, RunState.FAILED, e.getMessage());
             throw e;
         }
     }
 
     private record AgentOutput<T>(String runId, T content) {
-    }
-
-    /**
-     * 更新 Run 终态。重新加载 Run 实体避免覆盖 usage 列。
-     */
-    private void settleRun(String runId, RunState state, String reason) {
-        settleRun(runId, state, reason, terminalReason(state));
-    }
-
-    private void settleRun(String runId, RunState state, String reason, RunTerminalReason terminalReason) {
-        try {
-            Run current = runDao.findOne(runId);
-            if (current == null || current.getState() != RunState.RUNNING) {
-                return;
-            }
-            current.setState(state);
-            current.setTerminalReason(terminalReason);
-            current.setFinishedDate(new java.util.Date());
-            if (state == RunState.FAILED) {
-                current.setFailureReason(reason);
-            }
-            runDao.save(current);
-        } catch (Exception e) {
-            log.warn("plan-agent: 更新 Run 终态失败 runId={}", runId, e);
-        }
-    }
-
-    private RunTerminalReason terminalReason(RunState state) {
-        if (state == RunState.SUCCEEDED) {
-            return RunTerminalReason.SUCCEEDED;
-        }
-        if (state == RunState.CANCELLED) {
-            return RunTerminalReason.CANCELLED;
-        }
-        return RunTerminalReason.FAILED;
     }
 
     private String buildPlanningPrompt(Project project, String modifyHint) {

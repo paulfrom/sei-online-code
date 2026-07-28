@@ -5,7 +5,6 @@ import com.changhong.onlinecode.dto.FeatureDesignBuildResultDto;
 import com.changhong.onlinecode.dto.enums.FeatureDesignBuildStatus;
 import com.changhong.onlinecode.dto.enums.FeatureDesignStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.entity.Agent;
 import com.changhong.onlinecode.entity.FeatureDesign;
 import com.changhong.onlinecode.entity.Run;
@@ -229,10 +228,9 @@ class FeatureDesignBuildServiceTest {
         when(taskService.save(any(Task.class))).thenReturn(taskSaveResult);
         when(agentExecutionService.workspace(projId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(runSaveResult);
-        when(runService.findOne(runId)).thenReturn(savedRun);
         when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(runId,
-                        "Supported outcomes: ENROLLED/WAITLISTED/FAILED", true, null)));
+                .thenReturn(CompletableFuture.completedFuture(AgentExecutionResult.succeeded(runId,
+                        "Supported outcomes: ENROLLED/WAITLISTED/FAILED")));
 
         // 执行
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);
@@ -250,12 +248,10 @@ class FeatureDesignBuildServiceTest {
 
         // 验证 Run 创建正确
         ArgumentCaptor<Run> runCaptor = ArgumentCaptor.forClass(Run.class);
-        verify(runService, times(2)).save(runCaptor.capture());
-        assertEquals(taskId, runCaptor.getAllValues().get(0).getTaskId());
+        verify(runService).save(runCaptor.capture());
+        assertEquals(taskId, runCaptor.getValue().getTaskId());
         assertEquals(FeatureDesignBuildStatus.BUILT, fd.getBuildStatus());
-        assertEquals(RunState.SUCCEEDED, savedRun.getState());
-        assertEquals(RunTerminalReason.SUCCEEDED, savedRun.getTerminalReason());
-        assertNotNull(savedRun.getFinishedDate());
+        verify(agentExecutionService).settleRun(runId, RunState.SUCCEEDED, null);
     }
 
     @Test
@@ -290,18 +286,14 @@ class FeatureDesignBuildServiceTest {
         when(taskService.save(any(Task.class))).thenReturn(taskSaveResult);
         when(agentExecutionService.workspace(projectId)).thenReturn(workspace);
         when(runService.save(any(Run.class))).thenReturn(runSaveResult);
-        when(runService.findOne(runId)).thenReturn(savedRun);
         when(agentExecutionService.executeAsync(eq("dev-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(
-                        runId, "compiler diagnostics", false, "network failed")));
+                .thenReturn(CompletableFuture.completedFuture(AgentExecutionResult.failed(
+                        runId, "compiler diagnostics", "network failed")));
 
         OperateResultWithData<FeatureDesignBuildResultDto> result = service.build(fdId);
 
         assertTrue(result.successful());
         assertEquals(FeatureDesignBuildStatus.BUILD_FAILED, fd.getBuildStatus());
-        assertEquals(RunState.FAILED, savedRun.getState());
-        assertEquals(RunTerminalReason.FAILED, savedRun.getTerminalReason());
-        assertEquals("network failed", savedRun.getFailureReason());
-        assertNotNull(savedRun.getFinishedDate());
+        verify(agentExecutionService).settleRun(runId, RunState.FAILED, "network failed");
     }
 }

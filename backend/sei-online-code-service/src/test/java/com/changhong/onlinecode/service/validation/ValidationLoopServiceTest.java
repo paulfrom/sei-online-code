@@ -28,9 +28,9 @@ class ValidationLoopServiceTest {
         RequirementCommentService comments = mock(RequirementCommentService.class);
         AgentExecutionService agentExecutionService = mock(AgentExecutionService.class);
         when(agentExecutionService.execute(eq("test-agent"), any(AgentExecutionRequest.class)))
-                .thenReturn(new AgentExecutionResult("run-1", """
+                .thenReturn(AgentExecutionResult.succeeded("run-1", """
                 {"passed":true,"summary":"ok","commands":[{"command":"workspace-selected validation","exitCode":0,"result":"ok"}],"findings":[]}
-                """, true, null));
+                """));
         ExecutionPlan plan = new ExecutionPlan();
         plan.setId("plan-1");
         plan.setPlanJson("{\"validation\":{\"mode\":\"test-agent\"}}");
@@ -47,7 +47,7 @@ class ValidationLoopServiceTest {
 
         ValidationLoopService.ValidationOutcome outcome = service.validateTask(task);
 
-        assertTrue(outcome.passed());
+        assertEquals(ValidationLoopService.ValidationStatus.PASSED, outcome.status());
         verify(agentExecutionService).execute(eq("test-agent"),
                 org.mockito.ArgumentMatchers.<AgentExecutionRequest>argThat(request ->
                         "project-1".equals(request.getProjectId())
@@ -80,8 +80,7 @@ class ValidationLoopServiceTest {
 
         ValidationLoopService.ValidationOutcome outcome = service.validateTask(task);
 
-        assertFalse(outcome.passed());
-        assertTrue(outcome.deferred());
+        assertEquals(ValidationLoopService.ValidationStatus.DEFERRED, outcome.status());
         assertEquals("同一工作区已有运行中任务", outcome.failureReason());
         verify(agentExecutionService, never()).settleRun(any(), any(), any());
         verify(comments, never()).append(any(), any(), any(), any(), any(), any(), any());
@@ -98,7 +97,7 @@ class ValidationLoopServiceTest {
                 "findings":["OrderServiceTest failed"]}
                 """;
         when(agentExecutionService.execute(eq("test-agent"), any(AgentExecutionRequest.class)))
-                .thenReturn(new AgentExecutionResult("run-3", report, true, null));
+                .thenReturn(AgentExecutionResult.succeeded("run-3", report));
         ExecutionPlan plan = new ExecutionPlan();
         plan.setId("plan-1");
         when(planDao.findOne("plan-1")).thenReturn(plan);
@@ -114,7 +113,7 @@ class ValidationLoopServiceTest {
 
         ValidationLoopService.ValidationOutcome outcome = service.validateTask(task);
 
-        assertFalse(outcome.passed());
+        assertEquals(ValidationLoopService.ValidationStatus.FAILED, outcome.status());
         verify(agentExecutionService).settleRun(eq("run-3"), eq(RunState.FAILED),
                 org.mockito.ArgumentMatchers.contains("./gradlew test (exitCode=1)"));
     }

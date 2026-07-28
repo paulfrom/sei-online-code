@@ -132,7 +132,7 @@ public class AgentExecutionService {
             log.info("cli run result {}", result);
             persistExecutionAudit(run, result);
             if (result != null && result.isProcessSucceeded()) {
-                return new AgentExecutionResult(run.getId(), result.getOutput(), true, null);
+                return AgentExecutionResult.succeeded(run.getId(), result.getOutput());
             }
             String reason = result == null ? "Agent 执行无结果" : result.getFailureReason();
             return AgentExecutionResult.failed(run.getId(), result == null ? null : result.getOutput(),
@@ -203,17 +203,40 @@ public class AgentExecutionService {
     }
 
     public void settleRun(String runId, RunState state, String reason) {
-        Run current = runDao.findOne(runId);
-        if (current == null || current.getState() != RunState.RUNNING) {
+        settleRun(runId, state, reason, null);
+    }
+
+    public void settleRun(String runId, RunState state, String reason,
+                          RunTerminalReason requestedTerminalReason) {
+        if (runId == null || runId.isBlank()) {
             return;
         }
-        current.setState(state);
-        current.setTerminalReason(terminalReason(state));
-        current.setFinishedDate(new Date());
-        if (state == RunState.FAILED && reason != null) {
-            current.setFailureReason(reason);
+        try {
+            Run current = runDao.findOne(runId);
+            if (current == null || current.getState() != RunState.RUNNING) {
+                return;
+            }
+            RunState finalState = Boolean.TRUE.equals(current.getCancelRequested())
+                    ? RunState.CANCELLED : state;
+            current.setState(finalState);
+            current.setTerminalReason(terminalReason(finalState, requestedTerminalReason));
+            current.setFinishedDate(new Date());
+            if (finalState == RunState.FAILED && reason != null) {
+                current.setFailureReason(reason);
+            }
+            runDao.save(current);
+        } catch (Exception e) {
+            log.warn("failed to settle agent run. runId={}, requestedState={}", runId, state, e);
         }
-        runDao.save(current);
+    }
+
+    public boolean isCancellationRequested(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return false;
+        }
+        Run current = runDao.findOne(runId);
+        return current != null && (Boolean.TRUE.equals(current.getCancelRequested())
+                || current.getState() == RunState.CANCELLED);
     }
 
     private Run createRun(Agent agent, AgentExecutionRequest request) {
@@ -260,8 +283,8 @@ public class AgentExecutionService {
     }
 
     private String workspaceKey(AgentExecutionRequest request, Run run) {
-        if (request.getWorkspaceKey() != null && !request.getWorkspaceKey().isBlank()) {
-            return request.getWorkspaceKey();
+        if (request.getWorkspaceMode() == AgentExecutionRequest.WorkspaceMode.SNAPSHOT_READER) {
+            return "snapshot-reader-" + run.getId();
         }
         if (request.getRequirementId() != null && !request.getRequirementId().isBlank()) {
             return "requirement-" + request.getRequirementId();
@@ -283,6 +306,12 @@ public class AgentExecutionService {
             return RunTerminalReason.CANCELLED;
         }
         return RunTerminalReason.FAILED;
+    }
+
+    private RunTerminalReason terminalReason(RunState state, RunTerminalReason requested) {
+        return state == RunState.CANCELLED || requested == null
+                ? terminalReason(state)
+                : requested;
     }
 
     private String executionPrompt(Agent agent, AgentExecutionRequest request, Run run) {

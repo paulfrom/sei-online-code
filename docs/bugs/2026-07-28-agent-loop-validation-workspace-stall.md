@@ -18,7 +18,8 @@
 
 ## 根因
 
-- `AgentExecutionResult.deferred=true` 没有贯穿 validation 和 PM review 状态机，
+- `AgentExecutionResult` 原来用 `succeeded/deferred` 两个 boolean 表示三种状态，
+  允许产生互相矛盾的组合，且 deferred 没有贯穿 validation 和 PM review 状态机，
   被压缩成普通失败或空决策。
 - 物理工作区的默认 key 优先取 requirementId，未区分 writer 与 review/read lane。
 - PM REPLAN 的提示词和服务端约束不一致：服务端要求独立 test-agent，
@@ -56,9 +57,22 @@
 - CLI 最终输出、failureReason、threadId 和 turnId 持久化到 Run；
   现有 Run 详情页可以在运行结束后显示最终结构化输出。
 - requirement 开发/验证继续使用单 writer workspace。
-- memory-review 使用独立的 review snapshot workspace key，避免其 AgentBrief/skills
+- `AgentExecutionRequest` 只保留 `WRITER` 和 `SNAPSHOT_READER` 两种 workspace mode，
+  不再允许业务调用方覆盖任意物理 workspace key。
+- memory-review 使用 `SNAPSHOT_READER`，每个 Run 获得独立快照工作区，避免其 AgentBrief/skills
   写入与 writer 冲突。它是“逻辑只读、物理隔离副本”，不是让多个进程共享写
   同一个目录。
+
+### 旧实现清理
+
+- 删除 `AgentExecutionResult` 四参数兼容构造器；执行结果只能通过
+  `SUCCEEDED / FAILED / DEFERRED` 枚举状态和命名工厂创建。
+- 删除 ValidationOutcome 和 CodingTask CompletionDecision 的双 boolean 状态，
+  改为互斥枚举。
+- 删除 Plan、Spec、Requirement、PM 和 FeatureDesignBuild 中各自维护的 Run
+  终态写入代码，统一由 `AgentExecutionService.settleRun` 处理取消优先级、
+  terminal reason、finishedDate 和 failureReason。
+- 删除 PM 客户端内部的 deferred 异常类型，改为 agent 包级统一异常。
 
 ## 并发模型
 
@@ -91,7 +105,7 @@ PM Review 和 Acceptance 的门禁更完整，适合做可审计的交付闭环�
 
 - 针对 AgentExecution、validation settlement、PM review/replan、补偿恢复和
   memory-review workspace 的单元测试已覆盖。
-- 完整 service 测试执行 600 项：本次相关测试通过；另有 3 项既有
+- 完整 service 测试执行 606 项：本次相关测试通过；另有 3 项既有
   `ProgressLedgerMigrationStaticTest` 失败。当前迁移目录只有 V9–V13，
-  缺少该测试要求的 V8 之前核心建表迁移；另有 13 项跳过，其余 584 项通过。
+  缺少该测试要求的 V8 之前核心建表迁移；另有 13 项跳过，其余 590 项通过。
   这 3 项失败与本次 agent loop 改动无关。

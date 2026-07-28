@@ -39,7 +39,7 @@ class ValidationTaskExecutionServiceTest {
         when(taskDao.findOne("task-1")).thenReturn(task);
         when(requirementDao.findOne("req-1")).thenReturn(requirement);
         when(validationLoopService.validateTask(task))
-                .thenReturn(new ValidationLoopService.ValidationOutcome(true, List.of()));
+                .thenReturn(ValidationLoopService.ValidationOutcome.passed(List.of()));
 
         service.executeAsync("task-1");
 

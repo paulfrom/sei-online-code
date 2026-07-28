@@ -1,12 +1,10 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.SpecDao;
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.LifecycleState;
 import com.changhong.onlinecode.dto.enums.SpecState;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Spec;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +29,6 @@ class SpecAgentServiceTest {
     private ProjectLifecycleService projectLifecycleService;
     private AgentExecutionService agentExecutionService;
     private FailureInfoSupport failureInfoSupport;
-    private RunDao runDao;
     private SpecAgentService service;
 
     @BeforeEach
@@ -40,9 +37,8 @@ class SpecAgentServiceTest {
         projectLifecycleService = mock(ProjectLifecycleService.class);
         agentExecutionService = mock(AgentExecutionService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
-        runDao = mock(RunDao.class);
         service = new SpecAgentService(specDao, projectLifecycleService,
-                agentExecutionService, failureInfoSupport, runDao);
+                agentExecutionService, failureInfoSupport);
     }
 
     @Test
@@ -61,7 +57,8 @@ class SpecAgentServiceTest {
                   "apiContract":[{"method":"GET","path":"/api/inventory/tasks","requestShape":"InventoryQuery","responseShape":"ResultData<Page<InventoryTaskDto>>","description":"查询盘点任务"}]
                 """;
         when(agentExecutionService.executeAsync(eq("requirement-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult("run-1", truncated, true, null)));
+                .thenReturn(CompletableFuture.completedFuture(
+                        AgentExecutionResult.succeeded("run-1", truncated)));
 
         service.spawnRequirement("p1", null, "spec1");
 

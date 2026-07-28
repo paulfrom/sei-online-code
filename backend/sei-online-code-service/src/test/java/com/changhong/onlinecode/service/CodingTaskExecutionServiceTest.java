@@ -605,8 +605,8 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.workspace(eq("project-empty"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-1");
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
-                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
-                        savedRun.get().getId(), "任务已完成", true, null)));
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(AgentExecutionResult.succeeded(
+                        savedRun.get().getId(), "任务已完成")));
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-empty", "backend-dev-agent", "prompt");
 
@@ -651,8 +651,8 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.workspace(eq("project-cli-fail"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-cli-fail");
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
-                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
-                        savedRun.get().getId(), "真实 CLI 失败输出", false, "claude exited with code 1")));
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(AgentExecutionResult.failed(
+                        savedRun.get().getId(), "真实 CLI 失败输出", "claude exited with code 1")));
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-cli-fail", "backend-dev-agent", "prompt");
 
@@ -701,8 +701,8 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated.txt"), "hello");
-                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(),
-                            "Supported outcomes: ENROLLED/WAITLISTED/FAILED", true, null));
+                    return CompletableFuture.completedFuture(AgentExecutionResult.succeeded(savedRun.get().getId(),
+                            "Supported outcomes: ENROLLED/WAITLISTED/FAILED"));
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask("task-file-change", "backend-dev-agent", "prompt");
@@ -757,8 +757,8 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
                 .thenAnswer(invocation -> {
                     Files.writeString(tempDir.resolve("generated-ledger-fail.txt"), "hello");
-                    return CompletableFuture.completedFuture(new AgentExecutionResult(savedRun.get().getId(),
-                            "任务已完成", true, null));
+                    return CompletableFuture.completedFuture(AgentExecutionResult.succeeded(savedRun.get().getId(),
+                            "任务已完成"));
                 });
 
         ResultData<CodingTaskDto> result = service.executePlanTask(
@@ -816,8 +816,8 @@ class CodingTaskExecutionServiceTest {
         when(agentExecutionService.workspace(eq("project-recovery"), anyString())).thenReturn(agentWorkspace);
         when(changeCollector.resolveHead(tempDir.toString())).thenReturn("base-recovery");
         when(agentExecutionService.executeAsync(eq("backend-dev-agent"), any()))
-                .thenAnswer(invocation -> CompletableFuture.completedFuture(new AgentExecutionResult(
-                        currentRun.get().getId(), "现有实现验证通过", true, null)));
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(AgentExecutionResult.succeeded(
+                        currentRun.get().getId(), "现有实现验证通过")));
 
         ResultData<CodingTaskDto> result = service.executePlanTask(
                 "task-recovery", "backend-dev-agent", "继续未完成部分", TriggerSource.USER_ACTION);

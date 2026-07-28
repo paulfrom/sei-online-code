@@ -15,14 +15,7 @@ public class AgentExecutionRequest {
     private String runId;
     private String projectId;
     private String requirementId;
-    /**
-     * Optional physical workspace key override.
-     *
-     * <p>Requirement-scoped writers leave this blank and share the requirement workspace.
-     * Read-only/review agents use an isolated key so their generated briefs and skill files
-     * cannot contend with or mutate the writer workspace.</p>
-     */
-    private String workspaceKey;
+    private WorkspaceMode workspaceMode = WorkspaceMode.WRITER;
     private String logStreamKey;
     private String loopId;
     private String codingTaskId;
@@ -35,4 +28,11 @@ public class AgentExecutionRequest {
     private String compensatesRunId;
     private Integer attemptNo;
     private long timeoutSeconds = 1_800L;
+
+    public enum WorkspaceMode {
+        /** 同一 requirement 只允许一个 agent 持有写租约。 */
+        WRITER,
+        /** 基于项目快照创建独立工作区，允许多个 review/read agent 并行。 */
+        SNAPSHOT_READER
+    }
 }

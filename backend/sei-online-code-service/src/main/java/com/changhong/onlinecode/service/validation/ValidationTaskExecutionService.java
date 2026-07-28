@@ -130,12 +130,13 @@ public class ValidationTaskExecutionService {
             settlementService.finishOnFailure(codingTaskId, "test-agent 执行异常：" + e.getMessage());
             return;
         }
-        if (outcome != null && outcome.deferred()) {
+        if (outcome != null && outcome.status() == ValidationLoopService.ValidationStatus.DEFERRED) {
             settlementService.defer(codingTaskId,
                     outcome.failureReason() == null ? "test-agent execution deferred" : outcome.failureReason());
             return;
         }
-        boolean passed = outcome != null && outcome.passed();
+        boolean passed = outcome != null
+                && outcome.status() == ValidationLoopService.ValidationStatus.PASSED;
         settlementService.finish(codingTaskId, passed);
     }
 }

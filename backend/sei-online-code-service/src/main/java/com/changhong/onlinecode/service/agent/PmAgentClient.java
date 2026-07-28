@@ -1,18 +1,15 @@
 package com.changhong.onlinecode.service.agent;
 
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.DeliveryFailureCategory;
 import com.changhong.onlinecode.dto.enums.ExecutionPlanType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.RunState;
-import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.RequirementAutomationService;
 import com.changhong.onlinecode.dto.revision.PlanPatch;
 import com.changhong.onlinecode.service.revision.contract.PlanPatchValidationException;
@@ -27,7 +24,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -55,7 +51,6 @@ public class PmAgentClient {
     private static final long DELIVERY_REVIEW_TIMEOUT_SECONDS = 600;
     private static final PlanPatchValidator PLAN_PATCH_VALIDATOR = new PlanPatchValidator();
 
-    private final RunDao runDao;
     private final AgentExecutionService agentExecutionService;
 
     /**
@@ -82,7 +77,7 @@ public class PmAgentClient {
                 context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
 
         log.info("pm execution result: {}", execution);
-        if (!execution.succeeded()) {
+        if (execution.status() != AgentExecutionResult.Status.SUCCEEDED) {
             settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
                     execution.failureReason(), "pm-agent 调用失败"));
             return null;
@@ -93,7 +88,7 @@ public class PmAgentClient {
         }
 
         if (isCancellationRequested(execution.runId())) {
-            markRunCancelled(execution.runId());
+            agentExecutionService.settleRun(execution.runId(), RunState.CANCELLED, null);
             return null;
         }
 
@@ -127,7 +122,7 @@ public class PmAgentClient {
                 input.loopId(), prompt, context == null ? null : context.getId(),
                 context == null ? null : context.getWorkspaceMemoryId(), PLAN_TIMEOUT_SECONDS);
 
-        if (!execution.succeeded()) {
+        if (execution.status() != AgentExecutionResult.Status.SUCCEEDED) {
             settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
                     execution.failureReason(), "pm-agent 增量计划调用失败"));
             return null;
@@ -137,7 +132,7 @@ public class PmAgentClient {
             return null;
         }
         if (isCancellationRequested(execution.runId())) {
-            markRunCancelled(execution.runId());
+            agentExecutionService.settleRun(execution.runId(), RunState.CANCELLED, null);
             return null;
         }
 
@@ -169,7 +164,7 @@ public class PmAgentClient {
         AgentExecutionResult execution = executeAgent(requirement.getProjectId(), requirement.getId(),
                 plan.getLoopId(), prompt, plan.getMemoryContextId(), plan.getWorkspaceMemoryId(),
                 ACCEPT_TIMEOUT_SECONDS);
-        if (!execution.succeeded()) {
+        if (execution.status() != AgentExecutionResult.Status.SUCCEEDED) {
             settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
                     execution.failureReason(), "pm-agent 验收调用失败"));
             return null;
@@ -180,7 +175,7 @@ public class PmAgentClient {
         }
 
         if (isCancellationRequested(execution.runId())) {
-            markRunCancelled(execution.runId());
+            agentExecutionService.settleRun(execution.runId(), RunState.CANCELLED, null);
             return null;
         }
 
@@ -219,11 +214,11 @@ public class PmAgentClient {
         String workspaceMemoryId = plan == null ? null : plan.getWorkspaceMemoryId();
         AgentExecutionResult execution = executeAgent(projectId, requirementId, loopId, prompt,
                 memoryContextId, workspaceMemoryId, DELIVERY_REVIEW_TIMEOUT_SECONDS);
-        if (execution.deferred()) {
+        if (execution.status() == AgentExecutionResult.Status.DEFERRED) {
             throw new AgentExecutionDeferredException(execution.runId(),
                     firstNonBlank(execution.failureReason(), "pm-agent 交付审阅执行被推迟"));
         }
-        if (!execution.succeeded()) {
+        if (execution.status() != AgentExecutionResult.Status.SUCCEEDED) {
             settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
                     execution.failureReason(), "pm-agent 交付审阅调用失败"));
             return null;
@@ -233,7 +228,7 @@ public class PmAgentClient {
             return null;
         }
         if (isCancellationRequested(execution.runId())) {
-            markRunCancelled(execution.runId());
+            agentExecutionService.settleRun(execution.runId(), RunState.CANCELLED, null);
             return null;
         }
         PmDeliveryDecision decision = parseDeliveryDecisionJson(execution.output(), input);
@@ -262,60 +257,15 @@ public class PmAgentClient {
     }
 
     private void markRunSucceeded(String runId) {
-        Run current = currentRun(runId);
-        if (current.getState() == RunState.RUNNING && !Boolean.TRUE.equals(current.getCancelRequested())) {
-            current.setState(RunState.SUCCEEDED);
-            current.setTerminalReason(RunTerminalReason.SUCCEEDED);
-            current.setFinishedDate(new Date());
-            runDao.save(current);
-        }
-    }
-
-    private void markRunFailed(String runId, String reason) {
-        Run current = currentRun(runId);
-        if (current == null) {
-            LOGGER.error("pm-agent run not created: {}", reason);
-            return;
-        }
-        if (current.getState() != RunState.RUNNING) {
-            return;
-        }
-        current.setState(RunState.FAILED);
-        current.setTerminalReason(RunTerminalReason.FAILED);
-        current.setSummary(reason);
-        current.setFailureReason(reason);
-        current.setFinishedDate(new Date());
-        runDao.save(current);
+        agentExecutionService.settleRun(runId, RunState.SUCCEEDED, null);
     }
 
     private void settleFailedOrCancelled(String runId, String reason) {
-        if (isCancellationRequested(runId)) {
-            markRunCancelled(runId);
-        } else {
-            markRunFailed(runId, reason);
-        }
+        agentExecutionService.settleRun(runId, RunState.FAILED, reason);
     }
 
     private boolean isCancellationRequested(String runId) {
-        Run current = currentRun(runId);
-        return current != null
-                && (Boolean.TRUE.equals(current.getCancelRequested()) || current.getState() == RunState.CANCELLED);
-    }
-
-    private void markRunCancelled(String runId) {
-        Run current = currentRun(runId);
-        if (current == null) {
-            return;
-        }
-        current.setCancelRequested(Boolean.TRUE);
-        current.setState(RunState.CANCELLED);
-        current.setTerminalReason(RunTerminalReason.CANCELLED);
-        current.setFinishedDate(new Date());
-        runDao.save(current);
-    }
-
-    private Run currentRun(String runId) {
-        return runId == null ? null : runDao.findOne(runId);
+        return agentExecutionService.isCancellationRequested(runId);
     }
 
     private String buildPlanningPrompt(Requirement requirement,
@@ -968,19 +918,4 @@ public class PmAgentClient {
                                       List<RequirementComment> relatedComments) {
     }
 
-    /**
-     * 调度资源繁忙不是 PM 决策失败；编排器捕获后把审阅恢复为 PENDING，等待补偿重发。
-     */
-    public static class AgentExecutionDeferredException extends RuntimeException {
-        private final String runId;
-
-        public AgentExecutionDeferredException(String runId, String message) {
-            super(message);
-            this.runId = runId;
-        }
-
-        public String getRunId() {
-            return runId;
-        }
-    }
 }

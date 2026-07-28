@@ -1,7 +1,6 @@
 package com.changhong.onlinecode.service;
 
 import com.changhong.onlinecode.dao.RequirementDao;
-import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.MemoryValidationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementStatus;
 import com.changhong.onlinecode.dto.enums.RunState;
@@ -9,7 +8,6 @@ import com.changhong.onlinecode.dto.enums.RunTerminalReason;
 import com.changhong.onlinecode.entity.Project;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
-import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.service.agent.AgentExecutionRequest;
 import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
@@ -36,7 +34,6 @@ class RequirementAgentServiceTest {
     private AgentExecutionService agentExecutionService;
     private FailureInfoSupport failureInfoSupport;
     private RequirementCommentService requirementCommentService;
-    private RunDao runDao;
     private RequirementAgentService service;
 
     @BeforeEach
@@ -46,10 +43,9 @@ class RequirementAgentServiceTest {
         agentExecutionService = mock(AgentExecutionService.class);
         failureInfoSupport = mock(FailureInfoSupport.class);
         requirementCommentService = mock(RequirementCommentService.class);
-        runDao = mock(RunDao.class);
         service = new RequirementAgentService(requirementDao, projectService, agentExecutionService, failureInfoSupport,
                 mock(RequirementDesignContextService.class), mock(DesignContextPromptAssembler.class),
-                requirementCommentService, runDao);
+                requirementCommentService);
     }
 
     @Test
@@ -85,10 +81,7 @@ class RequirementAgentServiceTest {
         latest.setProjectId("p1");
         latest.setStatus(RequirementStatus.PRD_GENERATING);
         latest.setGenerationToken("token-2");
-        Run run = new Run();
-        run.setState(RunState.RUNNING);
         when(requirementDao.findOne("req1")).thenReturn(initial, latest);
-        when(runDao.findOne("run-1")).thenReturn(run);
         when(projectService.findOne("p1")).thenReturn(new Project());
         String content = """
                 # PRD
@@ -114,8 +107,8 @@ class RequirementAgentServiceTest {
                 "至少包含一个 ATX Markdown 标题，格式为 `# 标题` 到 `###### 标题`"));
         assertTrue(requestCaptor.getValue().getPrompt().contains("需求概述、业务目标、功能需求"));
         verify(requirementDao, never()).save(any(Requirement.class));
-        assertEquals(RunState.FAILED, run.getState());
-        assertEquals(RunTerminalReason.SUPERSEDED, run.getTerminalReason());
+        verify(agentExecutionService).settleRun(
+                "run-1", RunState.FAILED, "已被新一轮生成接管", RunTerminalReason.SUPERSEDED);
     }
 
     @Test
@@ -125,20 +118,16 @@ class RequirementAgentServiceTest {
         requirement.setProjectId("p1");
         requirement.setStatus(RequirementStatus.PRD_GENERATING);
         requirement.setGenerationToken("token-1");
-        Run run = new Run();
-        run.setState(RunState.RUNNING);
-
         when(requirementDao.findOne("req1")).thenReturn(requirement, requirement);
         when(projectService.findOne("p1")).thenReturn(new Project());
-        when(runDao.findOne("run-1")).thenReturn(run);
         when(agentExecutionService.executeAsync(eq("prd-agent"), any()))
-                .thenReturn(CompletableFuture.completedFuture(new AgentExecutionResult(
-                        "run-1", "diagnostic", false, "网络失败：日志提到新一轮生成接管")));
+                .thenReturn(CompletableFuture.completedFuture(AgentExecutionResult.failed(
+                        "run-1", "diagnostic", "网络失败：日志提到新一轮生成接管")));
 
         service.spawnPrd("req1", null, "token-1");
 
-        assertEquals(RunState.FAILED, run.getState());
-        assertEquals(RunTerminalReason.FAILED, run.getTerminalReason());
+        verify(agentExecutionService).settleRun(
+                "run-1", RunState.FAILED, "网络失败：日志提到新一轮生成接管");
     }
 
     @Test
@@ -232,18 +221,13 @@ class RequirementAgentServiceTest {
         requirement.setPrdContent("# PRD");
         RequirementDesignContext context = new RequirementDesignContext();
         context.setId("ctx1");
-        Run run = new Run();
-        run.setId("run-1");
-        run.setState(com.changhong.onlinecode.dto.enums.RunState.RUNNING);
         when(requirementDao.findOne("req1")).thenReturn(requirement);
-        when(runDao.findOne("run-1")).thenReturn(run);
         when(agentExecutionService.executeAsync(eq("memory-review-agent"), any()))
                 .thenReturn(CompletableFuture.completedFuture(agentResult("不是 JSON")));
 
         service.reviewMemory("req1", "# PRD", context);
 
-        assertEquals(com.changhong.onlinecode.dto.enums.RunState.FAILED, run.getState());
-        verify(runDao).save(run);
+        verify(agentExecutionService).settleRun(eq("run-1"), eq(RunState.FAILED), anyString());
         verify(requirementDao, never()).save(any(Requirement.class));
     }
 
@@ -293,11 +277,12 @@ class RequirementAgentServiceTest {
         String logStreamKey = captor.getValue().getLogStreamKey();
         assertTrue(logStreamKey.length() <= 36, "log_stream_key must fit varchar(36): " + logStreamKey);
         assertEquals("req1", logStreamKey);
-        assertEquals("memory-review-ctx1", captor.getValue().getWorkspaceKey());
+        assertEquals(AgentExecutionRequest.WorkspaceMode.SNAPSHOT_READER,
+                captor.getValue().getWorkspaceMode());
         assertTrue(captor.getValue().getPrompt().contains("ASCII 双引号必须转义为 \\\""));
     }
 
     private static AgentExecutionResult agentResult(String output) {
-        return new AgentExecutionResult("run-1", output, true, null);
+        return AgentExecutionResult.succeeded("run-1", output);
     }
 }
