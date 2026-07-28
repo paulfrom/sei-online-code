@@ -65,14 +65,17 @@ const computeDuration = (started, finished) => {
  */
 const RunTab = ({ runs, overview, taskFilterId, onClearTaskFilter, onBackToTask, onOpenLog }) => {
   const { styles } = useStyles();
-  const [runTypeKeys, setRunTypeKeys] = useState([]);
+  // 运行列表默认只展示真实 Agent 调用；MR 等 SYSTEM Run 保留为审计记录，
+  // 用户需要时仍可通过 Run 类型筛选显式查看。
+  const [runTypeKeys, setRunTypeKeys] = useState(() => ['AGENT']);
 
   const filteredRuns = useMemo(() => {
     return runs.filter((run) => {
       if (taskFilterId && run.codingTaskId !== taskFilterId) {
         return false;
       }
-      if (runTypeKeys.length > 0 && !runTypeKeys.includes(run.runType)) {
+      const runType = run.runType || 'AGENT';
+      if (runTypeKeys.length > 0 && !runTypeKeys.includes(runType)) {
         return false;
       }
       return true;

@@ -7,6 +7,7 @@ export interface RunLogFrame {
   logStreamKey: string;
   taskId?: string | null;
   runId?: string | null;
+  sequenceNo?: number | null;
   stream: string;
   line: string;
   ts: string;

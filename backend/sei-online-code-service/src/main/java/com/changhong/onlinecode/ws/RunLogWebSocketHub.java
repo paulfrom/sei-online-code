@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.UnaryOperator;
 
 /**
  * 运行日志 WebSocket hub（B8）。契约 §3.1，方向仅 server→browser。
@@ -36,6 +37,13 @@ public class RunLogWebSocketHub {
 
     /** logStreamKey → 该迭代的浏览器连接集合。 */
     private static final Map<String, Set<Session>> SESSIONS = new ConcurrentHashMap<>();
+
+    /** Spring 启动后注册的持久化/脱敏处理器；非 Spring 单测环境保持 identity。 */
+    private static volatile UnaryOperator<RunLogFrame> frameProcessor = UnaryOperator.identity();
+
+    public static void setFrameProcessor(UnaryOperator<RunLogFrame> processor) {
+        frameProcessor = processor == null ? UnaryOperator.identity() : processor;
+    }
 
     @OnOpen
     public void onOpen(Session session, @PathParam("logStreamKey") String logStreamKey) {
@@ -67,6 +75,15 @@ public class RunLogWebSocketHub {
      */
     public static void broadcast(RunLogFrame frame) {
         if (frame == null || frame.getLogStreamKey() == null) {
+            return;
+        }
+        try {
+            frame = frameProcessor.apply(frame);
+        } catch (Exception e) {
+            // 证据持久化不能中断 Agent 进程；失败会由 evidence completeness 单独表达。
+            LOGGER.warn("run-log frame processing failed: runId={}", frame.getRunId(), e);
+        }
+        if (frame == null) {
             return;
         }
         Set<Session> sessions = SESSIONS.get(frame.getLogStreamKey());

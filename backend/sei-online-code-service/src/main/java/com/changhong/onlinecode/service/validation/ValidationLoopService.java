@@ -131,7 +131,11 @@ public class ValidationLoopService {
         sb.append("\nReturn only valid JSON with this shape:\n");
         sb.append("{\"passed\":true or false,\"summary\":\"string\",\"commands\":[");
         sb.append("{\"command\":\"string\",\"exitCode\":0,\"result\":\"string\"}");
-        sb.append("],\"findings\":[\"string\"]}\n");
+        sb.append("],\"findings\":[\"string\"],\"acceptanceCriteria\":[");
+        sb.append("{\"criterion\":\"string\",\"status\":\"PASSED|FAILED|NOT_APPLICABLE\",");
+        sb.append("\"evidence\":[\"specific command/log/diff reference\"]}]}\n");
+        sb.append("Every actual acceptance criterion in the plan must have one result. "
+                + "Never report a command or criterion as passed unless it was actually verified.\n");
         return sb.toString();
     }
 

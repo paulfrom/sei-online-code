@@ -156,6 +156,7 @@ public class CodingTaskService extends BaseEntityService<CodingTask> {
         dto.setStatus(task.getStatus());
         dto.setTitle(task.getTitle());
         dto.setDescription(task.getDescription());
+        dto.setAcceptanceCriteria(task.getAcceptanceCriteria());
         dto.setFileScope(task.getFileScope());
         dto.setArea(task.getArea());
         dto.setDependsOn(task.getDependsOn());

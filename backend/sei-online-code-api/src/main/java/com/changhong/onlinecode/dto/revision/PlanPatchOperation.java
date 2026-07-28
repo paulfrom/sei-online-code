@@ -31,6 +31,9 @@ public class PlanPatchOperation implements Serializable {
     @Schema(description = "任务描述")
     private String description;
 
+    @Schema(description = "验收标准")
+    private List<String> acceptanceCriteria;
+
     @Schema(description = "任务区域：frontend / backend")
     private String area;
 

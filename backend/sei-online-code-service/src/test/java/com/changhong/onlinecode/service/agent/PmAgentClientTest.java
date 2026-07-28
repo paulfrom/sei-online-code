@@ -238,6 +238,24 @@ class PmAgentClientTest {
     }
 
     @Test
+    void parseAcceptance_combinesFixAndValidationIntoOneRemediationTask() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
+        PmAgentClient.PmAcceptanceResult result = parseAcceptance(client, """
+                {"accepted":false,"summary":"需要修复","findings":["回归失败"],"remediationTasks":[
+                {"taskKey":"R1","title":"fix","description":"修复缺陷","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["缺陷已修复"]},
+                {"taskKey":"V1","title":"verify","description":"运行回归测试","agent":"test-agent","area":"validation","dependsOn":["R1"],"fileScope":["backend/"],"acceptanceCriteria":["回归通过"]}
+                ]}
+                """);
+
+        assertNotNull(result);
+        assertEquals(1, result.remediationTasks().size());
+        assertEquals("backend-dev-agent", result.remediationTasks().get(0).agent());
+        assertTrue(result.remediationTasks().get(0).description().contains("运行回归测试"));
+        assertEquals(List.of("缺陷已修复", "回归通过"),
+                result.remediationTasks().get(0).acceptanceCriteria());
+    }
+
+    @Test
     void parseDelivery_approveDecisionForValidJson() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmDeliveryDecision decision = parseDelivery(client, """
@@ -247,6 +265,65 @@ class PmAgentClientTest {
         assertEquals(com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision.APPROVE, decision.decision());
         assertEquals(com.changhong.onlinecode.dto.enums.DeliveryFailureCategory.NONE, decision.failureCategory());
         assertEquals(List.of("evidence"), decision.findings());
+    }
+
+    @Test
+    void parseDelivery_preservesEvidenceBackedRemediationBriefAndMemoryCandidates() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
+        PmDeliveryDecision decision = parseDelivery(client, """
+                {"decision":"RETRY","summary":"fix","failureCategory":"VALIDATION_FAILED",
+                "findings":["compile failed"],"retryReason":"fix compile error",
+                "remediationBrief":{"goal":"fix and verify","rootCauses":["wrong API"],
+                "requiredChanges":["use supported API"],"verificationSteps":["./gradlew test"],
+                "evidenceRefs":["evidence-1","artifact-diff"]},
+                "behaviorMemoryCandidates":[{"scopeKey":"backend.api-compat","area":"backend",
+                "rule":"verify the framework API before coding","rationale":"prevents compile failures",
+                "evidenceRefs":["evidence-1"]}],"remediationTasks":[]}
+                """);
+
+        assertNotNull(decision);
+        assertNotNull(decision.remediationBrief());
+        assertEquals("fix and verify", decision.remediationBrief().goal());
+        assertEquals(List.of("./gradlew test"), decision.remediationBrief().verificationSteps());
+        assertEquals(1, decision.behaviorMemoryCandidates().size());
+        assertEquals("backend.api-compat",
+                decision.behaviorMemoryCandidates().get(0).scopeKey());
+    }
+
+    @Test
+    void reviewDelivery_instructsPmToUseOneSelfValidatingRemediationTask() {
+        AgentExecutionService executionService = mock(AgentExecutionService.class);
+        AtomicReference<AgentExecutionRequest> captured = new AtomicReference<>();
+        when(executionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class))).thenAnswer(invocation -> {
+            captured.set(invocation.getArgument(1));
+            return AgentExecutionResult.succeeded("run-review", """
+                    {"decision":"RETRY","summary":"fix directly","failureCategory":"VALIDATION_FAILED",
+                    "findings":["test failed"],"retryReason":"fix and verify","remediationTasks":[]}
+                    """);
+        });
+        Requirement requirement = new Requirement();
+        requirement.setId("req-1");
+        requirement.setProjectId("project-1");
+        PmAgentClient.DeliveryReviewInput input = new PmAgentClient.DeliveryReviewInput(
+                "req-1", "loop-1", "task-1", "delivery-run", "T1", "task", "description",
+                "backend", "backend-dev-agent", "coding-task", true, List.of(), """
+                {"runState":"SUCCEEDED","runSummary":"tests failed"}
+                """, List.of());
+
+        PmDeliveryDecision decision = new PmAgentClient(executionService)
+                .reviewDelivery(requirement, null, input);
+
+        assertNotNull(decision);
+        String prompt = captured.get().getPrompt();
+        assertTrue(prompt.contains("same task must directly fix the issue"));
+        assertTrue(prompt.contains("exactly one self-contained coding remediation task"));
+        assertTrue(prompt.contains("Never split remediation into multiple tasks"));
+        assertTrue(prompt.contains("Run success means an execution result was received"));
+        assertTrue(prompt.contains("APPROVE is forbidden when the structured evidence is missing"));
+        assertTrue(prompt.contains("\"remediationBrief\""));
+        assertTrue(prompt.contains("\"behaviorMemoryCandidates\""));
+        verify(executionService).settleRun("run-review", RunState.SUCCEEDED, null);
     }
 
     @Test
@@ -277,7 +354,7 @@ class PmAgentClientTest {
     }
 
     @Test
-    void parseDelivery_replanWithValidRemediationTasksIsAccepted() throws Exception {
+    void parseDelivery_replanCombinesFixAndValidationIntoOneCodingTask() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
         PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
@@ -286,11 +363,16 @@ class PmAgentClientTest {
                 ]}
                 """);
         assertNotNull(decision);
-        assertEquals(2, decision.remediationTasks().size());
+        assertEquals(1, decision.remediationTasks().size());
+        assertEquals("backend-dev-agent", decision.remediationTasks().get(0).agent());
+        assertEquals(List.of(), decision.remediationTasks().get(0).dependsOn());
+        assertTrue(decision.remediationTasks().get(0).description().contains("验证要求：verify。v"));
+        assertEquals(List.of("ok", "all tests pass"),
+                decision.remediationTasks().get(0).acceptanceCriteria());
     }
 
     @Test
-    void parseDelivery_replanWithoutIndependentTestAgentGetsDeterministicValidationTask() throws Exception {
+    void parseDelivery_replanWithOneCodingTaskRemainsOneSelfValidatingTask() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
 
         PmDeliveryDecision decision = parseDelivery(client, """
@@ -300,13 +382,15 @@ class PmAgentClientTest {
                 """);
 
         assertNotNull(decision);
-        assertEquals(2, decision.remediationTasks().size());
-        assertEquals("test-agent", decision.remediationTasks().get(1).agent());
-        assertEquals(List.of("R1"), decision.remediationTasks().get(1).dependsOn());
+        assertEquals(1, decision.remediationTasks().size());
+        assertEquals("backend-dev-agent", decision.remediationTasks().get(0).agent());
+        assertTrue(decision.remediationTasks().get(0).description().contains("完成修复后运行受影响范围"));
+        assertEquals(List.of("ok", "报告实际执行的验证命令与结果，确认修复有效且未引入回归"),
+                decision.remediationTasks().get(0).acceptanceCriteria());
     }
 
     @Test
-    void parseDelivery_replanWithUnsequencedTestAgentGetsFinalValidationTask() throws Exception {
+    void parseDelivery_replanWithUnsequencedTestAgentStillCombinesIntoOneTask() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
 
         PmDeliveryDecision decision = parseDelivery(client, """
@@ -317,9 +401,21 @@ class PmAgentClientTest {
                 """);
 
         assertNotNull(decision);
-        assertEquals(3, decision.remediationTasks().size());
-        assertEquals("test-agent", decision.remediationTasks().get(2).agent());
-        assertEquals(List.of("R1", "V1"), decision.remediationTasks().get(2).dependsOn());
+        assertEquals(1, decision.remediationTasks().size());
+        assertEquals("backend-dev-agent", decision.remediationTasks().get(0).agent());
+        assertTrue(decision.remediationTasks().get(0).description().contains("early verify"));
+    }
+
+    @Test
+    void parseDelivery_replanWithMultipleCodingTasksIsRejected() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(AgentExecutionService.class));
+
+        assertNull(parseDelivery(client, """
+                {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
+                {"taskKey":"R1","title":"fix backend","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]},
+                {"taskKey":"R2","title":"fix frontend","description":"d","agent":"frontend-dev-agent","area":"frontend","dependsOn":[],"fileScope":["frontend/"],"acceptanceCriteria":["ok"]}
+                ]}
+                """));
     }
 
     @Test

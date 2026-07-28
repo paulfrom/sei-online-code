@@ -654,6 +654,7 @@ public class RequirementAutomationService {
             task.setPlanTaskKey(planTask.taskKey());
             task.setTitle(planTask.title());
             task.setDescription(planTask.description());
+            task.setAcceptanceCriteria(planTask.acceptanceCriteria());
             task.setAssignedAgent(planTask.agent());
             task.setArea(planTask.area());
             task.setDependsOn(planTask.dependsOn());

@@ -21,6 +21,8 @@ public interface TaskDeliveryReviewDao extends BaseEntityDao<TaskDeliveryReview>
     /** 幂等查询：同一 (codingTaskId, deliveryRunId) 的审阅记录。 */
     Optional<TaskDeliveryReview> findByCodingTaskIdAndDeliveryRunId(String codingTaskId, String deliveryRunId);
 
+    Optional<TaskDeliveryReview> findFirstByDeliveryRunIdOrderByCreatedDateDesc(String deliveryRunId);
+
     /** 某需求下处于 PENDING 或 REVIEWING（未决）的审阅记录，用于调度门禁（方案 §6.1）。 */
     @Query("SELECT r FROM TaskDeliveryReview r "
             + "WHERE r.requirementId = :requirementId "

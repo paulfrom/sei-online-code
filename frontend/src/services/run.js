@@ -21,3 +21,35 @@ export async function findOneRun(id) {
 export async function findRunUsage(runId) {
   return request({ url: `${API}/run/findUsage`, method: 'GET', params: { runId } });
 }
+
+export async function findRunEvidence(runId) {
+  return request({ url: `${API}/run/findEvidence`, method: 'GET', params: { runId } });
+}
+
+export async function findRunLogFrames(runId, afterSequence = 0, limit = 2000) {
+  return request({
+    url: `${API}/run/findLogFrames`,
+    method: 'GET',
+    params: { runId, afterSequence, limit },
+  });
+}
+
+export async function findRunArtifactContent(artifactId) {
+  return request({
+    url: `${API}/run/findArtifactContent`,
+    method: 'GET',
+    params: { artifactId },
+  });
+}
+
+export async function findRunFeedback(runId) {
+  return request({ url: `${API}/run/findFeedback`, method: 'GET', params: { runId } });
+}
+
+export async function findAppliedBehaviorMemories(runId) {
+  return request({
+    url: `${API}/run/findAppliedBehaviorMemories`,
+    method: 'GET',
+    params: { runId },
+  });
+}

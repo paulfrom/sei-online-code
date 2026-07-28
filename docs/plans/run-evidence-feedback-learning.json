@@ -1,0 +1,426 @@
+{
+  "project_name": "Run Evidence, PM Feedback and Agent Behavior Learning",
+  "description": "Persist redacted replayable run logs and immutable structured evidence, provide PM with complete delivery facts and actionable remediation contracts, inject feedback into the next agent run, and manage evidence-backed long-term behavior memory.",
+  "tech_stack": {
+    "frontend": "React + UmiJS + @ead/suid",
+    "backend": "Java + Spring Boot + sei-core",
+    "mobile": "",
+    "database": "PostgreSQL-compatible schema through repository migration process",
+    "infrastructure": "DB-backed compressed artifact chunks in phase 1; storage abstraction allows object storage later"
+  },
+  "architecture_decisions": [
+    {
+      "decision": "Use an ArtifactStore plus immutable RunEvidence versions instead of one database row per log line.",
+      "rationale": "Preserves ordered replay while avoiding database write amplification and keeping PM and agent prompts bounded.",
+      "alternatives_considered": [
+        "Persist every log frame as a row",
+        "Persist only Run.summary and Git diff",
+        "Store artifacts only in external object storage"
+      ]
+    },
+    {
+      "decision": "Keep Run execution state independent from evidence completeness and delivery quality.",
+      "rationale": "Run success continues to mean that an inspectable result was received; PM owns delivery decisions, while missing evidence is explicit and cannot be treated as approval.",
+      "alternatives_considered": [
+        "Fail Run when artifact persistence fails",
+        "Let evidence completeness redefine Run state"
+      ]
+    },
+    {
+      "decision": "Represent long-term improvement as governed behavior memory, not model training or automatic mutation of project agent-memory files.",
+      "rationale": "Behavior rules remain evidence-backed, scoped, reversible and measurable, and a single PM mistake cannot permanently poison future runs.",
+      "alternatives_considered": [
+        "Automatically append every PM finding to agent-memory",
+        "Do not retain behavioral feedback",
+        "Fine-tune models from run logs"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "EV-001",
+      "agent": "backend-dev-agent",
+      "title": "Add evidence, artifact, acceptance and behavior-memory data contracts",
+      "description": "Create database migration, entities, DAOs and DTOs for RunArtifact, RunArtifactChunk, RunEvidence, AgentBehaviorMemory and RunBehaviorMemory. Add CodingTask and PlanPatchOperation acceptanceCriteria, TaskDeliveryReview evidence/remediation fields, and CliRunResult exitCode.",
+      "priority": 1,
+      "dependencies": [],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "Migration and JPA mappings agree on every column, index and unique constraint",
+        "No tenant_code or tenant isolation is introduced",
+        "CodingTask creation and PlanPatch task creation preserve acceptanceCriteria",
+        "Historical tasks resolve criteria from planJson or report explicit missing evidence",
+        "Artifact content is not added directly to oc_run"
+      ],
+      "artifacts_expected": [
+        "Migration SQL",
+        "Entities and DAOs",
+        "API DTOs",
+        "Data-model tests"
+      ],
+      "scope": [
+        "backend/sei-online-code-api/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/entity/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/dao/",
+        "backend/sei-online-code-service/src/main/resources/db/migration/"
+      ]
+    },
+    {
+      "id": "EV-002",
+      "agent": "backend-dev-agent",
+      "title": "Persist and replay redacted ordered run logs",
+      "description": "Replace direct-only WebSocket emission with a CompositeRunLogSink that broadcasts and writes gzip chunks. Add sequence numbers, redaction, retention, completeness and historical frame APIs.",
+      "priority": 2,
+      "dependencies": [
+        "EV-001"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "Claude and Codex stdout, stderr and system frames replay in original sequence",
+        "The implementation does not write one database row per frame",
+        "Secrets and sensitive file contents are redacted before persistence",
+        "Truncation and write failures are explicit and do not alter Run state",
+        "A 100000-frame load test stays within configured memory and chunk bounds"
+      ],
+      "artifacts_expected": [
+        "RunLogSink implementations",
+        "Artifact writer and redactor",
+        "Historical log API",
+        "Retention job",
+        "Unit and load tests"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/evidence/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/controller/",
+        "backend/sei-online-code-api/src/main/java/com/changhong/onlinecode/api/"
+      ]
+    },
+    {
+      "id": "EV-003",
+      "agent": "backend-dev-agent",
+      "title": "Capture exit codes, Git state and immutable RunEvidence",
+      "description": "Propagate process exitCode, capture Git state before releasing the workspace lease, parse final and validation outputs, evaluate actual acceptance criteria, create evidence versions and link observations to evidence IDs.",
+      "priority": 2,
+      "dependencies": [
+        "EV-001",
+        "EV-002"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "Process exitCode and validation-command exitCodes are stored separately",
+        "Git evidence is captured before another run can mutate the workspace",
+        "Every required acceptance criterion is PASSED, FAILED or NOT_VERIFIED",
+        "Sensitive paths are excluded and reported as excluded",
+        "Evidence extraction can be rerun from immutable artifacts without overwriting prior versions"
+      ],
+      "artifacts_expected": [
+        "RunEvidenceCaptureCoordinator",
+        "Evidence extractors",
+        "Evidence query API",
+        "Observation evidence references",
+        "Concurrency and extraction tests"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/evidence/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/memory/"
+      ]
+    },
+    {
+      "id": "EV-004",
+      "agent": "backend-dev-agent",
+      "title": "Give PM complete evidence and enforce actionable remediation briefs",
+      "description": "Extend delivery-review input with bounded RunEvidence and log excerpts. Extend PM output with root causes, evidence-linked findings and RemediationBrief. Validate coverage and persist the normalized brief.",
+      "priority": 3,
+      "dependencies": [
+        "EV-003"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "PM receives raw-log excerpts, Git diff summary, process and command exitCodes, and actual acceptance criteria",
+        "APPROVE is rejected when required evidence is missing or a required criterion failed",
+        "Every PM finding references existing evidence",
+        "Every failed criterion is covered by a required change and verification step",
+        "REPLAN still resolves to one coding task that fixes and verifies"
+      ],
+      "artifacts_expected": [
+        "PM prompt contract",
+        "Decision parser and validator",
+        "RemediationBrief persistence",
+        "PM review tests"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/PmAgentClient.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/review/"
+      ]
+    },
+    {
+      "id": "EV-005",
+      "agent": "backend-dev-agent",
+      "title": "Inject authoritative PM feedback into the next agent run",
+      "description": "Add AgentFeedbackPromptAssembler and completion-output contract. Inject remediation brief, failed criteria, verification steps and bounded evidence excerpts into RETRY and REPLAN runs, and track the applied run.",
+      "priority": 4,
+      "dependencies": [
+        "EV-004"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "The next agent prompt contains root causes, required changes, verification steps and failed criteria",
+        "Machine feedback does not depend on comment metadata",
+        "Complete raw logs are never copied into the prompt",
+        "Feedback-to-run linkage is idempotent and auditable",
+        "Agent final output reports resolved findings and acceptance results"
+      ],
+      "artifacts_expected": [
+        "AgentFeedbackPromptAssembler",
+        "Prompt contract tests",
+        "Feedback application tracking"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/CodingTaskExecutionService.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/agent/"
+      ]
+    },
+    {
+      "id": "EV-006",
+      "agent": "backend-dev-agent",
+      "title": "Implement governed long-term agent behavior memory",
+      "description": "Create candidate deduplication, promotion, approval, disablement, expiry, scoped retrieval, prompt injection and outcome evaluation. Do not automatically edit project agent-memory files.",
+      "priority": 5,
+      "dependencies": [
+        "EV-004",
+        "EV-005"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "A single normal finding remains CANDIDATE",
+        "Repeated evidence from distinct runs can promote under configuration",
+        "Security and destructive-operation rules require human approval",
+        "Only applicable ACTIVE memories enter prompts and the prompt budget is enforced",
+        "Disabled memories stop appearing in new prompts",
+        "Recurring findings mark injected memories ineffective instead of strengthening them"
+      ],
+      "artifacts_expected": [
+        "Behavior memory service",
+        "Behavior memory API",
+        "Prompt retrieval integration",
+        "Effectiveness tests"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/behavior/",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/service/DesignContextPromptAssembler.java",
+        "backend/sei-online-code-service/src/main/java/com/changhong/onlinecode/controller/",
+        "backend/sei-online-code-api/"
+      ]
+    },
+    {
+      "id": "EV-007",
+      "agent": "frontend-dev-agent",
+      "title": "Display historical logs, structured evidence, remediation and behavior memory",
+      "description": "Load historical log frames before live WebSocket subscription, deduplicate by sequence, display evidence completeness, commands, findings, acceptance results, Git artifacts, PM remediation and injected behavior memory.",
+      "priority": 6,
+      "dependencies": [
+        "EV-002",
+        "EV-003",
+        "EV-004",
+        "EV-006"
+      ],
+      "estimated_complexity": "high",
+      "acceptance_criteria": [
+        "A completed run can be reopened and its logs replayed",
+        "Historical and live frames have no duplicates or silent gaps",
+        "Truncated and missing evidence states are visible",
+        "Findings link to log ranges or diff paths",
+        "Large logs are paginated and sensitive content is not printed to browser console"
+      ],
+      "artifacts_expected": [
+        "Frontend services",
+        "RunLogDrawer enhancements",
+        "Frontend regression tests"
+      ],
+      "scope": [
+        "frontend/src/services/",
+        "frontend/src/pages/OnlineCode/components/RequirementWorkspace/",
+        "frontend/tests/"
+      ]
+    },
+    {
+      "id": "EV-008",
+      "agent": "test-agent",
+      "title": "Verify the evidence-to-repair-to-learning loop end to end",
+      "description": "Run unit, integration, security, failure-injection, load and frontend tests across artifact persistence, evidence extraction, PM decisions, next-run feedback and behavior-memory lifecycle.",
+      "priority": 7,
+      "dependencies": [
+        "EV-001",
+        "EV-002",
+        "EV-003",
+        "EV-004",
+        "EV-005",
+        "EV-006",
+        "EV-007"
+      ],
+      "estimated_complexity": "very-high",
+      "acceptance_criteria": [
+        "A result-bearing run is successful while PM can still require a repair",
+        "Failed validation commands cannot be approved",
+        "Secrets are absent from database chunks, APIs and UI",
+        "Old Git evidence remains unchanged after a subsequent run",
+        "Artifact failure is visible but does not corrupt Run state",
+        "Repeated findings create governed memory and disabled memory is no longer injected",
+        "Configured artifact limits produce TRUNCATED rather than COMPLETE"
+      ],
+      "artifacts_expected": [
+        "End-to-end test report",
+        "Security redaction report",
+        "Artifact capacity measurements",
+        "Failure-injection results"
+      ],
+      "scope": [
+        "backend/sei-online-code-service/src/test/",
+        "frontend/tests/",
+        "frontend/src/pages/OnlineCode/components/RequirementWorkspace/"
+      ]
+    }
+  ],
+  "api_contracts": [
+    {
+      "endpoint": "/run/findLogFrames",
+      "method": "GET",
+      "request": {
+        "runId": "string",
+        "afterSequence": "long",
+        "limit": "1..1000"
+      },
+      "response": {
+        "artifactState": "OPEN|COMPLETE|TRUNCATED|FAILED|EXPIRED",
+        "completeness": "COMPLETE|TRUNCATED|MISSING",
+        "nextSequence": "long",
+        "hasMore": "boolean",
+        "frames": "RunLogFrame[]"
+      },
+      "headers": {}
+    },
+    {
+      "endpoint": "/run/findEvidence",
+      "method": "GET",
+      "request": {
+        "runId": "string"
+      },
+      "response": {
+        "data": "RunEvidenceDto"
+      },
+      "headers": {}
+    },
+    {
+      "endpoint": "/run/downloadArtifact",
+      "method": "GET",
+      "request": {
+        "runId": "string",
+        "artifactId": "string"
+      },
+      "response": {
+        "content": "binary or text stream",
+        "sha256": "string",
+        "completeness": "COMPLETE|TRUNCATED|MISSING"
+      },
+      "headers": {
+        "Content-Type": "artifact content type",
+        "Content-Encoding": "gzip or identity"
+      }
+    },
+    {
+      "endpoint": "/agentBehaviorMemory/approve",
+      "method": "POST",
+      "request": {
+        "id": "string",
+        "reason": "string"
+      },
+      "response": {
+        "status": "ACTIVE"
+      },
+      "headers": {}
+    },
+    {
+      "endpoint": "/agentBehaviorMemory/disable",
+      "method": "POST",
+      "request": {
+        "id": "string",
+        "reason": "string"
+      },
+      "response": {
+        "status": "DISABLED"
+      },
+      "headers": {}
+    }
+  ],
+  "data_models": [
+    {
+      "entity": "RunArtifact",
+      "fields": {
+        "runId": "string",
+        "artifactType": "RAW_LOG|GIT_DIFF|FINAL_OUTPUT|VALIDATION_REPORT",
+        "version": "integer",
+        "state": "OPEN|COMPLETE|TRUNCATED|FAILED|EXPIRED",
+        "sha256": "string",
+        "redactionVersion": "string",
+        "completeness": "COMPLETE|TRUNCATED|MISSING",
+        "expiresAt": "timestamp"
+      }
+    },
+    {
+      "entity": "RunEvidence",
+      "fields": {
+        "runId": "string",
+        "version": "integer",
+        "status": "CAPTURING|READY|PARTIAL|FAILED",
+        "processExitCode": "integer|null",
+        "commandResultsJson": "text",
+        "findingsJson": "text",
+        "acceptanceCriteriaJson": "text",
+        "acceptanceResultsJson": "text",
+        "artifactRefsJson": "text"
+      }
+    },
+    {
+      "entity": "AgentBehaviorMemory",
+      "fields": {
+        "projectId": "string",
+        "agentName": "string|null",
+        "taskArea": "string",
+        "fingerprint": "string",
+        "status": "CANDIDATE|ACTIVE|DISABLED|REJECTED|EXPIRED",
+        "ruleText": "text",
+        "evidenceRefsJson": "text",
+        "confidence": "decimal",
+        "successCount": "integer",
+        "recurrenceCount": "integer"
+      }
+    }
+  ],
+  "non_functional_requirements": {
+    "security": [
+      "Redact secrets before persistence",
+      "Exclude sensitive file content from Git artifacts",
+      "Audit artifact downloads and behavior-memory state changes",
+      "Require human approval for security and destructive-operation behavior rules"
+    ],
+    "performance": [
+      "Write compressed chunks, not one row per frame",
+      "Default chunk size 64 KiB and flush interval 1 second",
+      "Paginate historical log replay",
+      "Bound PM excerpts and behavior-memory prompt budgets"
+    ],
+    "scalability": [
+      "Use an ArtifactStore abstraction",
+      "Support TTL cleanup and capacity alerts",
+      "Allow a future object-storage implementation without changing business contracts"
+    ]
+  },
+  "testing_strategy": {
+    "unit_tests": "Redaction, chunking, evidence parsing, acceptance mapping, PM validation, feedback assembly, memory promotion and retrieval.",
+    "integration_tests": "Runner to artifact to evidence to review to retry prompt, including transaction and workspace-lease ordering.",
+    "e2e_tests": "Defective delivery produces PM remediation, next run receives and resolves it, and repeated findings produce governed memory.",
+    "performance_tests": "100000 frames and configured maximum artifact size; verify bounded memory, chunk count and replay latency."
+  }
+}

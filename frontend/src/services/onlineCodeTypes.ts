@@ -88,6 +88,7 @@ export interface CodingTaskDto {
   status: CodingTaskStatus;
   title: string;
   description?: string | null;
+  acceptanceCriteria?: string[] | null;
   fileScope: string[];
   failureSummary?: string | null;
   revisionSeq?: number | null;

@@ -366,6 +366,11 @@ public class PmAgentClient {
         sb.append("## Context\n");
         sb.append("memoryContextId: ").append(context == null ? "n/a" : context.getId()).append("\n");
         sb.append("workspaceMemoryId: ").append(context == null ? "n/a" : context.getWorkspaceMemoryId()).append("\n");
+        sb.append("\nRemediation guidance:\n");
+        sb.append("- When acceptance fails, return exactly one coding remediation task.\n");
+        sb.append("- That task must directly fix every reported issue and run the necessary tests/build/validation itself.\n");
+        sb.append("- Do not split remediation into separate implementation and test-agent tasks.\n");
+        sb.append("- Use an empty dependsOn list and put the verification commands/evidence requirements in description and acceptanceCriteria.\n");
 
         sb.append("\nReturn **only** valid JSON:\n");
         sb.append("{\n");
@@ -377,8 +382,8 @@ public class PmAgentClient {
         sb.append("      \"taskKey\": \"FE-001\",\n");
         sb.append("      \"title\": \"string\",\n");
         sb.append("      \"description\": \"string\",\n");
-        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\" or \"test-agent\",\n");
-        sb.append("      \"area\": \"frontend\" or \"backend\" or \"full-stack\" or \"validation\",\n");
+        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\",\n");
+        sb.append("      \"area\": \"frontend\" or \"backend\",\n");
         sb.append("      \"dependsOn\": [],\n");
         sb.append("      \"fileScope\": [\"frontend/src/...\"],\n");
         sb.append("      \"acceptanceCriteria\": [\"string\"]\n");
@@ -393,12 +398,13 @@ public class PmAgentClient {
         sb.append("You are pm-agent. Review a single task delivery and decide what the orchestrator should do next.\n\n");
         sb.append("Decision contract:\n");
         sb.append("- APPROVE: only when the task succeeded and delivery evidence is complete.\n");
-        sb.append("- RETRY: only for transient infrastructure issues or clearly correctable agent execution deviation; record retryReason.\n");
-        sb.append("- REPLAN: for code defects, test failures, upstream delivery incomplete, task contract errors, or when new remediation tasks are needed.\n");
-        sb.append("  REPLAN must include at least one coding remediation task and a final independent test-agent task.\n");
-        sb.append("  The test-agent task must depend on the remediation tasks. Never RETRY a failed validation-task alone.\n");
+        sb.append("- RETRY: when the current assigned agent can act on the feedback. The same task must directly fix the issue and run the necessary verification in one run; record retryReason.\n");
+        sb.append("- REPLAN: only when the current task boundary, assigned agent, or file scope cannot safely handle the feedback.\n");
+        sb.append("  REPLAN must contain exactly one self-contained coding remediation task. It must both fix the issue and run its own tests/build/validation.\n");
+        sb.append("  Never split remediation into multiple tasks or add a separate test-agent task.\n");
         sb.append("- WAIT_HUMAN: when you cannot decide safely, output is invalid, remediation cap reached, or a human decision is required.\n");
-        sb.append("- For a FAILED or VALIDATION_FAILED delivery, APPROVE is forbidden.\n\n");
+        sb.append("- Run success means an execution result was received, not that the delivery is correct. Decide from the result summary, findings, changes, and validation evidence.\n");
+        sb.append("- For evidence that still shows a defect or failed validation, APPROVE is forbidden even when deliverySucceeded is true.\n\n");
         sb.append("## Requirement\n");
         sb.append("Title: ").append(requirement == null ? "" : Objects.toString(requirement.getTitle(), "")).append("\n");
         sb.append("Description: ").append(requirement == null ? "" : Objects.toString(requirement.getDescription(), "")).append("\n\n");
@@ -440,19 +446,37 @@ public class PmAgentClient {
         sb.append("  \"failureCategory\": \"NONE | TRANSIENT_INFRA | DELIVERY_INCOMPLETE | VALIDATION_FAILED | UPSTREAM_INCOMPLETE | PLAN_DEFECT\",\n");
         sb.append("  \"findings\": [\"string\"],\n");
         sb.append("  \"retryReason\": \"required only when decision is RETRY\",\n");
+        sb.append("  \"remediationBrief\": {\n");
+        sb.append("    \"goal\": \"single fix-and-verify objective\",\n");
+        sb.append("    \"rootCauses\": [\"evidence-backed root cause\"],\n");
+        sb.append("    \"requiredChanges\": [\"concrete change\"],\n");
+        sb.append("    \"verificationSteps\": [\"actual command or acceptance check\"],\n");
+        sb.append("    \"evidenceRefs\": [\"runEvidenceId/artifactId/log sequence\"]\n");
+        sb.append("  },\n");
+        sb.append("  \"behaviorMemoryCandidates\": [{\n");
+        sb.append("    \"scopeKey\": \"stable problem category\",\n");
+        sb.append("    \"area\": \"frontend | backend | full-stack\",\n");
+        sb.append("    \"rule\": \"specific reusable behavior, not a task-specific patch\",\n");
+        sb.append("    \"rationale\": \"why this prevents recurrence\",\n");
+        sb.append("    \"evidenceRefs\": [\"evidence id\"]\n");
+        sb.append("  }],\n");
         sb.append("  \"remediationTasks\": [\n");
         sb.append("    {\n");
         sb.append("      \"taskKey\": \"string\",\n");
         sb.append("      \"title\": \"string\",\n");
         sb.append("      \"description\": \"string\",\n");
-        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\" or \"test-agent\",\n");
-        sb.append("      \"area\": \"frontend\" or \"backend\" or \"full-stack\" or \"validation\",\n");
+        sb.append("      \"agent\": \"frontend-dev-agent\" or \"backend-dev-agent\",\n");
+        sb.append("      \"area\": \"frontend\" or \"backend\",\n");
         sb.append("      \"dependsOn\": [],\n");
         sb.append("      \"fileScope\": [\"frontend/src/...\"],\n");
         sb.append("      \"acceptanceCriteria\": [\"string\"]\n");
         sb.append("    }\n");
         sb.append("  ]\n");
         sb.append("}\n");
+        sb.append("APPROVE is forbidden when the structured evidence is missing, partial, truncated, "
+                + "or any actual acceptance criterion is unverified. RETRY/REPLAN must include one "
+                + "authoritative remediationBrief that tells the same coding agent how to fix and verify "
+                + "in one task. Every finding, root cause and behavior-memory candidate must cite evidenceRefs.\n");
         return sb.toString();
     }
 
@@ -500,21 +524,10 @@ public class PmAgentClient {
                     LOGGER.warn("pm-agent delivery review REPLAN without remediationTasks: {}", json);
                     return null;
                 }
-                java.util.Set<String> codingTaskKeys = remediationTasks.stream()
-                        .filter(task -> "frontend-dev-agent".equals(task.agent())
-                                || "backend-dev-agent".equals(task.agent()))
-                        .map(RequirementAutomationService.PlanTask::taskKey)
-                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-                if (codingTaskKeys.isEmpty()) {
-                    LOGGER.warn("pm-agent delivery review REPLAN without coding remediation task");
+                remediationTasks = consolidateRemediationTasks(remediationTasks);
+                if (remediationTasks == null) {
+                    LOGGER.warn("pm-agent delivery review REPLAN must resolve to one coding remediation task");
                     return null;
-                }
-                boolean hasFinalValidation = remediationTasks.stream()
-                        .filter(task -> "test-agent".equals(task.agent()))
-                        .anyMatch(task -> task.dependsOn() != null
-                                && task.dependsOn().containsAll(codingTaskKeys));
-                if (!hasFinalValidation) {
-                    appendDeterministicValidationTask(remediationTasks);
                 }
                 if (!isValidTaskGraph(remediationTasks)) {
                     LOGGER.warn("pm-agent delivery review REPLAN has invalid agent assignment or DAG");
@@ -522,7 +535,18 @@ public class PmAgentClient {
                 }
             }
 
-            return new PmDeliveryDecision(decision, summary, category, findings, retryReason, remediationTasks);
+            PmDeliveryDecision.RemediationBrief remediationBrief =
+                    parseRemediationBrief(root.path("remediationBrief"));
+            if ((decision == TaskDeliveryReviewDecision.RETRY
+                    || decision == TaskDeliveryReviewDecision.REPLAN)
+                    && remediationBrief == null) {
+                remediationBrief = synthesizeRemediationBrief(
+                        summary, findings, retryReason, remediationTasks, input.deliveryRunId());
+            }
+            List<PmDeliveryDecision.BehaviorMemoryCandidate> memoryCandidates =
+                    parseBehaviorMemoryCandidates(root.path("behaviorMemoryCandidates"));
+            return new PmDeliveryDecision(decision, summary, category, findings, retryReason,
+                    remediationTasks, remediationBrief, memoryCandidates);
         } catch (Exception e) {
             LOGGER.warn("pm-agent delivery review JSON parse failed: requirementId={}, codingTaskId={}",
                     input.requirementId(), input.codingTaskId(), e);
@@ -530,33 +554,137 @@ public class PmAgentClient {
         }
     }
 
-    private void appendDeterministicValidationTask(
-            List<RequirementAutomationService.PlanTask> remediationTasks) {
-        java.util.Set<String> keys = remediationTasks.stream()
-                .map(RequirementAutomationService.PlanTask::taskKey)
-                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-        String validationKey = "REMEDIATION-VALIDATE";
-        int suffix = 2;
-        while (keys.contains(validationKey)) {
-            validationKey = "REMEDIATION-VALIDATE-" + suffix++;
+    private PmDeliveryDecision.RemediationBrief parseRemediationBrief(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
         }
-        List<String> dependencies = List.copyOf(keys);
-        List<String> fileScope = remediationTasks.stream()
-                .flatMap(task -> task.fileScope() == null ? java.util.stream.Stream.empty()
-                        : task.fileScope().stream())
+        String goal = node.path("goal").asText("").trim();
+        List<String> rootCauses = readStringList(node.path("rootCauses"));
+        List<String> requiredChanges = readStringList(node.path("requiredChanges"));
+        List<String> verificationSteps = readStringList(node.path("verificationSteps"));
+        List<String> evidenceRefs = readStringList(node.path("evidenceRefs"));
+        if (goal.isBlank() || requiredChanges.isEmpty() || verificationSteps.isEmpty()
+                || evidenceRefs.isEmpty()) {
+            return null;
+        }
+        return new PmDeliveryDecision.RemediationBrief(
+                goal, rootCauses, requiredChanges, verificationSteps, evidenceRefs);
+    }
+
+    private PmDeliveryDecision.RemediationBrief synthesizeRemediationBrief(
+            String summary,
+            List<String> findings,
+            String retryReason,
+            List<RequirementAutomationService.PlanTask> remediationTasks,
+            String deliveryRunId) {
+        List<String> changes = remediationTasks == null
+                ? List.of() : remediationTasks.stream()
+                .map(RequirementAutomationService.PlanTask::description)
+                .filter(value -> value != null && !value.isBlank())
+                .toList();
+        List<String> verification = remediationTasks == null
+                ? List.of() : remediationTasks.stream()
+                .flatMap(task -> task.acceptanceCriteria().stream())
                 .distinct()
                 .toList();
-        remediationTasks.add(new RequirementAutomationService.PlanTask(
-                validationKey,
-                "验证修复结果",
-                "独立执行受影响范围的测试、构建与验收检查，确认修复有效且未引入回归。",
-                "test-agent",
-                "validation",
-                dependencies,
+        return new PmDeliveryDecision.RemediationBrief(
+                firstNonBlank(retryReason, summary, "修复交付问题并完成实际验证"),
+                findings,
+                changes.isEmpty() ? List.of(firstNonBlank(summary, retryReason, "修复已发现问题")) : changes,
+                verification.isEmpty()
+                        ? List.of("运行受影响范围的实际测试或构建并报告命令与 exitCode")
+                        : verification,
+                deliveryRunId == null ? List.of("deliveryEvidence")
+                        : List.of("run:" + deliveryRunId));
+    }
+
+    private List<PmDeliveryDecision.BehaviorMemoryCandidate> parseBehaviorMemoryCandidates(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<PmDeliveryDecision.BehaviorMemoryCandidate> values = new ArrayList<>();
+        for (JsonNode candidate : node) {
+            String scopeKey = candidate.path("scopeKey").asText("").trim();
+            String rule = candidate.path("rule").asText("").trim();
+            List<String> evidenceRefs = readStringList(candidate.path("evidenceRefs"));
+            if (scopeKey.isBlank() || rule.isBlank() || evidenceRefs.isEmpty()) {
+                continue;
+            }
+            values.add(new PmDeliveryDecision.BehaviorMemoryCandidate(
+                    scopeKey,
+                    candidate.path("area").asText(null),
+                    rule,
+                    candidate.path("rationale").asText(null),
+                    evidenceRefs));
+        }
+        return List.copyOf(values);
+    }
+
+    /**
+     * 将历史协议中“修复任务 + 独立测试任务”的返回兼容收敛为一个自修复、自验证任务。
+     *
+     * <p>跨多个开发 agent 的修复无法安全合并，直接拒绝并交由 PM/人工重新决策；一个开发任务
+     * 搭配若干 test-agent 任务时，则把验证描述、文件范围和验收标准合并进开发任务。</p>
+     */
+    private List<RequirementAutomationService.PlanTask> consolidateRemediationTasks(
+            List<RequirementAutomationService.PlanTask> remediationTasks) {
+        boolean hasUnsupportedAgent = remediationTasks.stream()
+                .anyMatch(task -> !"frontend-dev-agent".equals(task.agent())
+                        && !"backend-dev-agent".equals(task.agent())
+                        && !"test-agent".equals(task.agent()));
+        if (hasUnsupportedAgent) {
+            return null;
+        }
+        List<RequirementAutomationService.PlanTask> codingTasks = remediationTasks.stream()
+                .filter(task -> "frontend-dev-agent".equals(task.agent())
+                        || "backend-dev-agent".equals(task.agent()))
+                .toList();
+        if (codingTasks.size() != 1) {
+            return null;
+        }
+
+        RequirementAutomationService.PlanTask codingTask = codingTasks.get(0);
+        List<String> fileScope = new ArrayList<>();
+        List<String> acceptanceCriteria = new ArrayList<>();
+        StringBuilder description = new StringBuilder(Objects.toString(codingTask.description(), ""));
+        boolean validationMerged = false;
+        for (RequirementAutomationService.PlanTask task : remediationTasks) {
+            if (task.fileScope() != null) {
+                task.fileScope().stream().filter(scope -> !fileScope.contains(scope)).forEach(fileScope::add);
+            }
+            if (task.acceptanceCriteria() != null) {
+                task.acceptanceCriteria().stream()
+                        .filter(criterion -> !acceptanceCriteria.contains(criterion))
+                        .forEach(acceptanceCriteria::add);
+            }
+            if (task != codingTask && "test-agent".equals(task.agent())) {
+                validationMerged = true;
+                if (!description.isEmpty()) {
+                    description.append("\n\n");
+                }
+                description.append("验证要求：")
+                        .append(Objects.toString(task.title(), ""))
+                        .append("。")
+                        .append(Objects.toString(task.description(), ""));
+            }
+        }
+        if (!validationMerged) {
+            if (!description.isEmpty()) {
+                description.append("\n\n");
+            }
+            description.append("验证要求：完成修复后运行受影响范围的测试、构建或检查，并报告实际命令与结果。");
+            acceptanceCriteria.add("报告实际执行的验证命令与结果，确认修复有效且未引入回归");
+        }
+
+        return List.of(new RequirementAutomationService.PlanTask(
+                codingTask.taskKey(),
+                codingTask.title(),
+                description.toString(),
+                codingTask.agent(),
+                codingTask.area(),
+                List.of(),
                 fileScope,
-                List.of("所有受影响测试与构建命令通过", "报告实际执行命令、exitCode 与 findings")));
-        LOGGER.info("pm-agent REPLAN omitted test-agent; appended deterministic validation task {}",
-                validationKey);
+                acceptanceCriteria));
     }
 
     private TaskDeliveryReviewDecision parseDecision(String text) {
@@ -625,6 +753,7 @@ public class PmAgentClient {
         sb.append("    \"area\": \"frontend|backend|full-stack|validation\",\n");
         sb.append("    \"fileScope\": [\"backend/...\"],\n");
         sb.append("    \"dependsOn\": [\"output taskKey\"],\n");
+        sb.append("    \"acceptanceCriteria\": [\"actual verifiable criterion\"],\n");
         sb.append("    \"assignedAgent\": \"frontend-dev-agent|backend-dev-agent|test-agent\",\n");
         sb.append("    \"reason\": \"string\"\n");
         sb.append("  }]\n");
@@ -703,6 +832,13 @@ public class PmAgentClient {
                 }
             }
 
+            if (!accepted && !remediationTasks.isEmpty()) {
+                remediationTasks = consolidateRemediationTasks(remediationTasks);
+                if (remediationTasks == null) {
+                    LOGGER.warn("pm-agent acceptance remediation must resolve to one coding task");
+                    return null;
+                }
+            }
             if (!isValidTaskGraph(remediationTasks)) {
                 LOGGER.warn("pm-agent remediation contains invalid agent assignment or DAG");
                 return null;

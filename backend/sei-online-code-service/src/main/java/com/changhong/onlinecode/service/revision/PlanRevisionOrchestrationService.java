@@ -183,7 +183,9 @@ public class PlanRevisionOrchestrationService {
     private PlanRevisionInput.TaskSnapshot taskSnapshot(CodingTask task) {
         return new PlanRevisionInput.TaskSnapshot(task.getId(), task.getPlanTaskKey(), task.getTitle(),
                 task.getDescription(), task.getAssignedAgent(), task.getArea(), task.getDependsOn(),
-                task.getFileScope(), List.of(), task.getStatus().name(), task.getFailureSummary());
+                task.getFileScope(),
+                task.getAcceptanceCriteria() == null ? List.of() : task.getAcceptanceCriteria(),
+                task.getStatus().name(), task.getFailureSummary());
     }
 
     private PlanRevisionInput.CommentSnapshot commentSnapshot(RequirementComment comment) {

@@ -168,6 +168,10 @@ public class TaskDeliveryReviewService extends BaseEntityService<TaskDeliveryRev
         return dao.findFirstByCodingTaskIdOrderByCreatedDateDesc(codingTaskId);
     }
 
+    public Optional<TaskDeliveryReview> findFirstByDeliveryRunId(String deliveryRunId) {
+        return dao.findFirstByDeliveryRunIdOrderByCreatedDateDesc(deliveryRunId);
+    }
+
     /** 某依赖任务是否已 APPROVE（依赖满足条件，方案 §6.3）。 */
     public boolean isApproved(String codingTaskId) {
         return dao.findFirstByCodingTaskIdOrderByCreatedDateDesc(codingTaskId)

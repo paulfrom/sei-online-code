@@ -21,6 +21,9 @@ public class CliRunResult {
     /** CLI/协议层是否正常完成。 */
     private boolean processSucceeded;
 
+    /** 实际进程退出码；进程未成功启动时为 null。 */
+    private Integer exitCode;
+
     /** 失败原因；processSucceeded = false 时有值。 */
     private String failureReason;
 

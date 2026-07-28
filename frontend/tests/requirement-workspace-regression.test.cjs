@@ -56,6 +56,28 @@ test('RunTab uses the public FilterView data and controlled-selection props', ()
   assert.doesNotMatch(source, /<FilterView[\s\S]*?\svalue=\{/);
 });
 
+test('RunTab defaults to agent runs while retaining system runs as an explicit filter option', () => {
+  const source = read('src/pages/OnlineCode/components/RequirementWorkspace/RunTab.jsx');
+  assert.match(source, /useState\(\(\) => \['AGENT'\]\)/);
+  assert.match(source, /const runType = run\.runType \|\| 'AGENT'/);
+  assert.match(source, /\{ key: 'SYSTEM', title: '系统' \}/);
+});
+
+test('run drawer replays persisted logs and exposes structured evidence feedback and memory', () => {
+  const drawer = read('src/pages/OnlineCode/components/RequirementWorkspace/RunLogDrawer.jsx');
+  const service = read('src/services/run.js');
+  assert.match(service, /export async function findRunLogFrames/);
+  assert.match(service, /export async function findRunEvidence/);
+  assert.match(service, /export async function findRunFeedback/);
+  assert.match(service, /export async function findAppliedBehaviorMemories/);
+  assert.match(drawer, /findRunLogFrames\(run\.id, 0, 2000\)/);
+  assert.match(drawer, /mergeFrames\(current, frames\)/);
+  assert.match(drawer, /结构化 EvidenceBundle/);
+  assert.match(drawer, /实际验收标准/);
+  assert.match(drawer, /PM 权威修复反馈/);
+  assert.match(drawer, /本 Run 应用的长期行为记忆/);
+});
+
 test('stop automation uses the requirement-level cancellation endpoint', () => {
   const hook = read('src/pages/OnlineCode/components/RequirementWorkspace/useRequirementWorkspace.js');
   const service = read('src/services/requirement.js');

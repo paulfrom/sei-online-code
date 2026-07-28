@@ -31,6 +31,9 @@ public class RunLogFrame implements Serializable {
     @Schema(description = "运行 id（Phase 2 多 agent fan-out）；无归属时为 null")
     private String runId;
 
+    @Schema(description = "Run 内严格递增的持久化序号；旧的非持久化帧可为 null")
+    private Long sequenceNo;
+
     @Schema(description = "流类型：stdout | stderr | system")
     private String stream;
 

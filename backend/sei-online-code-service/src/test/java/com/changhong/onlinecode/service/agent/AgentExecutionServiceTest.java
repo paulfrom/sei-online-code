@@ -70,6 +70,7 @@ class AgentExecutionServiceTest {
 
         CliRunResult cliResult = new CliRunResult();
         cliResult.setProcessSucceeded(true);
+        cliResult.setExitCode(0);
         cliResult.setOutput("{\"passed\":true}");
         when(registry.executeDetailed(eq(agentWorkspace), any(),
                 org.mockito.ArgumentMatchers.contains("失败原因：格式校验失败"), any()))
@@ -89,6 +90,7 @@ class AgentExecutionServiceTest {
         assertEquals("run-1", result.runId());
         assertEquals("{\"passed\":true}", result.output());
         assertEquals("{\"passed\":true}", run.getSummary());
+        assertEquals(0, run.getExitCode());
 
         ArgumentCaptor<AgentRunCreateCommand> commandCaptor =
                 ArgumentCaptor.forClass(AgentRunCreateCommand.class);

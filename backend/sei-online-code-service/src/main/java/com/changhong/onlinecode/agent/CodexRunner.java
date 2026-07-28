@@ -234,6 +234,7 @@ public class CodexRunner implements CliRunner {
         result.setOutput(output);
         result.setUsage(usage);
         result.setProcessSucceeded(true);
+        result.setExitCode(0);
         return result;
     }
 
@@ -246,6 +247,7 @@ public class CodexRunner implements CliRunner {
         result.setOutput(output);
         result.setUsage(usage);
         result.setProcessSucceeded(false);
+        result.setExitCode(1);
         result.setFailureReason(reason);
         return result;
     }

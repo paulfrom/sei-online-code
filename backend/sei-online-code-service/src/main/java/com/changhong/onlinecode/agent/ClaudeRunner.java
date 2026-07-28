@@ -123,11 +123,15 @@ public class ClaudeRunner implements CliRunner {
             String finalState = code == 0 ? "PREVIEW" : "FAILED";
             emit(logStreamKey, taskId, runId, "system", "DONE", finalState);
             if (code == 0) {
-                return successResult(envelope.result(), usage);
+                CliRunResult result = successResult(envelope.result(), usage);
+                result.setExitCode(code);
+                return result;
             }
             // 非零退出码但 stdout 中存在可解析 usage 时，仍尽力保存。
-            return failedResult("claude exited with code " + code,
+            CliRunResult result = failedResult("claude exited with code " + code,
                     firstNonBlank(envelope.result(), errorOutput.toString(), stdout), usage);
+            result.setExitCode(code);
+            return result;
         } catch (IOException e) {
             log.warn("claude spawn failed: logStreamKey={}", logStreamKey, e);
             emit(logStreamKey, taskId, runId, "system", "DONE", "FAILED");

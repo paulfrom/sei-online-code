@@ -16,7 +16,9 @@ import com.changhong.onlinecode.entity.Skill;
 import com.changhong.onlinecode.entity.SkillFile;
 import com.changhong.onlinecode.service.AgentService;
 import com.changhong.onlinecode.service.SkillService;
+import com.changhong.onlinecode.service.evidence.RunEvidenceService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -47,7 +49,9 @@ public class AgentExecutionService {
     private final SkillMaterializer skillMaterializer;
     private final AgentWorkspaceLease workspaceLease;
     private final Executor agentExecutionExecutor;
+    private final RunEvidenceService runEvidenceService;
 
+    @Autowired
     public AgentExecutionService(AgentService agentService,
                                  CliRunnerRegistry cliRunnerRegistry,
                                  RunDao runDao,
@@ -55,7 +59,8 @@ public class AgentExecutionService {
                                  SkillService skillService,
                                  SkillMaterializer skillMaterializer,
                                  AgentWorkspaceLease workspaceLease,
-                                 @Qualifier("agentExecutionExecutor") Executor agentExecutionExecutor) {
+                                 @Qualifier("agentExecutionExecutor") Executor agentExecutionExecutor,
+                                 RunEvidenceService runEvidenceService) {
         this.agentService = agentService;
         this.cliRunnerRegistry = cliRunnerRegistry;
         this.runDao = runDao;
@@ -64,6 +69,20 @@ public class AgentExecutionService {
         this.skillMaterializer = skillMaterializer;
         this.workspaceLease = workspaceLease;
         this.agentExecutionExecutor = agentExecutionExecutor;
+        this.runEvidenceService = runEvidenceService;
+    }
+
+    /** 测试与旧调用方兼容构造器；生产由带 evidence service 的构造器注入。 */
+    public AgentExecutionService(AgentService agentService,
+                                 CliRunnerRegistry cliRunnerRegistry,
+                                 RunDao runDao,
+                                 AgentRunRecorder agentRunRecorder,
+                                 SkillService skillService,
+                                 SkillMaterializer skillMaterializer,
+                                 AgentWorkspaceLease workspaceLease,
+                                 Executor agentExecutionExecutor) {
+        this(agentService, cliRunnerRegistry, runDao, agentRunRecorder, skillService,
+                skillMaterializer, workspaceLease, agentExecutionExecutor, null);
     }
 
     public CompletableFuture<AgentExecutionResult> executeAsync(String agentName, AgentExecutionRequest request) {
@@ -131,6 +150,7 @@ public class AgentExecutionService {
             CliRunResult result = future.get(timeoutSeconds(request), TimeUnit.SECONDS);
             log.info("cli run result {}", result);
             persistExecutionAudit(run, result);
+            captureEvidence(run, result, workspace);
             if (result != null && result.isProcessSucceeded()) {
                 return AgentExecutionResult.succeeded(run.getId(), result.getOutput());
             }
@@ -162,7 +182,8 @@ public class AgentExecutionService {
         boolean hasTurn = turnId != null && !turnId.isBlank();
         boolean hasOutput = result.getOutput() != null && !result.getOutput().isBlank();
         boolean hasFailure = result.getFailureReason() != null && !result.getFailureReason().isBlank();
-        if (!hasThread && !hasTurn && !hasOutput && !hasFailure) {
+        boolean hasExitCode = result.getExitCode() != null;
+        if (!hasThread && !hasTurn && !hasOutput && !hasFailure && !hasExitCode) {
             return;
         }
         Run persisted = runDao.findOne(run.getId());
@@ -181,7 +202,20 @@ public class AgentExecutionService {
         if (hasFailure) {
             persisted.setFailureReason(result.getFailureReason());
         }
+        persisted.setExitCode(result.getExitCode());
         runDao.save(persisted);
+    }
+
+    private void captureEvidence(Run run, CliRunResult result, AgentWorkspace workspace) {
+        if (runEvidenceService == null) {
+            return;
+        }
+        try {
+            runEvidenceService.capture(run, result, workspace == null ? null : workspace.path());
+        } catch (Exception e) {
+            // evidence 是独立状态，采集失败不能改变 Run 是否有结果。
+            log.warn("run evidence capture failed: runId={}", run == null ? null : run.getId(), e);
+        }
     }
 
     private void markDeferredRun(String runId, String reason) {

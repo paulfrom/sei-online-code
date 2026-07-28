@@ -33,10 +33,13 @@ import com.changhong.onlinecode.service.agent.AgentExecutionResult;
 import com.changhong.onlinecode.service.agent.AgentExecutionService;
 import com.changhong.onlinecode.service.agent.CodingTaskProgressIntegrator;
 import com.changhong.onlinecode.service.progress.WorkspaceLeaseService;
+import com.changhong.onlinecode.service.evidence.AgentBehaviorMemoryService;
+import com.changhong.onlinecode.service.review.TaskDeliveryReviewService;
 import com.changhong.sei.core.dto.ResultData;
 import com.changhong.sei.core.service.bo.OperateResultWithData;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -62,7 +65,7 @@ import java.util.function.Supplier;
  * @author sei-online-code
  */
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Slf4j
 public class CodingTaskExecutionService {
 
@@ -87,6 +90,15 @@ public class CodingTaskExecutionService {
     private final RequirementWorkspaceDao requirementWorkspaceDao;
     private final TaskHandoffSnapshotDao taskHandoffSnapshotDao;
     private final PlatformTransactionManager transactionManager;
+    private AgentBehaviorMemoryService behaviorMemoryService;
+    private TaskDeliveryReviewService taskDeliveryReviewService;
+
+    @Autowired(required = false)
+    void setEvidenceFeedbackServices(AgentBehaviorMemoryService behaviorMemoryService,
+                                     TaskDeliveryReviewService taskDeliveryReviewService) {
+        this.behaviorMemoryService = behaviorMemoryService;
+        this.taskDeliveryReviewService = taskDeliveryReviewService;
+    }
 
     /**
      * Requests logical cancellation and best-effort process termination.
@@ -347,13 +359,12 @@ public class CodingTaskExecutionService {
             return CompletionDecision.deferred(result.failureReason());
         }
         String summary = firstNonBlank(result.output(), result.failureReason());
-        if (result.status() != AgentExecutionResult.Status.SUCCEEDED) {
-            String failure = firstNonBlank(summary, "Agent 执行失败");
-            return CompletionDecision.failed(summary, failure);
+        if (summary == null) {
+            return CompletionDecision.failed("执行返回空结果", "执行返回空结果");
         }
-        if (result.output() == null) {
-            return CompletionDecision.failed(summary, "执行返回空结果");
-        }
+        // Run 只描述一次 agent 调用是否产出了可审阅结果，不承载交付质量判断。
+        // 即使 CLI 进程以非零状态结束，只要带回输出或明确原因，也先把 Run 收敛为成功，
+        // 再由任务级 PM 审阅根据结果内容决定 APPROVE / RETRY / REPLAN / WAIT_HUMAN。
         recordProgressBestEffort(run, summary);
         return CompletionDecision.ok(summary);
     }
@@ -563,6 +574,11 @@ public class CodingTaskExecutionService {
         sb.append("\n").append(designContextSection).append("\n");
         sb.append("编码任务：").append(task.getTitle()).append('\n');
         sb.append("任务描述：").append(task.getDescription()).append('\n');
+        if (task.getAcceptanceCriteria() != null && !task.getAcceptanceCriteria().isEmpty()) {
+            sb.append("实际验收标准（必须逐条验证）：\n");
+            task.getAcceptanceCriteria().forEach(criterion ->
+                    sb.append("- ").append(criterion).append('\n'));
+        }
         if (task.getFileScope() != null) {
             sb.append("文件范围：").append(task.getFileScope()).append('\n');
         }
@@ -572,6 +588,14 @@ public class CodingTaskExecutionService {
             requirementCommentService.findByRequirementId(task.getRequirementId()).forEach(comment ->
                     sb.append('[').append(comment.getAuthorType()).append('/').append(comment.getCommentType())
                             .append("] ").append(Objects.toString(comment.getContent(), "")).append('\n'));
+        }
+        appendAuthoritativeFeedback(sb, task, run);
+        if (behaviorMemoryService != null && run != null) {
+            String behaviorPrompt = behaviorMemoryService.renderAndLink(
+                    run.getId(), task.getProjectId(), task.getAssignedAgent(), task.getArea());
+            if (behaviorPrompt != null && !behaviorPrompt.isBlank()) {
+                sb.append('\n').append(behaviorPrompt).append('\n');
+            }
         }
 
         Run previousRun = run != null && run.getParentRunId() != null
@@ -615,7 +639,38 @@ public class CodingTaskExecutionService {
             sb.append("恢复执行允许复用上一次 Run 已落地的有效变更，但必须检查并完成当前任务验收；");
             sb.append("如果现有成果已经满足任务要求，不要为了制造新差异而重复改写，请运行必要验证并明确给出证据。");
         }
+        sb.append("\n\n最终响应必须只返回有效 JSON，供平台形成结构化证据：")
+                .append("{\"summary\":\"string\",\"commands\":[{\"command\":\"string\",")
+                .append("\"exitCode\":0,\"result\":\"string\"}],\"findings\":[\"string\"],")
+                .append("\"acceptanceCriteria\":[{\"criterion\":\"string\",")
+                .append("\"status\":\"PASSED|FAILED|NOT_APPLICABLE\",")
+                .append("\"evidence\":[\"command、日志或 diff 的具体引用\"]}]}.")
+                .append("不得声称未实际执行的命令或验收结果。");
         return sb.toString();
+    }
+
+    private void appendAuthoritativeFeedback(StringBuilder sb, CodingTask task, Run run) {
+        if (taskDeliveryReviewService == null) {
+            return;
+        }
+        taskDeliveryReviewService.findFirstByCodingTaskId(task.getId())
+                .filter(review -> review.getRemediationBriefJson() != null
+                        && !review.getRemediationBriefJson().isBlank())
+                .ifPresent(review -> {
+                    sb.append("\n## PM 权威修复反馈\n")
+                            .append("来源 reviewId=").append(review.getId())
+                            .append(", evidenceId=")
+                            .append(Objects.toString(review.getEvidenceId(), "MISSING"))
+                            .append('\n')
+                            .append(review.getRemediationBriefJson()).append('\n')
+                            .append("先修复根因，再执行其中的 verificationSteps；"
+                                    + "修复与验证必须由当前任务一次完成，不得拆成独立测试任务。\n");
+                    if (run != null && (review.getFeedbackAppliedRunId() == null
+                            || review.getFeedbackAppliedRunId().isBlank())) {
+                        review.setFeedbackAppliedRunId(run.getId());
+                        taskDeliveryReviewService.save(review);
+                    }
+                });
     }
 
     private void appendHandoffSnapshot(StringBuilder sb, CodingTask task) {

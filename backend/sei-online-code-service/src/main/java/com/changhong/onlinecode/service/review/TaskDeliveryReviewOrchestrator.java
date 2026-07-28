@@ -3,17 +3,23 @@ package com.changhong.onlinecode.service.review;
 import com.changhong.onlinecode.dao.CodingTaskDao;
 import com.changhong.onlinecode.dao.ExecutionPlanDao;
 import com.changhong.onlinecode.dao.RequirementDao;
+import com.changhong.onlinecode.dao.RunDao;
 import com.changhong.onlinecode.dto.enums.CodingTaskStatus;
 import com.changhong.onlinecode.dto.enums.RequirementAutomationStatus;
 import com.changhong.onlinecode.dto.enums.RequirementCommentAuthorType;
 import com.changhong.onlinecode.dto.enums.RequirementCommentType;
 import com.changhong.onlinecode.dto.enums.TriggerSource;
+import com.changhong.onlinecode.dto.enums.EvidenceCompleteness;
+import com.changhong.onlinecode.dto.enums.RunArtifactType;
+import com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision;
 import com.changhong.onlinecode.entity.CodingTask;
 import com.changhong.onlinecode.entity.ExecutionPlan;
 import com.changhong.onlinecode.entity.Requirement;
 import com.changhong.onlinecode.entity.RequirementComment;
 import com.changhong.onlinecode.entity.RequirementDesignContext;
+import com.changhong.onlinecode.entity.Run;
 import com.changhong.onlinecode.entity.TaskDeliveryReview;
+import com.changhong.onlinecode.entity.RunEvidence;
 import com.changhong.onlinecode.service.CodingTaskSchedulingEvents;
 import com.changhong.onlinecode.service.FailureInfoSupport;
 import com.changhong.onlinecode.service.RequirementAutomationService;
@@ -21,8 +27,12 @@ import com.changhong.onlinecode.service.RequirementCommentService;
 import com.changhong.onlinecode.service.RequirementDesignContextService;
 import com.changhong.onlinecode.service.agent.AgentExecutionDeferredException;
 import com.changhong.onlinecode.service.agent.PmDeliveryDecision;
+import com.changhong.onlinecode.service.evidence.AgentBehaviorMemoryService;
+import com.changhong.onlinecode.service.evidence.RunArtifactService;
+import com.changhong.onlinecode.service.evidence.RunEvidenceService;
 import com.changhong.sei.core.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -45,7 +55,7 @@ import java.util.Objects;
  * <ul>
  *   <li>APPROVE：审阅 DECIDED，调度器继续启动后续任务。</li>
  *   <li>RETRY：CodingTask 回 PENDING，retryCount 仅 +1 一次，提交后重新调度。</li>
- *   <li>REPLAN：当前计划 NEEDS_REMEDIATION，复用 startRemediationLoop 生成补救计划（含独立验收任务）。</li>
+ *   <li>REPLAN：当前计划 NEEDS_REMEDIATION，复用 startRemediationLoop 生成单个自修复、自验证任务。</li>
  *   <li>WAIT_HUMAN：需求 WAITING_HUMAN，停止自动调度/补偿。</li>
  * </ul>
  *
@@ -59,34 +69,64 @@ public class TaskDeliveryReviewOrchestrator {
     private final CodingTaskDao codingTaskDao;
     private final RequirementDao requirementDao;
     private final ExecutionPlanDao executionPlanDao;
+    private final RunDao runDao;
     private final RequirementCommentService commentService;
     private final RequirementDesignContextService designContextService;
     private final FailureInfoSupport failureInfoSupport;
     private final RequirementAutomationService automationService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionTemplate decisionTransactions;
+    private final RunEvidenceService runEvidenceService;
+    private final RunArtifactService runArtifactService;
+    private final AgentBehaviorMemoryService behaviorMemoryService;
 
+    @Autowired
     public TaskDeliveryReviewOrchestrator(TaskDeliveryReviewService reviewService,
                                           CodingTaskDao codingTaskDao,
                                           RequirementDao requirementDao,
                                           ExecutionPlanDao executionPlanDao,
+                                          RunDao runDao,
+                                          RequirementCommentService commentService,
+                                          RequirementDesignContextService designContextService,
+                                          FailureInfoSupport failureInfoSupport,
+                                          RequirementAutomationService automationService,
+                                          ApplicationEventPublisher eventPublisher,
+                                          PlatformTransactionManager transactionManager,
+                                          RunEvidenceService runEvidenceService,
+                                          RunArtifactService runArtifactService,
+                                          AgentBehaviorMemoryService behaviorMemoryService) {
+        this.reviewService = reviewService;
+        this.codingTaskDao = codingTaskDao;
+        this.requirementDao = requirementDao;
+        this.executionPlanDao = executionPlanDao;
+        this.runDao = runDao;
+        this.commentService = commentService;
+        this.designContextService = designContextService;
+        this.failureInfoSupport = failureInfoSupport;
+        this.automationService = automationService;
+        this.eventPublisher = eventPublisher;
+        this.runEvidenceService = runEvidenceService;
+        this.runArtifactService = runArtifactService;
+        this.behaviorMemoryService = behaviorMemoryService;
+        this.decisionTransactions = new TransactionTemplate(transactionManager);
+        this.decisionTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    /** 兼容现有单元测试构造；生产使用带 evidence/memory service 的构造器。 */
+    public TaskDeliveryReviewOrchestrator(TaskDeliveryReviewService reviewService,
+                                          CodingTaskDao codingTaskDao,
+                                          RequirementDao requirementDao,
+                                          ExecutionPlanDao executionPlanDao,
+                                          RunDao runDao,
                                           RequirementCommentService commentService,
                                           RequirementDesignContextService designContextService,
                                           FailureInfoSupport failureInfoSupport,
                                           RequirementAutomationService automationService,
                                           ApplicationEventPublisher eventPublisher,
                                           PlatformTransactionManager transactionManager) {
-        this.reviewService = reviewService;
-        this.codingTaskDao = codingTaskDao;
-        this.requirementDao = requirementDao;
-        this.executionPlanDao = executionPlanDao;
-        this.commentService = commentService;
-        this.designContextService = designContextService;
-        this.failureInfoSupport = failureInfoSupport;
-        this.automationService = automationService;
-        this.eventPublisher = eventPublisher;
-        this.decisionTransactions = new TransactionTemplate(transactionManager);
-        this.decisionTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this(reviewService, codingTaskDao, requirementDao, executionPlanDao, runDao,
+                commentService, designContextService, failureInfoSupport, automationService,
+                eventPublisher, transactionManager, null, null, null);
     }
 
     /**
@@ -165,16 +205,43 @@ public class TaskDeliveryReviewOrchestrator {
                 requirement.getId(), task.getLoopId(), task.getId(), review.getDeliveryRunId(),
                 task.getPlanTaskKey(), task.getTitle(), task.getDescription(), task.getArea(),
                 task.getAssignedAgent(), taskType, Boolean.TRUE.equals(review.getDeliverySucceeded()),
-                List.of(), evidence, comments);
+                task.getAcceptanceCriteria() == null ? List.of() : task.getAcceptanceCriteria(),
+                evidence, comments);
     }
 
     private String buildDeliveryEvidence(CodingTask task, TaskDeliveryReview review) {
         Map<String, Object> evidence = new LinkedHashMap<>();
+        Run deliveryRun = review.getDeliveryRunId() == null
+                ? null : runDao.findOne(review.getDeliveryRunId());
         evidence.put("deliveryRunId", review.getDeliveryRunId());
         evidence.put("deliverySucceeded", review.getDeliverySucceeded());
+        evidence.put("runState", deliveryRun == null ? null : deliveryRun.getState());
+        evidence.put("runSummary", deliveryRun == null ? null : deliveryRun.getSummary());
+        evidence.put("runFailureReason", deliveryRun == null ? null : deliveryRun.getFailureReason());
         evidence.put("failureSummary", task.getFailureSummary());
         evidence.put("failureDetail", task.getFailureDetail());
         evidence.put("retryCount", task.getRetryCount());
+        if (runEvidenceService != null && review.getDeliveryRunId() != null) {
+            RunEvidence runEvidence = runEvidenceService.findLatest(review.getDeliveryRunId());
+            if (runEvidence != null) {
+                review.setEvidenceId(runEvidence.getId());
+                evidence.put("runEvidence", runEvidenceService.findLatestDto(review.getDeliveryRunId()));
+            } else {
+                evidence.put("runEvidence", Map.of(
+                        "status", "MISSING",
+                        "completeness", EvidenceCompleteness.MISSING));
+            }
+        }
+        if (runArtifactService != null && review.getDeliveryRunId() != null) {
+            runArtifactService.findByRunId(review.getDeliveryRunId()).stream()
+                    .filter(artifact -> artifact.getArtifactType() == RunArtifactType.GIT_DIFF)
+                    .reduce((first, second) -> second)
+                    .ifPresent(artifact -> evidence.put(
+                            "gitDiffExcerpt",
+                            bounded(runArtifactService.readText(artifact.getId()), 48_000)));
+            evidence.put("rawLogExcerpt",
+                    runArtifactService.readLogFrames(review.getDeliveryRunId(), 0L, 200).getFrames());
+        }
         try {
             return JsonUtils.mapper().writeValueAsString(evidence);
         } catch (Exception e) {
@@ -195,11 +262,19 @@ public class TaskDeliveryReviewOrchestrator {
             return;
         }
 
+        decision = enforceEvidenceGate(review, decision);
         String decisionJson = serializeDecision(decision);
+        review.setRemediationBriefJson(decision.remediationBrief() == null
+                ? null : toJson(decision.remediationBrief()));
         com.changhong.onlinecode.dto.enums.TaskDeliveryReviewDecision effectiveDecision =
                 reviewService.recordDecision(review, decision.decision(), decision.summary(),
                         decisionJson, decision.failureCategory());
         appendReviewComment(requirement, task, decision);
+        if (behaviorMemoryService != null) {
+            behaviorMemoryService.recordPmDecision(
+                    task.getProjectId(), task.getAssignedAgent(), review.getId(),
+                    review.getEvidenceId(), review.getDeliveryRunId(), decision);
+        }
 
         switch (effectiveDecision) {
             case APPROVE -> handleApprove(requirement);
@@ -282,11 +357,44 @@ public class TaskDeliveryReviewOrchestrator {
         metadata.put("decision", decision.decision().name());
         metadata.put("failureCategory", decision.failureCategory().name());
         metadata.put("findings", decision.findings());
+        metadata.put("remediationBrief", decision.remediationBrief());
+        metadata.put("behaviorMemoryCandidates", decision.behaviorMemoryCandidates());
+        String content = "任务交付审阅：" + decision.decision().name() + " — " + decision.summary();
+        if (decision.remediationBrief() != null) {
+            content += "\n\n权威修复说明（下一次 Agent 必须执行并验证）：\n"
+                    + toJson(decision.remediationBrief());
+        }
         commentService.append(requirement.getId(), task.getLoopId(),
                 RequirementCommentAuthorType.PM_AGENT, "pm-agent",
                 RequirementCommentType.VALIDATION_RESULT,
-                "任务交付审阅：" + decision.decision().name() + " — " + decision.summary(),
+                content,
                 toJson(metadata));
+    }
+
+    private PmDeliveryDecision enforceEvidenceGate(TaskDeliveryReview review,
+                                                   PmDeliveryDecision decision) {
+        if (decision.decision() != TaskDeliveryReviewDecision.APPROVE
+                || runEvidenceService == null) {
+            return decision;
+        }
+        RunEvidence evidence = runEvidenceService.findLatest(review.getDeliveryRunId());
+        if (evidence != null && evidence.getCompleteness() == EvidenceCompleteness.COMPLETE) {
+            return decision;
+        }
+        String actual = evidence == null ? "MISSING" : evidence.getCompleteness().name();
+        return PmDeliveryDecision.waitingHuman(
+                "PM 返回 APPROVE，但结构化证据完整度为 " + actual
+                        + "；Run 结果保留成功，批准门禁转人工决定补证或修复。");
+    }
+
+    private String bounded(String value, int maxChars) {
+        if (value == null || value.length() <= maxChars) {
+            return value;
+        }
+        int side = maxChars / 2;
+        return value.substring(0, side)
+                + "\n...[excerpt truncated; use artifactId to inspect full redacted content]...\n"
+                + value.substring(value.length() - side);
     }
 
     private String serializeDecision(PmDeliveryDecision decision) {

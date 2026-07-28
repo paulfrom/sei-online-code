@@ -92,7 +92,8 @@ export type CodingTaskStatus =
   | 'VALIDATION_FAILED' | 'CANCELLED' | 'STALE' | 'BLOCKED' | 'SUPERSEDED';
 export interface CodingTaskDto {
   id: string; projectId: string; requirementId: string; status: CodingTaskStatus;
-  title: string; description?: string | null; fileScope?: string[] | null;
+  title: string; description?: string | null; acceptanceCriteria?: string[] | null;
+  fileScope?: string[] | null;
   area?: string | null; dependsOn?: string[] | null;
   executionPlanId?: string | null; planTaskKey?: string | null;
   assignedAgent?: string | null; loopId?: string | null;

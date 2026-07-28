@@ -87,6 +87,18 @@ public class TaskDeliveryReview extends BaseAuditableEntity {
     @Column(name = "decision_json", columnDefinition = "TEXT")
     private String decisionJson;
 
+    /** PM 做出决定时所依据的结构化证据快照。 */
+    @Column(name = "evidence_id", length = 36)
+    private String evidenceId;
+
+    /** 供下一次 Agent 直接消费的权威修复说明。 */
+    @Column(name = "remediation_brief_json", columnDefinition = "TEXT")
+    private String remediationBriefJson;
+
+    /** 首次消费 remediation brief 的后续 Run。 */
+    @Column(name = "feedback_applied_run_id", length = 36)
+    private String feedbackAppliedRunId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "failure_category", length = 32)
     private DeliveryFailureCategory failureCategory;

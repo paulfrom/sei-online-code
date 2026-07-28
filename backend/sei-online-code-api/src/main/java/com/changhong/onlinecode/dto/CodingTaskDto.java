@@ -34,6 +34,9 @@ public class CodingTaskDto extends BaseEntityDto {
     @Schema(description = "描述")
     private String description;
 
+    @Schema(description = "需要被实际验证结果逐条证明的验收标准")
+    private List<String> acceptanceCriteria;
+
     @Schema(description = "文件范围")
     private List<String> fileScope;
 

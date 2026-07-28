@@ -618,7 +618,7 @@ class CodingTaskExecutionServiceTest {
     }
 
     @Test
-    void executePlanTask_cliFailureStoresOutputAndPropagatesFailureReason() {
+    void executePlanTask_cliFailureWithResult_marksRunSucceededForPmReview() {
         CodingTask task = new CodingTask();
         task.setId("task-cli-fail");
         task.setRequirementId("req-cli-fail");
@@ -657,12 +657,13 @@ class CodingTaskExecutionServiceTest {
         ResultData<CodingTaskDto> result = service.executePlanTask("task-cli-fail", "backend-dev-agent", "prompt");
 
         assertTrue(result.successful());
-        assertEquals(RunState.FAILED, savedRun.get().getState());
+        assertEquals(RunState.SUCCEEDED, savedRun.get().getState());
         assertEquals("真实 CLI 失败输出", savedRun.get().getSummary());
-        assertEquals("真实 CLI 失败输出", task.getFailureSummary());
-        assertEquals("真实 CLI 失败输出", task.getFailureDetail());
+        assertNull(savedRun.get().getFailureReason());
+        assertNull(task.getFailureSummary());
+        assertNull(task.getFailureDetail());
         verify(eventPublisher).publishEvent(new CodingTaskSchedulingEvents.DevelopmentFinished(
-                "task-cli-fail", false, "真实 CLI 失败输出"));
+                "task-cli-fail", true, null));
     }
 
     @Test

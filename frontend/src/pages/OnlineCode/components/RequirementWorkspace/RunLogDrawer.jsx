@@ -2,8 +2,8 @@
  * RunLog drawer — three read-only views over a single Run (EXE-008 batch4):
  *
  * 1. 执行记录: run metadata + token usage (findRunUsage).
- * 2. 原始日志: live log lines streamed over the run-log WebSocket.
- * 3. 证据: paginated run observations (runObservation/findByRun) and, when the
+ * 2. 原始日志: persisted history followed by live WebSocket frames.
+ * 3. 证据: immutable EvidenceBundle plus paginated run observations and, when the
  *    Run is resolvable to an Execution, execution effects
  *    (executionProgress/findEffects). Evidence is server-paginated and loaded
  *    on demand; unknown enum values pass through raw. State is never inferred
@@ -13,7 +13,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createStyles } from '@ead/antd-style';
 import { Drawer, Descriptions, Tag, Tabs, Button } from '@ead/suid';
-import { findRunUsage } from '@/services/run';
+import {
+  findAppliedBehaviorMemories,
+  findRunArtifactContent,
+  findRunEvidence,
+  findRunFeedback,
+  findRunLogFrames,
+  findRunUsage,
+} from '@/services/run';
 import { subscribeRunLog } from '@/utils/run-log-socket';
 // @ts-ignore JS service module has no declaration file
 import { findEffects } from '@/services/executionProgress';
@@ -76,6 +83,19 @@ const useStyles = createStyles(({ token, css }) => ({
     color: ${token.colorTextTertiary};
     font-size: ${token.fontSizeSM}px;
   `,
+  codeBlock: css`
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    padding: ${token.paddingSM}px;
+    border-radius: ${token.borderRadius}px;
+    background: ${token.colorBgContainerDisabled};
+    color: ${token.colorText};
+    font-family: ${token.fontFamilyCode};
+    font-size: ${token.fontSizeSM}px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  `,
 }));
 
 const STATE_META = {
@@ -133,6 +153,41 @@ const effectStatusTag = (s) => (s ? tagOf(EFFECT_STATUS_META[s] || { color: 'def
 const rowsOf = (res) =>
   res && res.success && res.data && Array.isArray(res.data.rows) ? res.data.rows : [];
 
+const jsonValue = (value, fallback) => {
+  if (!value) return fallback;
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return fallback;
+  }
+};
+
+const frameKey = (frame) =>
+  frame?.sequenceNo !== null && frame?.sequenceNo !== undefined
+    ? `sequence:${frame.sequenceNo}`
+    : `${frame?.ts || ''}|${frame?.stream || ''}|${frame?.line || ''}|${frame?.state || ''}`;
+
+const mergeFrames = (current, incoming) => {
+  const values = new Map();
+  [...(current || []), ...(incoming || [])].forEach((frame) => {
+    if (frame) values.set(frameKey(frame), frame);
+  });
+  return [...values.values()].sort((a, b) => {
+    if (a.sequenceNo !== null && a.sequenceNo !== undefined
+      && b.sequenceNo !== null && b.sequenceNo !== undefined) {
+      return a.sequenceNo - b.sequenceNo;
+    }
+    return String(a.ts || '').localeCompare(String(b.ts || ''));
+  });
+};
+
+const formatLogFrame = (frame) => {
+  const sequence = frame.sequenceNo === null || frame.sequenceNo === undefined
+    ? ''
+    : `#${frame.sequenceNo} `;
+  return `${sequence}[${frame.ts || '-'}] [${frame.stream || 'system'}] ${frame.line || ''}`;
+};
+
 /**
  * Paginated evidence loader. Has-more is inferred from a full page so it does
  * not depend on the PageResult total. Mirrors ExecutionProgressTab's
@@ -181,9 +236,16 @@ function useEvidencePage(fetchPage, deps) {
  */
 const RunLogDrawer = ({ open, run, onClose, executionId }) => {
   const { styles } = useStyles();
-  const [lines, setLines] = useState([]);
+  const [logFrames, setLogFrames] = useState([]);
+  const [logHistoryLoading, setLogHistoryLoading] = useState(false);
+  const [logTruncated, setLogTruncated] = useState(false);
   const [terminated, setTerminated] = useState(null);
   const [usage, setUsage] = useState(null);
+  const [evidence, setEvidence] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+  const [behaviorMemories, setBehaviorMemories] = useState([]);
+  const [artifactContent, setArtifactContent] = useState(null);
+  const [selectedArtifactId, setSelectedArtifactId] = useState(null);
   const socketRef = useRef(null);
 
   const runId = run?.id || null;
@@ -203,31 +265,75 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
 
   useEffect(() => {
     if (!open || !run) {
-      setLines([]);
+      setLogFrames([]);
+      setLogHistoryLoading(false);
+      setLogTruncated(false);
       setTerminated(null);
       setUsage(null);
+      setEvidence(null);
+      setFeedback(null);
+      setBehaviorMemories([]);
+      setArtifactContent(null);
+      setSelectedArtifactId(null);
       return undefined;
     }
-    setLines([]);
+    let cancelled = false;
+    setLogFrames([]);
+    setLogHistoryLoading(true);
+    setLogTruncated(false);
     setTerminated(null);
     setUsage(null);
+    setEvidence(null);
+    setFeedback(null);
+    setBehaviorMemories([]);
+    setArtifactContent(null);
+    setSelectedArtifactId(null);
 
     findRunUsage(run.id).then((res) => {
-      if (res && res.success && res.data) {
+      if (!cancelled && res && res.success && res.data) {
         setUsage(res.data);
       }
     });
+    findRunEvidence(run.id).then((res) => {
+      if (!cancelled && res && res.success && res.data) {
+        setEvidence(res.data);
+      }
+    });
+    findRunFeedback(run.id).then((res) => {
+      if (!cancelled && res && res.success && res.data) {
+        setFeedback(res.data);
+      }
+    });
+    findAppliedBehaviorMemories(run.id).then((res) => {
+      if (!cancelled && res && res.success && Array.isArray(res.data)) {
+        setBehaviorMemories(res.data);
+      }
+    });
+    findRunLogFrames(run.id, 0, 2000)
+      .then((res) => {
+        if (cancelled || !res || !res.success || !res.data) return;
+        const frames = Array.isArray(res.data.frames) ? res.data.frames : [];
+        setLogFrames((current) => mergeFrames(current, frames));
+        setLogTruncated(Boolean(res.data.truncated));
+        const terminal = [...frames].reverse().find((frame) => frame.state);
+        if (terminal) setTerminated(terminal.state);
+      })
+      .finally(() => {
+        if (!cancelled) setLogHistoryLoading(false);
+      });
 
     const logStreamKey = run.logStreamKey;
     if (!logStreamKey) {
-      return undefined;
+      return () => {
+        cancelled = true;
+      };
     }
 
     const socket = subscribeRunLog({
       logStreamKey,
       runId: run.id,
       onLine: (frame) => {
-        setLines((prev) => [...prev, frame.line]);
+        setLogFrames((current) => mergeFrames(current, [frame]));
       },
       onTerminal: (state) => {
         setTerminated(state);
@@ -235,6 +341,7 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
     });
     socketRef.current = socket;
     return () => {
+      cancelled = true;
       socket.close();
       socketRef.current = null;
     };
@@ -248,6 +355,18 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
     ? STATE_META[terminated] || { color: 'default', label: terminated }
     : null;
   const usageSnapshot = usage || run || {};
+  const commandResults = jsonValue(evidence?.commandResultsJson, []);
+  const acceptanceResults = jsonValue(evidence?.acceptanceCriteriaJson, []);
+  const evidenceFindings = jsonValue(evidence?.findingsJson, []);
+  const remediationBrief = jsonValue(feedback?.remediationBriefJson, null);
+  const artifacts = Array.isArray(evidence?.artifacts) ? evidence.artifacts : [];
+
+  const showArtifact = async (artifact) => {
+    setSelectedArtifactId(artifact.id);
+    setArtifactContent('加载中…');
+    const res = await findRunArtifactContent(artifact.id);
+    setArtifactContent(res && res.success ? res.data || '' : res?.message || '材料读取失败');
+  };
 
   const tabItems = run
     ? [
@@ -297,7 +416,7 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
         {
           key: 'log',
           label: '原始日志',
-          children: run.logStreamKey ? (
+          children: (
             <React.Fragment>
               {terminalMeta && (
                 <div style={{ marginBottom: 8 }}>
@@ -305,12 +424,21 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
                   {tagOf(terminalMeta)}
                 </div>
               )}
+              {logTruncated && (
+                <div style={{ marginBottom: 8 }}>
+                  <Tag color="warning">日志已达到保留上限</Tag>
+                </div>
+              )}
               <div className={styles.logArea}>
-                {lines.length ? lines.join('\n') : '等待日志输出…'}
+                {logFrames.length
+                  ? logFrames.map(formatLogFrame).join('\n')
+                  : logHistoryLoading
+                    ? '正在加载历史日志…'
+                    : run.logStreamKey
+                      ? '等待日志输出…'
+                      : '暂无持久化日志'}
               </div>
             </React.Fragment>
-          ) : (
-            <div className={styles.hint}>本运行无实时日志流</div>
           ),
         },
         {
@@ -318,6 +446,113 @@ const RunLogDrawer = ({ open, run, onClose, executionId }) => {
           label: '证据',
           children: (
             <div className={styles.evidenceWrap}>
+              <section className={styles.evSection}>
+                <div className={styles.evTitle}>结构化 EvidenceBundle</div>
+                {evidence ? (
+                  <React.Fragment>
+                    <div className={styles.evHead}>
+                      <Tag color={evidence.completeness === 'COMPLETE' ? 'green' : 'warning'}>
+                        {evidence.completeness || 'UNKNOWN'}
+                      </Tag>
+                      <Tag>{evidence.status || '-'}</Tag>
+                      <span className={styles.evMeta}>v{evidence.evidenceVersion || '-'}</span>
+                      <span className={styles.evMeta}>exitCode={evidence.processExitCode ?? '-'}</span>
+                    </div>
+                    <div className={styles.evMain}>{evidence.summary || '-'}</div>
+                    <div className={styles.evTitle}>实际命令</div>
+                    {commandResults.length ? commandResults.map((command, index) => (
+                      <div key={`${command.command || 'command'}-${index}`} className={styles.evRow}>
+                        <div className={styles.evHead}>
+                          <Tag color={command.exitCode === 0 ? 'green' : 'error'}>
+                            exitCode={command.exitCode ?? '-'}
+                          </Tag>
+                          <span className={styles.evMain}>{command.command || '-'}</span>
+                        </div>
+                        {command.result && <div className={styles.evMeta}>{command.result}</div>}
+                      </div>
+                    )) : <div className={styles.hint}>未报告实际命令</div>}
+                    <div className={styles.evTitle}>实际验收标准</div>
+                    {acceptanceResults.length ? acceptanceResults.map((criterion, index) => (
+                      <div key={`${criterion.criterion || 'criterion'}-${index}`} className={styles.evRow}>
+                        <div className={styles.evHead}>
+                          <Tag color={criterion.status === 'PASSED' ? 'green'
+                            : criterion.status === 'FAILED' ? 'error' : 'warning'}>
+                            {criterion.status || 'NOT_VERIFIED'}
+                          </Tag>
+                          <span className={styles.evMain}>{criterion.criterion || '-'}</span>
+                        </div>
+                        {Array.isArray(criterion.evidence) && criterion.evidence.length > 0 && (
+                          <div className={styles.evMeta}>{criterion.evidence.join('；')}</div>
+                        )}
+                      </div>
+                    )) : <div className={styles.hint}>任务未配置验收标准</div>}
+                    {evidenceFindings.length > 0 && (
+                      <React.Fragment>
+                        <div className={styles.evTitle}>Findings</div>
+                        {evidenceFindings.map((finding, index) => (
+                          <div key={`${finding}-${index}`} className={styles.evMain}>- {String(finding)}</div>
+                        ))}
+                      </React.Fragment>
+                    )}
+                  </React.Fragment>
+                ) : (
+                  <div className={styles.hint}>暂无结构化 EvidenceBundle</div>
+                )}
+              </section>
+              <section className={styles.evSection}>
+                <div className={styles.evTitle}>原始材料（已脱敏）</div>
+                {artifacts.length ? (
+                  <React.Fragment>
+                    {artifacts.map((artifact) => (
+                      <div key={artifact.id} className={styles.evRow}>
+                        <div className={styles.evHead}>
+                          <Tag>{artifact.artifactType}</Tag>
+                          <Tag color={artifact.completeness === 'COMPLETE' ? 'green' : 'warning'}>
+                            {artifact.completeness}
+                          </Tag>
+                          <span className={styles.evMeta}>{artifact.byteLength ?? 0} bytes</span>
+                          <Button size="small" type="link" onClick={() => showArtifact(artifact)}>
+                            查看内容
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    {selectedArtifactId && (
+                      <pre className={styles.codeBlock}>{artifactContent || '无内容'}</pre>
+                    )}
+                  </React.Fragment>
+                ) : <div className={styles.hint}>暂无原始材料</div>}
+              </section>
+              <section className={styles.evSection}>
+                <div className={styles.evTitle}>PM 权威修复反馈</div>
+                {feedback ? (
+                  <React.Fragment>
+                    <div className={styles.evHead}>
+                      <Tag>{feedback.decision || '-'}</Tag>
+                      <span className={styles.evMeta}>evidenceId={feedback.evidenceId || 'MISSING'}</span>
+                    </div>
+                    <div className={styles.evMain}>{feedback.summary || '-'}</div>
+                    {remediationBrief && (
+                      <pre className={styles.codeBlock}>
+                        {JSON.stringify(remediationBrief, null, 2)}
+                      </pre>
+                    )}
+                  </React.Fragment>
+                ) : <div className={styles.hint}>暂无 PM 反馈</div>}
+              </section>
+              <section className={styles.evSection}>
+                <div className={styles.evTitle}>本 Run 应用的长期行为记忆</div>
+                {behaviorMemories.length ? behaviorMemories.map((memory) => (
+                  <div key={memory.id} className={styles.evRow}>
+                    <div className={styles.evHead}>
+                      <Tag>{memory.status}</Tag>
+                      <Tag>{memory.lastOutcome || 'UNKNOWN'}</Tag>
+                      <span className={styles.evMeta}>{memory.scopeKey}</span>
+                    </div>
+                    <div className={styles.evMain}>{memory.ruleText}</div>
+                  </div>
+                )) : <div className={styles.hint}>本 Run 未应用长期行为记忆</div>}
+              </section>
               <section className={styles.evSection}>
                 <div className={styles.evTitle}>运行观察（Observation）</div>
                 {observations.loading && observations.items.length === 0 ? (

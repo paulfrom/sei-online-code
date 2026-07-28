@@ -165,6 +165,7 @@ public class PlanPatchApplicationService {
         task.setPlanTaskKey(operation.getTaskKey());
         task.setTitle(operation.getTitle());
         task.setDescription(operation.getDescription());
+        task.setAcceptanceCriteria(copy(operation.getAcceptanceCriteria()));
         task.setArea(operation.getArea());
         task.setFileScope(copy(operation.getFileScope()));
         task.setDependsOn(copy(operation.getDependsOn()));
@@ -210,6 +211,7 @@ public class PlanPatchApplicationService {
             value.put("taskKey", task.getPlanTaskKey());
             value.put("title", task.getTitle());
             value.put("description", task.getDescription());
+            value.put("acceptanceCriteria", copy(task.getAcceptanceCriteria()));
             value.put("agent", task.getAssignedAgent());
             value.put("area", task.getArea());
             value.put("dependsOn", copy(task.getDependsOn()));

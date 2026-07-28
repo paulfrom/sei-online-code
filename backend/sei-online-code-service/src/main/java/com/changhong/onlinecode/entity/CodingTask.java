@@ -58,6 +58,11 @@ public class CodingTask extends BaseAuditableEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    /** 从计划继承、由实际验证结果逐条对照的验收标准。 */
+    @Convert(converter = com.changhong.onlinecode.entity.converter.StringListConverter.class)
+    @Column(name = "acceptance_criteria", columnDefinition = "TEXT")
+    private List<String> acceptanceCriteria;
+
     @Convert(converter = com.changhong.onlinecode.entity.converter.StringListConverter.class)
     @Column(name = "file_scope", columnDefinition = "TEXT")
     private List<String> fileScope;
