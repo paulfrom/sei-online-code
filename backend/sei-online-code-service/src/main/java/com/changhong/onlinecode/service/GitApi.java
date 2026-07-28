@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -144,7 +146,7 @@ public class GitApi {
     /**
      * 对 GitLab Commits API 的瞬时网络故障做有限重试。
      *
-     * <p>仅对连接重置/读超时/连接拒绝等瞬时异常重试（指数退避，最多
+     * <p>仅对连接重置/读超时/连接拒绝/响应提前结束等瞬时异常重试（指数退避，最多
      * {@link #COMMIT_RETRY_MAX_ATTEMPTS} 次）；业务类异常（4xx、冲突等）立即抛出。
      * 每批独立重试，已成功的批次不会重试。</p>
      *
@@ -172,16 +174,24 @@ public class GitApi {
     }
 
     /**
-     * 判断异常链是否包含瞬时网络故障（Socket 重置/超时/拒绝）。
+     * 判断异常链是否包含瞬时网络故障（Socket 重置/超时/拒绝、响应提前结束）。
      *
      * <p>gitlab4j 把底层网络异常包装成 GitLabApiException → ProcessingException → SocketException，
-     * 故需遍历 cause 链匹配。</p>
+     * 或 GitLabApiException → ProcessingException → IOException(Premature EOF)，
+     * 故需遍历 cause 链匹配。普通 IOException 不重试，避免掩盖协议或本地 I/O 配置错误。</p>
      */
-    private static boolean isTransientNetworkError(Throwable error) {
+    static boolean isTransientNetworkError(Throwable error) {
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
             if (cause instanceof java.net.SocketException
                     || cause instanceof java.net.SocketTimeoutException
                     || cause instanceof java.net.ConnectException) {
+                return true;
+            }
+            String message = cause.getMessage();
+            if (cause instanceof EOFException
+                    || (cause instanceof IOException
+                    && message != null
+                    && message.toLowerCase(Locale.ROOT).contains("premature eof"))) {
                 return true;
             }
         }

@@ -170,4 +170,12 @@ class TaskDeliveryReviewServiceTest {
 
         assertEquals(false, claimed);
     }
+
+    @Test
+    void requeueReview_usesCasToRecoverReviewingAsPending() {
+        when(dao.updateStatusIfMatch("review-1", TaskDeliveryReviewStatus.REVIEWING,
+                TaskDeliveryReviewStatus.PENDING)).thenReturn(1);
+
+        assertTrue(service.requeueReview("review-1"));
+    }
 }

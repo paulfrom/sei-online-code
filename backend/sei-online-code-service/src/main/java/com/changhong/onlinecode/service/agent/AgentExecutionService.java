@@ -73,6 +73,7 @@ public class AgentExecutionService {
             String reason = "Agent 执行线程池繁忙，本次执行推迟";
             log.warn("agent execution deferred because executor rejected task. agentName={}, runId={}",
                     agentName, request.getRunId());
+            markDeferredRun(request.getRunId(), reason);
             return CompletableFuture.completedFuture(AgentExecutionResult.deferred(request.getRunId(), reason));
         }
     }
@@ -112,7 +113,9 @@ public class AgentExecutionService {
                     + request.getProjectId() + ", workspaceKey=" + workspaceKey
                     + ", activeRunId=" + lease.busyRunId();
             log.info("agent execution deferred because workspace slot is busy: {}", reason);
-            // 工作区繁忙属于调度延迟：不创建失败 Run、不写失败摘要、不增加 retryCount（方案 §6.2）。
+            // 工作区繁忙属于调度延迟：Run 收敛为 CANCELLED，业务任务由调用方回退 PENDING，
+            // 不写失败终态、不增加 retryCount（方案 §6.2）。
+            markDeferredRun(run, reason);
             return AgentExecutionResult.deferred(run.getId(), reason);
         }
         try {
@@ -127,7 +130,7 @@ public class AgentExecutionService {
                     prompt, agent.getMcpConfig());
             CliRunResult result = future.get(timeoutSeconds(request), TimeUnit.SECONDS);
             log.info("cli run result {}", result);
-            persistSessionIds(run, result);
+            persistExecutionAudit(run, result);
             if (result != null && result.isProcessSucceeded()) {
                 return new AgentExecutionResult(run.getId(), result.getOutput(), true, null);
             }
@@ -143,8 +146,13 @@ public class AgentExecutionService {
         }
     }
 
-    /** 保存 CLI session 标识用于审计；当前恢复 Run 仍会启动新 session，不依赖这些字段续作。 */
-    private void persistSessionIds(Run run, CliRunResult result) {
+    /**
+     * 保存最终 Agent 输出与 CLI session 标识用于审计。
+     *
+     * <p>实时 WS 帧只服务在线查看；最终输出必须进入 Run.summary，确保运行结束后仍能查看
+     * test-agent 的 commands/exitCode/findings 等结构化证据。</p>
+     */
+    private void persistExecutionAudit(Run run, CliRunResult result) {
         if (result == null || run == null || run.getId() == null) {
             return;
         }
@@ -152,12 +160,14 @@ public class AgentExecutionService {
         String turnId = result.getTurnId();
         boolean hasThread = threadId != null && !threadId.isBlank();
         boolean hasTurn = turnId != null && !turnId.isBlank();
-        if (!hasThread && !hasTurn) {
+        boolean hasOutput = result.getOutput() != null && !result.getOutput().isBlank();
+        boolean hasFailure = result.getFailureReason() != null && !result.getFailureReason().isBlank();
+        if (!hasThread && !hasTurn && !hasOutput && !hasFailure) {
             return;
         }
         Run persisted = runDao.findOne(run.getId());
         if (persisted == null) {
-            return;
+            persisted = run;
         }
         if (hasThread) {
             persisted.setThreadId(threadId);
@@ -165,7 +175,31 @@ public class AgentExecutionService {
         if (hasTurn) {
             persisted.setTurnId(turnId);
         }
+        if (hasOutput) {
+            persisted.setSummary(result.getOutput());
+        }
+        if (hasFailure) {
+            persisted.setFailureReason(result.getFailureReason());
+        }
         runDao.save(persisted);
+    }
+
+    private void markDeferredRun(String runId, String reason) {
+        if (runId == null || runId.isBlank()) {
+            return;
+        }
+        markDeferredRun(runDao.findOne(runId), reason);
+    }
+
+    private void markDeferredRun(Run run, String reason) {
+        if (run == null || run.getState() != RunState.RUNNING) {
+            return;
+        }
+        run.setState(RunState.CANCELLED);
+        run.setTerminalReason(RunTerminalReason.CANCELLED);
+        run.setFinishedDate(new Date());
+        run.setSummary("执行因调度资源繁忙而推迟：" + Objects.toString(reason, "未知原因"));
+        runDao.save(run);
     }
 
     public void settleRun(String runId, RunState state, String reason) {
@@ -226,6 +260,9 @@ public class AgentExecutionService {
     }
 
     private String workspaceKey(AgentExecutionRequest request, Run run) {
+        if (request.getWorkspaceKey() != null && !request.getWorkspaceKey().isBlank()) {
+            return request.getWorkspaceKey();
+        }
         if (request.getRequirementId() != null && !request.getRequirementId().isBlank()) {
             return "requirement-" + request.getRequirementId();
         }

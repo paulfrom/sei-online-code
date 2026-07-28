@@ -83,6 +83,17 @@ public class TaskDeliveryReviewService extends BaseEntityService<TaskDeliveryRev
     }
 
     /**
+     * 将超时或进程中断遗留的 REVIEWING 审阅原子恢复为 PENDING。
+     *
+     * <p>调用方必须先完成超时判断；CAS 防止覆盖刚刚完成的 PM 决策。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean requeueReview(String reviewId) {
+        return dao.updateStatusIfMatch(reviewId, TaskDeliveryReviewStatus.REVIEWING,
+                TaskDeliveryReviewStatus.PENDING) > 0;
+    }
+
+    /**
      * 记录 PM 决策，先做合法性校验（方案 §4.3）。
      *
      * <p>非法组合 {@code deliverySucceeded=false + APPROVE} 被拒绝并转为 {@code WAIT_HUMAN}。</p>

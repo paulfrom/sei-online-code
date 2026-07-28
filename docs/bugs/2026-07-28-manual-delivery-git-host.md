@@ -65,3 +65,27 @@ curl -I --connect-timeout 5 http://rddgit.changhong.com
 
 若域名无法解析，应修复 Docker/Kubernetes DNS 转发或企业内网 DNS 配置，不应在
 业务代码中硬编码 IP。
+
+## 后续故障：Commit API 响应提前结束
+
+DNS 与 host 传递修复后，Commit API 曾返回 `403 Forbidden`，随后出现：
+
+```text
+GitLabApiException: java.io.IOException: Premature EOF
+Caused by: jakarta.ws.rs.ProcessingException: java.io.IOException: Premature EOF
+```
+
+只读核查确认：
+
+- token 有效，包含 `api`、`read_user`、`write_repository` scope；
+- token 用户在目标项目中的访问级别为 Owner；
+- `feature/REQ-0002` 尚不存在，且没有匹配 `feature/*` 的保护规则；
+- 基线分支 `dev` 存在、受保护，但当前 token 的 `can_push=true`。
+
+因此当前失败不是固定权限不足，而是 GitLab 或其前置网关在返回 chunked HTTP
+响应时提前断开。现有重试器只识别 Socket/Timeout/ConnectException，没有识别
+cause 链中的普通 `IOException: Premature EOF`。
+
+修复后，`Premature EOF` 和 `EOFException` 会进入已有的最多三次有限重试；其他
+普通 `IOException` 仍立即失败。服务端可能已落库但响应丢失，因此重试仍存在生成
+内容相同冗余 commit 的低概率风险，此风险与原有“响应丢失后重试”策略一致。

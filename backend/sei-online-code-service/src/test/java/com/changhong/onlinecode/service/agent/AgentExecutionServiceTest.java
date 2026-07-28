@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -58,13 +59,14 @@ class AgentExecutionServiceTest {
 
         AgentWorkspace agentWorkspace = mock(AgentWorkspace.class);
         when(agentWorkspace.pathString()).thenReturn(workspace.toString());
-        when(registry.workspace(eq("project-1"), eq("requirement-requirement-1"))).thenReturn(agentWorkspace);
+        when(registry.workspace(eq("project-1"), eq("memory-review-context-1"))).thenReturn(agentWorkspace);
 
         Run run = new Run();
         run.setId("run-1");
         run.setState(RunState.RUNNING);
         run.setUserPrompt("prompt\n\n## 上一次 Agent 执行失败\n失败原因：格式校验失败");
         when(recorder.createAgentRun(any())).thenReturn(run);
+        when(runDao.findOne("run-1")).thenReturn(run);
 
         CliRunResult cliResult = new CliRunResult();
         cliResult.setProcessSucceeded(true);
@@ -77,6 +79,7 @@ class AgentExecutionServiceTest {
         request.setProjectId("project-1");
         request.setRequirementId("requirement-1");
         request.setCodingTaskId("task-1");
+        request.setWorkspaceKey("memory-review-context-1");
         request.setPrompt("prompt");
         request.setTriggerSource(TriggerSource.AUTO);
 
@@ -85,6 +88,7 @@ class AgentExecutionServiceTest {
         assertTrue(result.succeeded());
         assertEquals("run-1", result.runId());
         assertEquals("{\"passed\":true}", result.output());
+        assertEquals("{\"passed\":true}", run.getSummary());
 
         ArgumentCaptor<AgentRunCreateCommand> commandCaptor =
                 ArgumentCaptor.forClass(AgentRunCreateCommand.class);
@@ -94,6 +98,7 @@ class AgentExecutionServiceTest {
         assertEquals("agent-1", commandCaptor.getValue().getAgentId());
         verify(registry).executeDetailed(eq(agentWorkspace), any(),
                 org.mockito.ArgumentMatchers.contains("失败原因：格式校验失败"), any());
+        verify(runDao).save(run);
     }
 
     @Test
@@ -117,10 +122,14 @@ class AgentExecutionServiceTest {
         when(registry.workspace(eq("project-1"), any())).thenReturn(agentWorkspace);
 
         AtomicInteger runNo = new AtomicInteger();
+        AtomicReference<Run> deferredRun = new AtomicReference<>();
         when(recorder.createAgentRun(any())).thenAnswer(invocation -> {
             Run run = new Run();
             run.setId("run-" + runNo.incrementAndGet());
             run.setState(RunState.RUNNING);
+            if ("run-2".equals(run.getId())) {
+                deferredRun.set(run);
+            }
             return run;
         });
 
@@ -143,6 +152,8 @@ class AgentExecutionServiceTest {
         assertTrue(second.deferred());
         assertEquals("run-2", second.runId());
         assertTrue(second.failureReason().contains("推迟"));
+        assertEquals(RunState.CANCELLED, deferredRun.get().getState());
+        assertTrue(deferredRun.get().getSummary().contains("调度资源繁忙"));
         verify(registry, times(1)).executeDetailed(eq(agentWorkspace), any(), any(), any());
 
         CliRunResult cliResult = new CliRunResult();
@@ -198,8 +209,13 @@ class AgentExecutionServiceTest {
         java.util.concurrent.Executor rejecting = command -> {
             throw new java.util.concurrent.RejectedExecutionException("full");
         };
+        RunDao runDao = mock(RunDao.class);
+        Run run = new Run();
+        run.setId("run-1");
+        run.setState(RunState.RUNNING);
+        when(runDao.findOne("run-1")).thenReturn(run);
         AgentExecutionService service = new AgentExecutionService(
-                mock(AgentService.class), mock(CliRunnerRegistry.class), mock(RunDao.class),
+                mock(AgentService.class), mock(CliRunnerRegistry.class), runDao,
                 mock(AgentRunRecorder.class), mock(SkillService.class),
                 mock(SkillMaterializer.class), new AgentWorkspaceLease(), rejecting);
         AgentExecutionRequest request = request("project-1", "requirement-1", "task-1");
@@ -209,6 +225,8 @@ class AgentExecutionServiceTest {
 
         assertTrue(result.deferred());
         assertEquals("run-1", result.runId());
+        assertEquals(RunState.CANCELLED, run.getState());
+        verify(runDao).save(run);
     }
 
     private AgentExecutionRequest request(String projectId, String requirementId, String taskId) {

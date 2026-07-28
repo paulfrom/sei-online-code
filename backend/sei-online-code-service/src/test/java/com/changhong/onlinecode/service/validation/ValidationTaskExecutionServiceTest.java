@@ -16,7 +16,10 @@ import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +58,26 @@ class ValidationTaskExecutionServiceTest {
         service.executeAsync("task-1");
 
         verify(settlement).defer("task-1", "validation agent executor queue is full");
+    }
+
+    @Test
+    void workspaceContentionRestoresPendingInsteadOfFinishingAsValidationFailure() {
+        CodingTaskDao taskDao = mock(CodingTaskDao.class);
+        RequirementDao requirementDao = mock(RequirementDao.class);
+        ValidationLoopService validationLoopService = mock(ValidationLoopService.class);
+        ValidationTaskSettlementService settlement = mock(ValidationTaskSettlementService.class);
+        ValidationTaskExecutionService service = new ValidationTaskExecutionService(
+                taskDao, requirementDao, validationLoopService, settlement, Runnable::run);
+        CodingTask task = validatingTask();
+        when(taskDao.findOne("task-1")).thenReturn(task);
+        when(requirementDao.findOne("req-1")).thenReturn(requirement());
+        when(validationLoopService.validateTask(task))
+                .thenReturn(ValidationLoopService.ValidationOutcome.deferred("workspace busy"));
+
+        service.executeAsync("task-1");
+
+        verify(settlement).defer("task-1", "workspace busy");
+        verify(settlement, never()).finish(anyString(), anyBoolean());
     }
 
     @Test

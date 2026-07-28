@@ -74,6 +74,7 @@ class CompensationDevelopmentRulesTest {
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         com.changhong.onlinecode.config.OcConfig ocConfig = mock(com.changhong.onlinecode.config.OcConfig.class);
         when(ocConfig.getRunTimeoutMinutes()).thenReturn(30L);
+        when(ocConfig.getLoopStaleMinutes()).thenReturn(30L);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         service = new CompensationService(requirementDao, requirementDesignContextDao, executionPlanDao,
                 codingTaskDao, runDao, requirementAgentService, automationService, deliveryService,
@@ -177,6 +178,29 @@ class CompensationDevelopmentRulesTest {
 
         verify(codingTaskDao, never()).updateStatusIfMatch(anyString(), any(), any());
         // 未决 review 阻塞，不应触发 resumeDevelopmentLoop（避免在门禁下空转）。
+        verify(automationService, never()).resumeDevelopmentLoop(anyString(), anyString());
+    }
+
+    @Test
+    void staleReviewingReview_isRequeuedAndReposted() {
+        Date now = new Date();
+        Requirement req = developingRequirement();
+        developed(req, p -> {});
+        CodingTask task = failedTask("task-reviewing", CodingTaskStatus.FAILED);
+        when(codingTaskDao.findByRequirementId("req-1")).thenReturn(List.of(task));
+        TaskDeliveryReview reviewing = new TaskDeliveryReview();
+        reviewing.setId("review-stale");
+        reviewing.setStatus(TaskDeliveryReviewStatus.REVIEWING);
+        reviewing.setDeliveryRunId("run-stale");
+        reviewing.setLastEditedDate(new Date(now.getTime() - 31 * 60_000L));
+        when(taskDeliveryReviewService.findFirstByCodingTaskId("task-reviewing"))
+                .thenReturn(Optional.of(reviewing));
+        when(taskDeliveryReviewService.requeueReview("review-stale")).thenReturn(true);
+
+        service.compensateRequirementLoops(now);
+
+        verify(taskDeliveryReviewService).requeueReview("review-stale");
+        assertEquals(TaskDeliveryReviewStatus.PENDING, reviewing.getStatus());
         verify(automationService, never()).resumeDevelopmentLoop(anyString(), anyString());
     }
 

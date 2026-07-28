@@ -350,6 +350,18 @@ public class CompensationService {
             // 失败任务必须先有 PM 决策；未审阅的失败重发审阅事件，不自动恢复。
             TaskDeliveryReview review = taskDeliveryReviewService
                     .findFirstByCodingTaskId(task.getId()).orElse(null);
+            if (review != null && review.getStatus() == TaskDeliveryReviewStatus.REVIEWING
+                    && isStale(review.getLastEditedDate(), now)
+                    && taskDeliveryReviewService.requeueReview(review.getId())) {
+                review.setStatus(TaskDeliveryReviewStatus.PENDING);
+                compensationLogService.record("TASK_DELIVERY_REVIEW", review.getId(),
+                        "REQUEUE_STALE_REVIEW", true,
+                        "恢复超时的 PM 交付审阅",
+                        "codingTaskId=" + task.getId() + ", deliveryRunId=" + review.getDeliveryRunId(),
+                        TriggerSource.SCHEDULED_COMPENSATION);
+                log.warn("stale delivery review requeued. reviewId={}, codingTaskId={}",
+                        review.getId(), task.getId());
+            }
             if (review == null || review.getStatus() == TaskDeliveryReviewStatus.PENDING
                     || review.getStatus() == TaskDeliveryReviewStatus.REVIEWING) {
                 if (review != null && review.getStatus() == TaskDeliveryReviewStatus.PENDING) {

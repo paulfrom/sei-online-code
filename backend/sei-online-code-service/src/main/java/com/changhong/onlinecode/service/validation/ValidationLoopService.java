@@ -47,6 +47,9 @@ public class ValidationLoopService {
                                        ExecutionPlan plan) {
         List<Map<String, Object>> facts = new ArrayList<>();
         TestAgentResult result = runTestAgent(requirementId, projectId, loopId, codingTaskId, taskKey, area, scope, plan);
+        if (result.deferred()) {
+            return ValidationOutcome.deferred(result.failureReason());
+        }
         facts.addAll(result.facts());
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("scope", scope);
@@ -62,7 +65,7 @@ public class ValidationLoopService {
                         ? (result.passed() ? "验证通过" : "验证失败")
                         : result.report(),
                 toJson(metadata));
-        return new ValidationOutcome(result.passed(), facts);
+        return new ValidationOutcome(result.passed(), facts, false, result.failureReason());
     }
 
     private TestAgentResult runTestAgent(String requirementId, String projectId, String loopId, String codingTaskId,
@@ -82,18 +85,27 @@ public class ValidationLoopService {
             request.setWorkspaceMemoryId(plan.getWorkspaceMemoryId());
         }
         AgentExecutionResult result = agentExecutionService.execute("test-agent", request);
+        if (result == null) {
+            return TestAgentResult.failed(null, null, "test-agent 执行无结果");
+        }
+        if (result.deferred()) {
+            return TestAgentResult.deferred(result.runId(), result.failureReason());
+        }
         String report = result.output();
         boolean passed = result.succeeded() && parsePassed(report);
-        String failureReason = result.succeeded() ? "test-agent validation did not pass" : result.failureReason();
+        String failureReason = result.succeeded()
+                ? validationFailureReason(report)
+                : firstNonBlank(result.failureReason(), "test-agent 执行失败");
         if (result.runId() != null) {
             agentExecutionService.settleRun(result.runId(),
                     passed ? RunState.SUCCEEDED : RunState.FAILED,
                     passed ? null : failureReason);
         }
         if (!result.succeeded()) {
-            return TestAgentResult.failed(result.runId(), "test-agent 验证失败：" + failureReason);
+            return TestAgentResult.failed(result.runId(), report, failureReason);
         }
-        return new TestAgentResult(passed, report, result.runId(), extractFacts(report, result.runId()));
+        return new TestAgentResult(passed, report, result.runId(), extractFacts(report, result.runId()),
+                false, passed ? null : failureReason);
     }
 
     private String buildTestAgentPrompt(String scope, String area, String taskKey, String codingTaskId,
@@ -120,6 +132,43 @@ public class ValidationLoopService {
     private boolean parsePassed(String report) {
         JsonNode root = readJsonReport(report);
         return root != null && root.path("passed").asBoolean(false);
+    }
+
+    private String validationFailureReason(String report) {
+        JsonNode root = readJsonReport(report);
+        if (root == null) {
+            return report == null || report.isBlank()
+                    ? "test-agent 未返回验证报告"
+                    : "test-agent 返回的验证报告不是有效 JSON；原始输出已保存到 Run.summary";
+        }
+        List<String> details = new ArrayList<>();
+        String summary = root.path("summary").asText("");
+        if (!summary.isBlank()) {
+            details.add(summary);
+        }
+        JsonNode commands = root.path("commands");
+        if (commands.isArray()) {
+            for (JsonNode command : commands) {
+                if (command.path("exitCode").isNumber() && command.path("exitCode").asInt() != 0) {
+                    details.add(command.path("command").asText("unknown command")
+                            + " (exitCode=" + command.path("exitCode").asInt() + ")");
+                }
+            }
+        }
+        JsonNode findings = root.path("findings");
+        if (findings.isArray() && !findings.isEmpty()) {
+            String finding = findings.get(0).asText("");
+            if (!finding.isBlank()) {
+                details.add(finding);
+            }
+        }
+        return details.isEmpty()
+                ? "test-agent validation did not pass"
+                : "test-agent validation did not pass: " + String.join("; ", details);
+    }
+
+    private String firstNonBlank(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private List<Map<String, Object>> extractFacts(String report, String runId) {
@@ -170,14 +219,32 @@ public class ValidationLoopService {
         catch (Exception e) { return "{}"; }
     }
 
-    public record ValidationOutcome(boolean passed, List<Map<String, Object>> facts) { }
+    public record ValidationOutcome(boolean passed, List<Map<String, Object>> facts,
+                                    boolean deferred, String failureReason) {
+        public ValidationOutcome(boolean passed, List<Map<String, Object>> facts) {
+            this(passed, facts, false, null);
+        }
 
-    private record TestAgentResult(boolean passed, String report, String runId, List<Map<String, Object>> facts) {
-        static TestAgentResult failed(String runId, String report) {
+        public static ValidationOutcome deferred(String reason) {
+            return new ValidationOutcome(false, List.of(), true, reason);
+        }
+    }
+
+    private record TestAgentResult(boolean passed, String report, String runId, List<Map<String, Object>> facts,
+                                   boolean deferred, String failureReason) {
+        static TestAgentResult failed(String runId, String report, String failureReason) {
             Map<String, Object> fact = new LinkedHashMap<>();
             fact.put("runId", runId);
-            fact.put("report", report);
-            return new TestAgentResult(false, report, runId, List.of(fact));
+            fact.put("report", report == null || report.isBlank() ? failureReason : report);
+            fact.put("failureReason", failureReason);
+            String visibleReport = report == null || report.isBlank()
+                    ? "test-agent 验证失败：" + failureReason
+                    : report;
+            return new TestAgentResult(false, visibleReport, runId, List.of(fact), false, failureReason);
+        }
+
+        static TestAgentResult deferred(String runId, String reason) {
+            return new TestAgentResult(false, null, runId, List.of(), true, reason);
         }
     }
 }

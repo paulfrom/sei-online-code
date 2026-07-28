@@ -15,6 +15,14 @@ public class AgentExecutionRequest {
     private String runId;
     private String projectId;
     private String requirementId;
+    /**
+     * Optional physical workspace key override.
+     *
+     * <p>Requirement-scoped writers leave this blank and share the requirement workspace.
+     * Read-only/review agents use an isolated key so their generated briefs and skill files
+     * cannot contend with or mutate the writer workspace.</p>
+     */
+    private String workspaceKey;
     private String logStreamKey;
     private String loopId;
     private String codingTaskId;

@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -312,6 +313,16 @@ class PmAgentClientTest {
     }
 
     @Test
+    void parseDelivery_replanWithoutCodingRemediationIsRejected() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+        assertNull(parseDelivery(client, """
+                {"decision":"REPLAN","summary":"retry validation","failureCategory":"VALIDATION_FAILED","remediationTasks":[
+                {"taskKey":"V1","title":"verify again","description":"v","agent":"test-agent","area":"validation","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["all tests pass"]}
+                ]}
+                """));
+    }
+
+    @Test
     void parseDelivery_replanWithValidRemediationTasksIsAccepted() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
         PmDeliveryDecision decision = parseDelivery(client, """
@@ -325,14 +336,36 @@ class PmAgentClientTest {
     }
 
     @Test
-    void parseDelivery_replanWithoutIndependentTestAgentIsRejected() throws Exception {
+    void parseDelivery_replanWithoutIndependentTestAgentGetsDeterministicValidationTask() throws Exception {
         PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
 
-        assertNull(parseDelivery(client, """
+        PmDeliveryDecision decision = parseDelivery(client, """
                 {"decision":"REPLAN","summary":"fix","failureCategory":"PLAN_DEFECT","remediationTasks":[
                 {"taskKey":"R1","title":"fix","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]}
                 ]}
-                """));
+                """);
+
+        assertNotNull(decision);
+        assertEquals(2, decision.remediationTasks().size());
+        assertEquals("test-agent", decision.remediationTasks().get(1).agent());
+        assertEquals(List.of("R1"), decision.remediationTasks().get(1).dependsOn());
+    }
+
+    @Test
+    void parseDelivery_replanWithUnsequencedTestAgentGetsFinalValidationTask() throws Exception {
+        PmAgentClient client = new PmAgentClient(mock(RunDao.class), mock(AgentExecutionService.class));
+
+        PmDeliveryDecision decision = parseDelivery(client, """
+                {"decision":"REPLAN","summary":"fix","failureCategory":"VALIDATION_FAILED","remediationTasks":[
+                {"taskKey":"R1","title":"fix","description":"d","agent":"backend-dev-agent","area":"backend","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["ok"]},
+                {"taskKey":"V1","title":"early verify","description":"v","agent":"test-agent","area":"validation","dependsOn":[],"fileScope":["backend/"],"acceptanceCriteria":["all tests pass"]}
+                ]}
+                """);
+
+        assertNotNull(decision);
+        assertEquals(3, decision.remediationTasks().size());
+        assertEquals("test-agent", decision.remediationTasks().get(2).agent());
+        assertEquals(List.of("R1", "V1"), decision.remediationTasks().get(2).dependsOn());
     }
 
     @Test
@@ -341,6 +374,24 @@ class PmAgentClientTest {
         assertNull(parseDelivery(client, """
                 {"decision":"MAYBE","summary":"x"}
                 """));
+    }
+
+    @Test
+    void reviewDelivery_workspaceBusyPropagatesDeferredInsteadOfReturningInvalidDecision() {
+        AgentExecutionService executionService = mock(AgentExecutionService.class);
+        when(executionService.execute(org.mockito.ArgumentMatchers.eq("pm-agent"),
+                any(AgentExecutionRequest.class)))
+                .thenReturn(AgentExecutionResult.deferred("run-deferred", "workspace busy"));
+        Requirement requirement = new Requirement();
+        requirement.setId("req-1");
+        requirement.setProjectId("project-1");
+        PmAgentClient.DeliveryReviewInput input = new PmAgentClient.DeliveryReviewInput(
+                "req-1", "loop-1", "task-1", "delivery-run", "T1", "task", "description",
+                "backend", "backend-dev-agent", "coding-task", false, List.of(), "{}", List.of());
+
+        assertThrows(PmAgentClient.AgentExecutionDeferredException.class,
+                () -> new PmAgentClient(mock(RunDao.class), executionService)
+                        .reviewDelivery(requirement, null, input));
     }
 
     private PmAgentClient.PmPlanResult parsePlan(PmAgentClient client, String json) throws Exception {

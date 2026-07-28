@@ -151,6 +151,9 @@ public class RequirementAgentService {
         }
 
         AgentExecutionRequest request = buildRequest(requirement, buildMemoryReviewPrompt(content, context), context);
+        // memory-review-agent 只读取 PRD/记忆并返回差异，不得占用或改写需求级 writer 工作区。
+        // 独立 workspace 也隔离了 AgentBrief/skills 的物化写入，允许它与开发/验证任务并行。
+        request.setWorkspaceKey("memory-review-" + context.getId());
         CompletableFuture<AgentExecutionResult> future = agentExecutionService.executeAsync(MEMORY_REVIEW_AGENT_NAME, request);
 
         future.thenApply(result -> resultOutput(result, this::parseMemoryReview))

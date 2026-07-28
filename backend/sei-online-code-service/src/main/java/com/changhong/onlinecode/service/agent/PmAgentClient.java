@@ -219,6 +219,10 @@ public class PmAgentClient {
         String workspaceMemoryId = plan == null ? null : plan.getWorkspaceMemoryId();
         AgentExecutionResult execution = executeAgent(projectId, requirementId, loopId, prompt,
                 memoryContextId, workspaceMemoryId, DELIVERY_REVIEW_TIMEOUT_SECONDS);
+        if (execution.deferred()) {
+            throw new AgentExecutionDeferredException(execution.runId(),
+                    firstNonBlank(execution.failureReason(), "pm-agent 交付审阅执行被推迟"));
+        }
         if (!execution.succeeded()) {
             settleFailedOrCancelled(execution.runId(), firstNonBlank(execution.output(),
                     execution.failureReason(), "pm-agent 交付审阅调用失败"));
@@ -441,6 +445,8 @@ public class PmAgentClient {
         sb.append("- APPROVE: only when the task succeeded and delivery evidence is complete.\n");
         sb.append("- RETRY: only for transient infrastructure issues or clearly correctable agent execution deviation; record retryReason.\n");
         sb.append("- REPLAN: for code defects, test failures, upstream delivery incomplete, task contract errors, or when new remediation tasks are needed.\n");
+        sb.append("  REPLAN must include at least one coding remediation task and a final independent test-agent task.\n");
+        sb.append("  The test-agent task must depend on the remediation tasks. Never RETRY a failed validation-task alone.\n");
         sb.append("- WAIT_HUMAN: when you cannot decide safely, output is invalid, remediation cap reached, or a human decision is required.\n");
         sb.append("- For a FAILED or VALIDATION_FAILED delivery, APPROVE is forbidden.\n\n");
         sb.append("## Requirement\n");
@@ -544,12 +550,24 @@ public class PmAgentClient {
                     LOGGER.warn("pm-agent delivery review REPLAN without remediationTasks: {}", json);
                     return null;
                 }
-                if (!isValidTaskGraph(remediationTasks)) {
-                    LOGGER.warn("pm-agent delivery review REPLAN has invalid agent assignment or DAG");
+                java.util.Set<String> codingTaskKeys = remediationTasks.stream()
+                        .filter(task -> "frontend-dev-agent".equals(task.agent())
+                                || "backend-dev-agent".equals(task.agent()))
+                        .map(RequirementAutomationService.PlanTask::taskKey)
+                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+                if (codingTaskKeys.isEmpty()) {
+                    LOGGER.warn("pm-agent delivery review REPLAN without coding remediation task");
                     return null;
                 }
-                if (remediationTasks.stream().noneMatch(task -> "test-agent".equals(task.agent()))) {
-                    LOGGER.warn("pm-agent delivery review REPLAN has no independent test-agent task");
+                boolean hasFinalValidation = remediationTasks.stream()
+                        .filter(task -> "test-agent".equals(task.agent()))
+                        .anyMatch(task -> task.dependsOn() != null
+                                && task.dependsOn().containsAll(codingTaskKeys));
+                if (!hasFinalValidation) {
+                    appendDeterministicValidationTask(remediationTasks);
+                }
+                if (!isValidTaskGraph(remediationTasks)) {
+                    LOGGER.warn("pm-agent delivery review REPLAN has invalid agent assignment or DAG");
                     return null;
                 }
             }
@@ -560,6 +578,35 @@ public class PmAgentClient {
                     input.requirementId(), input.codingTaskId(), e);
             return null;
         }
+    }
+
+    private void appendDeterministicValidationTask(
+            List<RequirementAutomationService.PlanTask> remediationTasks) {
+        java.util.Set<String> keys = remediationTasks.stream()
+                .map(RequirementAutomationService.PlanTask::taskKey)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        String validationKey = "REMEDIATION-VALIDATE";
+        int suffix = 2;
+        while (keys.contains(validationKey)) {
+            validationKey = "REMEDIATION-VALIDATE-" + suffix++;
+        }
+        List<String> dependencies = List.copyOf(keys);
+        List<String> fileScope = remediationTasks.stream()
+                .flatMap(task -> task.fileScope() == null ? java.util.stream.Stream.empty()
+                        : task.fileScope().stream())
+                .distinct()
+                .toList();
+        remediationTasks.add(new RequirementAutomationService.PlanTask(
+                validationKey,
+                "验证修复结果",
+                "独立执行受影响范围的测试、构建与验收检查，确认修复有效且未引入回归。",
+                "test-agent",
+                "validation",
+                dependencies,
+                fileScope,
+                List.of("所有受影响测试与构建命令通过", "报告实际执行命令、exitCode 与 findings")));
+        LOGGER.info("pm-agent REPLAN omitted test-agent; appended deterministic validation task {}",
+                validationKey);
     }
 
     private TaskDeliveryReviewDecision parseDecision(String text) {
@@ -919,5 +966,21 @@ public class PmAgentClient {
                                       List<String> acceptanceCriteria,
                                       String deliveryEvidence,
                                       List<RequirementComment> relatedComments) {
+    }
+
+    /**
+     * 调度资源繁忙不是 PM 决策失败；编排器捕获后把审阅恢复为 PENDING，等待补偿重发。
+     */
+    public static class AgentExecutionDeferredException extends RuntimeException {
+        private final String runId;
+
+        public AgentExecutionDeferredException(String runId, String message) {
+            super(message);
+            this.runId = runId;
+        }
+
+        public String getRunId() {
+            return runId;
+        }
     }
 }

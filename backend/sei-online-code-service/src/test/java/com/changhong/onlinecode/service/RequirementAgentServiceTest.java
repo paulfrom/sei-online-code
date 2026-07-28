@@ -293,6 +293,7 @@ class RequirementAgentServiceTest {
         String logStreamKey = captor.getValue().getLogStreamKey();
         assertTrue(logStreamKey.length() <= 36, "log_stream_key must fit varchar(36): " + logStreamKey);
         assertEquals("req1", logStreamKey);
+        assertEquals("memory-review-ctx1", captor.getValue().getWorkspaceKey());
         assertTrue(captor.getValue().getPrompt().contains("ASCII 双引号必须转义为 \\\""));
     }
 
